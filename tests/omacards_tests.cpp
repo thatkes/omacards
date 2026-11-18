@@ -1,0 +1,176 @@
+#include <QDir>
+#include <QFile>
+#include <QTemporaryDir>
+#include <QtTest>
+
+#include "backend.h"
+#include "deck.h"
+#include "fsrs.h"
+#include "mathrender.h"
+#include "store.h"
+#include "theme.h"
+#include "translator.h"
+
+class OmacardsTests : public QObject {
+    Q_OBJECT
+
+private slots:
+    void fsrsInitialState() {
+        QCOMPARE(Fsrs::initial().reps, 0);
+        QVERIFY(Fsrs::initialStability(3) > Fsrs::initialStability(1));
+        QVERIFY(Fsrs::initialDifficulty(1) > Fsrs::initialDifficulty(3));
+        const double recall = Fsrs::retrievability(Fsrs::initial(), QDateTime::currentMSecsSinceEpoch());
+        QCOMPARE(recall, 0.0);
+    }
+
+    void fsrsReviewMovesDueForward() {
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        const ReviewResult first = Fsrs::review(Fsrs::initial(), 3, now);
+        QVERIFY(first.state.stability > 0.0);
+        QVERIFY(first.intervalDays >= 1);
+        QVERIFY(first.state.due > now);
+        QCOMPARE(first.state.reps, 1);
+
+        // A same-day repeat grows stability without resetting the memory state.
+        const ReviewResult repeat = Fsrs::review(first.state, 3, now);
+        QVERIFY(repeat.state.stability >= first.state.stability);
+        QCOMPARE(repeat.state.reps, 2);
+
+        // A lapse after a long delay lowers stability and raises difficulty.
+        const qint64 later = now + 30LL * 86400000LL;
+        const ReviewResult lapse = Fsrs::review(repeat.state, 1, later);
+        QVERIFY(lapse.state.stability < repeat.state.stability);
+        QCOMPARE(lapse.state.lapses, 1);
+        QVERIFY(lapse.retrievability < 1.0);
+    }
+
+    void deckParsesAndSerializes() {
+        QTemporaryDir dir;
+        const QString path = dir.filePath("Spanish.txt");
+        const QString text = QStringLiteral(
+            "# Deck: Spanish\n"
+            "# Description: Words and phrases\n"
+            "---\n"
+            "Q: What is \"gato\"?\n"
+            "A: cat\n"
+            "tags: vocab, animals\n"
+            "---\n"
+            "Q: Solve \\(x^2+1=0\\)\n"
+            "A: \\(x=\\pm i\\)\n"
+            "id: fixed-id\n");
+        QVERIFY(writeFile(path, text.toUtf8()));
+
+        QString error;
+        Deck deck = DeckIO::load(path, &error);
+        QVERIFY(error.isEmpty());
+        QCOMPARE(deck.name, QString("Spanish"));
+        QCOMPARE(deck.description, QString("Words and phrases"));
+        QCOMPARE(deck.cards.size(), 2);
+        QCOMPARE(deck.cards.first().question, QString("What is \"gato\"?"));
+        QCOMPARE(deck.cards.first().tags, QStringList({"vocab", "animals"}));
+        QCOMPARE(deck.cards.at(1).id, QString("fixed-id"));
+        QVERIFY(!deck.cards.first().id.isEmpty());
+
+        const QString roundTrip = DeckIO::serialize(deck);
+        QVERIFY(roundTrip.contains("# Deck: Spanish"));
+        QVERIFY(roundTrip.contains("Q: What is \"gato\"?"));
+        QVERIFY(roundTrip.contains("tags: vocab, animals"));
+    }
+
+    void clozeCardsHideAndReveal() {
+        Card card;
+        card.type = "cloze";
+        card.question = "The {{c1::cat}} sleeps.";
+        QVERIFY(DeckIO::displayQuestion(card).contains('['));
+        QVERIFY(!DeckIO::displayQuestion(card).contains("cat"));
+        QCOMPARE(DeckIO::displayAnswer(card), QString("The cat sleeps."));
+    }
+
+    void mathFallsBackToUnicode() {
+        MathRenderer renderer(QDir::tempPath() + "/omacards-math-test");
+        if (renderer.hasRenderer())
+            QVERIFY(!renderer.renderExpression("x^2").isEmpty());
+        QCOMPARE(unicodeMath("\\alpha + \\beta"), QString("α + β"));
+        QCOMPARE(unicodeMath("\\pm i"), QString("± i"));
+        QCOMPARE(unicodeMath("\\frac{1}{2}"), QString("(1)/(2)"));
+    }
+
+    void storeRoundTripsState() {
+        QTemporaryDir dir;
+        Store store(dir.filePath("state.db"));
+        QString error;
+        QVERIFY(store.open(&error));
+        QVERIFY(error.isEmpty());
+
+        FsrsState state = Fsrs::review(Fsrs::initial(), 3, QDateTime::currentMSecsSinceEpoch()).state;
+        store.save("card-1", "hash-1", state);
+        store.logReview("card-1", 3, state.lastReview, state, 3);
+
+        QCOMPARE(store.states().value("card-1").reps, 1);
+        QCOMPARE(store.hashes().value("card-1"), QString("hash-1"));
+        QCOMPARE(store.states().value("card-1").stability, state.stability);
+    }
+
+    void backendCreatesCardsAndCramsForever() {
+        QTemporaryDir dir;
+        Backend backend(dir.path(), dir.filePath("state.db"));
+        QString error;
+        QVERIFY(backend.initialize(&error));
+        QVERIFY(error.isEmpty());
+
+        QVERIFY(backend.createDeck("Test", &error));
+        QVERIFY(backend.createCard("Test", "Question?", "Answer", "basic", "tag", &error));
+        QVERIFY(error.isEmpty());
+        QCOMPARE(backend.totalCards(), 1);
+        QCOMPARE(backend.decks(), QStringList({"Test"}));
+
+        backend.selectDeck("Test");
+        backend.setMode("cram");
+        QVERIFY(backend.hasCard());
+        for (int i = 0; i < 12; ++i) {
+            backend.flip();
+            QVERIFY(backend.showingAnswer());
+            backend.answer(i % 3 == 0 ? 1 : 3);
+            QVERIFY(backend.hasCard()); // endless: the card comes back on every box interval
+        }
+        QCOMPARE(backend.reviewed(), 12);
+        QVERIFY(backend.correct() > 0);
+    }
+
+    void themeFallsBack() {
+        QTemporaryDir dir;
+        Theme theme(dir.path());
+        QCOMPARE(theme.accent(), QString("#FFD60A"));
+        QCOMPARE(theme.accentForeground(), QString("black"));
+    }
+
+    void themeReadsAccent() {
+        QTemporaryDir dir;
+        QDir(dir.path()).mkpath("theme");
+        QVERIFY(writeFile(dir.path() + "/theme/colors.toml", "accent = \"#112233\"\n"));
+        Theme theme(dir.path());
+        QCOMPARE(theme.accent(), QString("#112233"));
+        QCOMPARE(theme.accentForeground(), QString("white"));
+    }
+
+    void translatorFollowsLanguage() {
+        QTemporaryDir dir;
+        writeFile(dir.path() + "/language", "pt-BR\n");
+        writeFile(dir.path() + "/pt.json", R"({"Save": "Guardar"})");
+        writeFile(dir.path() + "/pt-BR.json", R"({"Save": "Salvar"})");
+        Translator translator(dir.path() + "/language", dir.path());
+        QCOMPARE(translator.language(), QString("pt-BR"));
+        QCOMPARE(translator.translate("Main", "Save"), QString("Salvar"));
+        QCOMPARE(Translator::pluralCategory("ar", 11), QString("many"));
+        QCOMPARE(Translator::pluralCategory("ja", 1), QString("other"));
+    }
+
+private:
+    static bool writeFile(const QString &path, const QByteArray &contents) {
+        QFile file(path);
+        return file.open(QIODevice::WriteOnly) && file.write(contents) == contents.size();
+    }
+};
+
+QTEST_MAIN(OmacardsTests)
+#include "omacards_tests.moc"

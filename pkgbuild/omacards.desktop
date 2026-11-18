@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=omacards
+Comment=Keyboard-first flashcards with FSRS review and endless cram
+Exec=omacards %f
+Icon=omacards
+Terminal=false
+Categories=Utility;Education;
+StartupWMClass=omacards
