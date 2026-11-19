@@ -1,0 +1,22 @@
+#!/bin/sh
+# Register a dev build with the shell and the desktop app launcher.
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+"$ROOT/bin/build"
+
+mkdir -p "$HOME/.local/bin" \
+         "$HOME/.local/share/applications" \
+         "$HOME/.local/share/icons/hicolor/scalable/apps"
+ln -sfn "$ROOT/build/omacards" "$HOME/.local/bin/omacards"
+ln -sfn "$ROOT/pkgbuild/omacards.desktop" "$HOME/.local/share/applications/omacards.desktop"
+ln -sfn "$ROOT/pkgbuild/omacards.svg" "$HOME/.local/share/icons/hicolor/scalable/apps/omacards.svg"
+
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$HOME/.local/share/applications"
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -q -f -t "$HOME/.local/share/icons/hicolor" || true
+fi
+
+"$ROOT/build/omacards" skill install
+printf 'omacards linked: command, launcher entry, icon and agent skill installed\n'

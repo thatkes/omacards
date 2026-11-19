@@ -20,6 +20,13 @@ struct CramEntry {
     int next = 0;
 };
 
+struct CardDraft {
+    QString question;
+    QString answer;
+    QString type = "basic"; // basic | cloze
+    QStringList tags;
+};
+
 class Backend : public QObject {
     Q_OBJECT
     Q_PROPERTY(QStringList decks READ decks NOTIFY decksChanged)
@@ -93,7 +100,10 @@ public:
     QVector<Card> searchCards(const QString &text, const QString &deckName = {}) const;
 
     // Headless helpers used by the agent CLI.
-    bool createDeck(const QString &name, QString *error = nullptr);
+    bool createDeck(const QString &name, QString *error = nullptr, const QString &description = {});
+    bool setDeckDescription(const QString &deckName, const QString &description, QString *error = nullptr);
+    bool createCards(const QString &deckName, const QVector<CardDraft> &drafts,
+                     const QString *description, QStringList *createdIds, QString *error = nullptr);
     bool createCard(const QString &deckName, const QString &question, const QString &answer,
                     const QString &type = "basic", const QString &tags = {}, QString *error = nullptr);
     bool modifyCard(const QString &deckName, const QString &cardId, const QString &question,

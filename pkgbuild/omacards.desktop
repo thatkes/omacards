@@ -1,9 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=omacards
+Name=Omacards
+GenericName=Flashcards
 Comment=Keyboard-first flashcards with FSRS review and endless cram
-Exec=omacards %f
+Exec=omacards
 Icon=omacards
 Terminal=false
-Categories=Utility;Education;
+Categories=Education;
+Keywords=spaced;repetition;fsrs;math;study;omarchy;cards;
 StartupWMClass=omacards

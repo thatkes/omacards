@@ -11,6 +11,94 @@
 #include <QRegularExpression>
 #include <QStandardPaths>
 
+namespace {
+QString escapePlain(const QString &text) {
+    return text.toHtmlEscaped().replace('\n', "<br>");
+}
+
+const QRegularExpression &mathPattern() {
+    static const QRegularExpression pattern(R"re(\\\((.*?)\\\)|\$\$(.*?)\$\$)re",
+                                           QRegularExpression::DotMatchesEverythingOption);
+    return pattern;
+}
+
+QString expressionAt(const QRegularExpressionMatch &match) {
+    return match.captured(1).isEmpty() ? match.captured(2) : match.captured(1);
+}
+
+template <typename Replacement>
+QString mapMath(const QString &text, Replacement replacement, bool escape) {
+    QString out;
+    int last = 0;
+    auto it = mathPattern().globalMatch(text);
+    while (it.hasNext()) {
+        const auto match = it.next();
+        const QString prefix = text.mid(last, match.capturedStart() - last);
+        out += escape ? escapePlain(prefix) : prefix;
+        out += replacement(expressionAt(match));
+        last = match.capturedEnd();
+    }
+    const QString tail = text.mid(last);
+    out += escape ? escapePlain(tail) : tail;
+    return out;
+}
+
+const QHash<QString, QString> &mathSymbols() {
+    static const QHash<QString, QString> symbols{
+        {"alpha", "α"}, {"beta", "β"}, {"gamma", "γ"}, {"delta", "δ"}, {"epsilon", "ε"},
+        {"theta", "θ"}, {"lambda", "λ"}, {"mu", "μ"}, {"pi", "π"}, {"sigma", "σ"},
+        {"tau", "τ"}, {"phi", "φ"}, {"omega", "ω"}, {"Gamma", "Γ"}, {"Delta", "Δ"},
+        {"Theta", "Θ"}, {"Lambda", "Λ"}, {"Pi", "Π"}, {"Sigma", "Σ"}, {"Omega", "Ω"},
+        {"times", "×"}, {"cdot", "·"}, {"pm", "±"}, {"mp", "∓"}, {"leq", "≤"},
+        {"geq", "≥"}, {"le", "≤"}, {"ge", "≥"}, {"neq", "≠"}, {"ne", "≠"},
+        {"approx", "≈"}, {"infty", "∞"}, {"sum", "∑"}, {"prod", "∏"}, {"int", "∫"},
+        {"partial", "∂"}, {"nabla", "∇"}, {"to", "→"}, {"rightarrow", "→"},
+        {"leftarrow", "←"}, {"Rightarrow", "⇒"}, {"Leftrightarrow", "⇔"},
+        {"in", "∈"}, {"notin", "∉"}, {"subset", "⊂"}, {"supset", "⊃"}, {"cup", "∪"},
+        {"cap", "∩"}, {"emptyset", "∅"}, {"forall", "∀"}, {"exists", "∃"}, {"neg", "¬"},
+        {"land", "∧"}, {"lor", "∨"}, {"ldots", "…"}, {"dots", "…"}, {"cdots", "⋯"},
+        {"quad", " "}, {"qquad", "  "}, {"sin", "sin"}, {"cos", "cos"}, {"tan", "tan"},
+        {"log", "log"}, {"ln", "ln"}, {"lim", "lim"}, {"min", "min"}, {"max", "max"},
+        {"sqrt", "√"},
+    };
+    return symbols;
+}
+
+const QStringList &structuredCommands() {
+    static const QStringList commands{
+        "frac", "dfrac", "tfrac", "binom", "sqrt", "text", "mathrm", "mathbf",
+        "displaystyle", "left", "right",
+    };
+    return commands;
+}
+
+struct BraceGroup {
+    QString content;
+    int end = -1; // index just after the closing brace
+};
+
+BraceGroup readGroup(const QString &text, int open) {
+    BraceGroup group;
+    if (open < 0 || open >= text.size() || text.at(open) != '{')
+        return group;
+    int depth = 0;
+    for (int i = open; i < text.size(); ++i) {
+        if (text.at(i) == '{') {
+            ++depth;
+        } else if (text.at(i) == '}') {
+            if (--depth == 0) {
+                group.content = text.mid(open + 1, i - open - 1);
+                group.end = i + 1;
+                return group;
+            }
+        }
+    }
+    group.content = text.mid(open + 1);
+    group.end = text.size();
+    return group;
+}
+} // namespace
+
 MathRenderer::MathRenderer(const QString &cacheDirectory, QObject *parent)
     : QObject(parent),
       m_cache(cacheDirectory.isEmpty()
@@ -45,20 +133,30 @@ bool MathRenderer::hasRenderer() const {
 }
 
 QString MathRenderer::render(const QString &text) const {
-    static const QRegularExpression math(R"re(\\\((.*?)\\\)|\$\$(.*?)\$\$)re",
-                                          QRegularExpression::DotMatchesEverythingOption);
-    QString html;
-    int last = 0;
-    auto it = math.globalMatch(text);
-    while (it.hasNext()) {
-        const auto match = it.next();
-        html += text.mid(last, match.capturedStart()).toHtmlEscaped().replace('\n', "<br>");
-        const QString expression = match.captured(1).isEmpty() ? match.captured(2) : match.captured(1);
-        html += renderExpression(expression);
-        last = match.capturedEnd();
+    return mapMath(text, [this](const QString &expression) { return renderExpression(expression); }, true);
+}
+
+QString MathRenderer::renderPlain(const QString &text) const {
+    return mapMath(text, unicodeMath, false);
+}
+
+QStringList MathRenderer::warnings(const QString &text) const {
+    static const QRegularExpression command(R"re(\\([A-Za-z]+))re");
+    QStringList result;
+    auto expressions = mathPattern().globalMatch(text);
+    while (expressions.hasNext()) {
+        const QString expression = expressionAt(expressions.next());
+        auto commands = command.globalMatch(expression);
+        while (commands.hasNext()) {
+            const QString name = commands.next().captured(1);
+            if (!mathSymbols().contains(name) && !structuredCommands().contains(name)) {
+                const QString message = QObject::tr("Unsupported math command: \\%1").arg(name);
+                if (!result.contains(message))
+                    result << message;
+            }
+        }
     }
-    html += text.mid(last).toHtmlEscaped().replace('\n', "<br>");
-    return html;
+    return result;
 }
 
 QString MathRenderer::renderExpression(const QString &expression) const {
@@ -122,49 +220,95 @@ QString MathRenderer::renderLatex(const QString &expression) const {
     return ok && QFileInfo::exists(svgPath) ? svgPath : QString();
 }
 
-template <typename Replacement>
-static QString replaceMatches(const QString &text, const QRegularExpression &expression, Replacement replacement) {
-    QString out;
-    int last = 0;
-    auto matches = expression.globalMatch(text);
-    while (matches.hasNext()) {
-        const auto match = matches.next();
-        out += text.mid(last, match.capturedStart() - last) + replacement(match);
-        last = match.capturedEnd();
-    }
-    return out + text.mid(last);
-}
-
 QString unicodeMath(const QString &expression) {
-    static const QHash<QString, QString> symbols{
-        {"alpha", "α"}, {"beta", "β"}, {"gamma", "γ"}, {"delta", "δ"}, {"epsilon", "ε"},
-        {"theta", "θ"}, {"lambda", "λ"}, {"mu", "μ"}, {"pi", "π"}, {"sigma", "σ"},
-        {"tau", "τ"}, {"phi", "φ"}, {"omega", "ω"}, {"Gamma", "Γ"}, {"Delta", "Δ"},
-        {"Theta", "Θ"}, {"Lambda", "Λ"}, {"Pi", "Π"}, {"Sigma", "Σ"}, {"Omega", "Ω"},
-        {"times", "×"}, {"cdot", "·"}, {"pm", "±"}, {"mp", "∓"}, {"leq", "≤"},
-        {"geq", "≥"}, {"neq", "≠"}, {"approx", "≈"}, {"infty", "∞"}, {"sum", "∑"},
-        {"prod", "∏"}, {"int", "∫"}, {"partial", "∂"}, {"nabla", "∇"}, {"to", "→"},
-        {"rightarrow", "→"}, {"leftarrow", "←"}, {"Rightarrow", "⇒"}, {"Leftrightarrow", "⇔"},
-        {"in", "∈"}, {"notin", "∉"}, {"subset", "⊂"}, {"supset", "⊃"}, {"cup", "∪"},
-        {"cap", "∩"}, {"emptyset", "∅"}, {"forall", "∀"}, {"exists", "∃"}, {"neg", "¬"},
-        {"land", "∧"}, {"lor", "∨"}, {"ldots", "…"}, {"dots", "…"}, {"quad", " "},
-        {"qquad", "  "}, {"sin", "sin"}, {"cos", "cos"}, {"tan", "tan"}, {"log", "log"},
-        {"ln", "ln"}, {"lim", "lim"}, {"min", "min"}, {"max", "max"}, {"sqrt", "√"},
-    };
-
-    QString out = expression.trimmed();
-    out.remove(QRegularExpression(R"re(\\(left|right|displaystyle|text|mathrm|mathbf))re"));
-    static const QRegularExpression command(R"re(\\([A-Za-z]+))re");
-    static const QRegularExpression fraction(R"re(\\frac\{([^{}]*)\}\{([^{}]*)\})re");
-    out = replaceMatches(out, fraction, [](const QRegularExpressionMatch &m) {
-        return QString("(%1)/(%2)").arg(m.captured(1), m.captured(2));
-    });
-    out = replaceMatches(out, command, [](const QRegularExpressionMatch &m) {
-        return symbols.value(m.captured(1), m.captured(1));
-    });
-    out.remove(QRegularExpression(R"re(\\[,;! ])re"));
+    const QString text = expression.trimmed();
+    QString out;
+    for (int i = 0; i < text.size();) {
+        const QChar ch = text.at(i);
+        if (ch == '\\') {
+            int after = i + 1;
+            while (after < text.size() && text.at(after).isLetter())
+                ++after;
+            const QString name = text.mid(i + 1, after - i - 1);
+            if (name.isEmpty()) {
+                i = qMin(i + 2, text.size());
+                continue;
+            }
+            if (name == QLatin1String("frac") || name == QLatin1String("dfrac")
+                || name == QLatin1String("tfrac")) {
+                const BraceGroup numerator = readGroup(text, after);
+                if (numerator.end > 0) {
+                    const BraceGroup denominator = readGroup(text, numerator.end);
+                    if (denominator.end > 0) {
+                        out += "(" + unicodeMath(numerator.content) + ")/(" + unicodeMath(denominator.content) + ")";
+                        i = denominator.end;
+                        continue;
+                    }
+                }
+            } else if (name == QLatin1String("binom")) {
+                const BraceGroup upper = readGroup(text, after);
+                if (upper.end > 0) {
+                    const BraceGroup lower = readGroup(text, upper.end);
+                    if (lower.end > 0) {
+                        out += "C(" + unicodeMath(upper.content) + "," + unicodeMath(lower.content) + ")";
+                        i = lower.end;
+                        continue;
+                    }
+                }
+            } else if (name == QLatin1String("sqrt")) {
+                const BraceGroup radicand = readGroup(text, after);
+                if (radicand.end > 0) {
+                    out += "√(" + unicodeMath(radicand.content) + ")";
+                    i = radicand.end;
+                    continue;
+                }
+            } else if (name == QLatin1String("text") || name == QLatin1String("mathrm")
+                       || name == QLatin1String("mathbf") || name == QLatin1String("displaystyle")) {
+                const BraceGroup literal = readGroup(text, after);
+                if (literal.end > 0) {
+                    out += literal.content;
+                    i = literal.end;
+                    continue;
+                }
+                i = after;
+                continue;
+            } else if (name == QLatin1String("left") || name == QLatin1String("right")) {
+                i = after;
+                continue;
+            }
+            out += mathSymbols().value(name, name);
+            i = after;
+            continue;
+        }
+        if (ch == '^' || ch == '_') {
+            if (i + 1 < text.size() && text.at(i + 1) == '{') {
+                const BraceGroup group = readGroup(text, i + 1);
+                const QString content = unicodeMath(group.content);
+                const bool compact = content.size() == 1
+                    || (content.startsWith('(') && content.endsWith(')'));
+                out += ch;
+                out += compact ? content : QStringLiteral("(%1)").arg(content);
+                i = group.end > 0 ? group.end : i + 2;
+                continue;
+            }
+            out += ch;
+            ++i;
+            continue;
+        }
+        if (ch == '{') {
+            const BraceGroup group = readGroup(text, i);
+            out += unicodeMath(group.content);
+            i = group.end > 0 ? group.end : i + 1;
+            continue;
+        }
+        if (ch == '}') {
+            ++i;
+            continue;
+        }
+        out += ch;
+        ++i;
+    }
     out.replace("^2", "²").replace("^3", "³").replace("_0", "₀").replace("_1", "₁");
-    out.replace("{", "").replace("}", "");
-    out.replace("  ", " ").replace("√(", "√").replace("^", "^");
+    out.replace("  ", " ");
     return out.trimmed();
 }

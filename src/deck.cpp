@@ -1,10 +1,12 @@
 // Deck files are the source of truth: plain text an agent can edit with sed,
 // and a sidecar SQLite database holds only scheduling state.
 #include "deck.h"
+#include "mathrender.h"
 
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QCryptographicHash>
 #include <QSaveFile>
 #include <QRegularExpression>
@@ -170,6 +172,126 @@ QVector<Deck> loadAll(const QString &directory, QString *error) {
         decks << deck;
     }
     return decks;
+}
+
+QVector<DeckIssue> lint(const QString &directory) {
+    QVector<DeckIssue> issues;
+    const QDir dir(directory);
+    if (!dir.exists())
+        return issues;
+
+    static const QRegularExpression keyLine(R"re(^(Q|A|Answer|tags|type|id)\s*:\s*(.*)$)re",
+                                            QRegularExpression::CaseInsensitiveOption);
+    MathRenderer math;
+    const auto questionLine = [](const QStringList &lines, const QString &question, int occurrence = 1) {
+        const QString expected = QStringLiteral("Q: ") + question.trimmed();
+        int seen = 0;
+        for (int i = 0; i < lines.size(); ++i) {
+            if (lines.at(i).trimmed() == expected && ++seen == occurrence)
+                return i + 1;
+        }
+        return 0;
+    };
+
+    const QStringList files = dir.entryList({"*.txt", "*.deck"}, QDir::Files, QDir::Name);
+    for (const QString &name : files) {
+        const QString path = dir.filePath(name);
+        QString error;
+        const Deck deck = load(path, &error);
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            DeckIssue issue;
+            issue.path = path;
+            issue.severity = QStringLiteral("error");
+            issue.message = QStringLiteral("Cannot read deck file");
+            issue.hint = QStringLiteral("Check file permissions.");
+            issues << issue;
+            continue;
+        }
+        const QStringList lines = QString::fromUtf8(file.readAll()).split('\n');
+
+        bool inBlock = false;
+        QString currentKey;
+        for (int i = 0; i < lines.size(); ++i) {
+            const QString raw = lines.at(i);
+            if (!inBlock) {
+                if (raw.trimmed() == QLatin1String("---"))
+                    inBlock = true;
+                continue;
+            }
+            if (raw.trimmed() == QLatin1String("---")) {
+                currentKey.clear();
+                continue;
+            }
+            if (raw.trimmed().isEmpty())
+                continue;
+            if (keyLine.match(raw).hasMatch()) {
+                currentKey = keyLine.match(raw).captured(1).toLower();
+                continue;
+            }
+            if (raw.startsWith(QLatin1String("  "))) {
+                if (raw.startsWith(QLatin1String("   "))) {
+                    DeckIssue issue;
+                    issue.path = path;
+                    issue.line = i + 1;
+                    issue.message = QStringLiteral("Continuation line has more than two leading spaces");
+                    issue.hint = QStringLiteral("Start multiline Q: or A: with exactly two spaces.");
+                    issues << issue;
+                }
+                continue;
+            }
+            if (raw.trimmed().startsWith('#'))
+                continue;
+            DeckIssue issue;
+            issue.path = path;
+            issue.line = i + 1;
+            issue.message = QStringLiteral("Unexpected line in deck file");
+            issue.hint = QStringLiteral("Use Q:, A:, tags:, type:, id:, or indent with exactly two spaces.");
+            issues << issue;
+        }
+
+        if (!error.isEmpty() && !error.startsWith(QStringLiteral("Unexpected line"))) {
+            DeckIssue issue;
+            issue.path = path;
+            issue.severity = QStringLiteral("error");
+            issue.message = error;
+            issue.hint = QStringLiteral("Fix the format above and run omacards check --json again.");
+            issues << issue;
+        }
+
+        QHash<QString, int> seenQuestions;
+        for (const Card &card : deck.cards) {
+            const QString key = card.question.trimmed().toCaseFolded();
+            const int occurrence = key.isEmpty() ? 1 : seenQuestions.value(key, 0) + 1;
+            if (!key.isEmpty())
+                seenQuestions.insert(key, occurrence);
+            const int line = questionLine(lines, card.question, occurrence);
+            if (occurrence > 1) {
+                DeckIssue issue;
+                issue.path = path;
+                issue.card = card.id;
+                issue.line = line;
+                issue.message = QStringLiteral("Duplicate question in deck");
+                issue.hint = QStringLiteral("Question already used on line %1; make it distinct.")
+                    .arg(questionLine(lines, card.question, 1));
+                issues << issue;
+            }
+            const auto addMathWarnings = [&](const QString &field, const QString &text) {
+                for (const QString &message : math.warnings(text)) {
+                    DeckIssue issue;
+                    issue.path = path;
+                    issue.card = card.id;
+                    issue.line = line;
+                    issue.message = QStringLiteral("Math warning in %1: %2").arg(field, message);
+                    issue.hint = QStringLiteral("Use supported macros, or install tectonic for LaTeX rendering.");
+                    issues << issue;
+                }
+            };
+            addMathWarnings(QStringLiteral("question"), card.question);
+            addMathWarnings(QStringLiteral("answer"), card.answer);
+        }
+    }
+    return issues;
 }
 
 QString serialize(const Deck &deck) {

@@ -1,7 +1,11 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -11,6 +15,7 @@
 #include <QtTest>
 
 #include "backend.h"
+#include "cli.h"
 #include "deck.h"
 #include "fsrs.h"
 #include "mathrender.h"
@@ -18,10 +23,194 @@
 #include "theme.h"
 #include "translator.h"
 
+namespace {
+struct EnvGuard {
+    QByteArray decks;
+    QByteArray state;
+
+    EnvGuard(const QString &decksDir, const QString &stateDb) {
+        decks = qgetenv("OMACARDS_DECKS_DIR");
+        state = qgetenv("OMACARDS_STATE_DB");
+        qputenv("OMACARDS_DECKS_DIR", decksDir.toUtf8());
+        qputenv("OMACARDS_STATE_DB", stateDb.toUtf8());
+    }
+
+    ~EnvGuard() {
+        if (!decks.isNull()) qputenv("OMACARDS_DECKS_DIR", decks);
+        else qunsetenv("OMACARDS_DECKS_DIR");
+        if (!state.isNull()) qputenv("OMACARDS_STATE_DB", state);
+        else qunsetenv("OMACARDS_STATE_DB");
+    }
+};
+}
+
 class OmacardsTests : public QObject {
     Q_OBJECT
 
 private slots:
+    void helpIsHeadless() {
+        QVERIFY(Cli::needsOffscreen({"--help"}));
+        QVERIFY(Cli::needsOffscreen({"-h"}));
+        QVERIFY(Cli::needsOffscreen({"help"}));
+        QVERIFY(!Cli::needsOffscreen({"open"}));
+
+        if (!QFileInfo::exists(appBinary()))
+            QSKIP("Build the app before running CLI integration tests.");
+        QProcess process;
+        process.start(appBinary(), {"--help"});
+        QVERIFY(process.waitForFinished(5000));
+        QCOMPARE(process.exitCode(), 0);
+        QVERIFY(process.readAllStandardOutput().contains("Usage:"));
+    }
+
+    void addCardsCreatesDeckBulk() {
+        QTemporaryDir dir;
+        EnvGuard env(dir.filePath("decks"), dir.filePath("state.db"));
+        const QString input = dir.filePath("cards.json");
+        QVERIFY(writeFile(input, R"({"description":"Bulk math","cards":[
+            {"question":"Q1?","answer":"A1","tags":["x","y"]},
+            {"question":"Q2?","answer":"A2","type":"cloze","tags":"z, w"}]})"));
+
+        QCOMPARE(Cli::run({"add-cards", "-d", "Bulk", "-i", input, "--json"}), 0);
+
+        QString error;
+        const Deck deck = DeckIO::load(QDir(dir.filePath("decks")).filePath("Bulk.txt"), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(deck.description, QString("Bulk math"));
+        QCOMPARE(deck.cards.size(), 2);
+        QCOMPARE(deck.cards.at(0).tags, QStringList({"x", "y"}));
+        QCOMPARE(deck.cards.at(1).type, QString("cloze"));
+        QCOMPARE(deck.cards.at(1).tags, QStringList({"z", "w"}));
+    }
+
+    void addCardsRejectsInvalidInputWithoutWriting() {
+        QTemporaryDir dir;
+        EnvGuard env(dir.filePath("decks"), dir.filePath("state.db"));
+        const QString input = dir.filePath("bad.json");
+        QVERIFY(writeFile(input, R"({"cards":[
+            {"question":"ok","answer":"a"},{"answer":"no question"}]})"));
+
+        QCOMPARE(Cli::run({"add-cards", "-d", "Bad", "-i", input, "--json"}), 1);
+        QVERIFY(!QFileInfo::exists(QDir(dir.filePath("decks")).filePath("Bad.txt")));
+    }
+
+    void addDeckDescriptionAndJsonImport() {
+        QTemporaryDir dir;
+        EnvGuard env(dir.filePath("decks"), dir.filePath("state.db"));
+        QCOMPARE(Cli::run({"add-deck", "Empty", "--description", "No cards", "--json"}), 0);
+        QString error;
+        const Deck empty = DeckIO::load(QDir(dir.filePath("decks")).filePath("Empty.txt"), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(empty.description, QString("No cards"));
+
+        const QString input = dir.filePath("Imported.json");
+        QVERIFY(writeFile(input, R"({"description":"from import","cards":[
+            {"question":"j1","answer":"a1"}]})"));
+        QCOMPARE(Cli::run({"import", input, "--json"}), 0);
+        const Deck imported = DeckIO::load(QDir(dir.filePath("decks")).filePath("Imported.txt"), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(imported.description, QString("from import"));
+        QCOMPARE(imported.cards.size(), 1);
+    }
+
+    void previewRendersMathAsText() {
+        QTemporaryDir dir;
+        EnvGuard env(dir.filePath("decks"), dir.filePath("state.db"));
+        const QString input = dir.filePath("cards.json");
+        QVERIFY(writeFile(input, R"json({"cards":[{"question":"Expand \\(x^2\\)",
+                                                  "answer":"\\(\\frac{1}{2}\\)"}]})json"));
+        int code = -1;
+        runCli({"add-cards", "-d", "Math", "-i", input, "--json"}, dir.filePath("decks"),
+               dir.filePath("state.db"), &code);
+        QCOMPARE(code, 0);
+
+        const QJsonObject result = runCli({"preview", "--deck", "Math", "--json"},
+                                          dir.filePath("decks"), dir.filePath("state.db"), &code);
+        QCOMPARE(code, 0);
+        const QJsonArray items = result.value(QStringLiteral("items")).toArray();
+        QCOMPARE(items.size(), 1);
+        const QJsonObject item = items.at(0).toObject();
+        QCOMPARE(item.value(QStringLiteral("question")).toString(), QString("Expand x²"));
+        QCOMPARE(item.value(QStringLiteral("answer")).toString(), QString("(1)/(2)"));
+    }
+
+    void checkMathReportsUnsupportedCommands() {
+        QTemporaryDir dir;
+        EnvGuard env(dir.filePath("decks"), dir.filePath("state.db"));
+        const QString input = dir.filePath("cards.json");
+        QVERIFY(writeFile(input, R"json({"cards":[{"question":"Bad \\(\\foobar{x}\\)",
+                                                  "answer":"ok"}]})json"));
+        int code = -1;
+        runCli({"add-cards", "-d", "Warn", "-i", input, "--json"}, dir.filePath("decks"),
+               dir.filePath("state.db"), &code);
+        QCOMPARE(code, 0);
+
+        const QJsonObject result = runCli({"check", "--math", "--json"}, dir.filePath("decks"),
+                                          dir.filePath("state.db"), &code);
+        QCOMPARE(code, 0);
+        const QJsonArray warnings = result.value(QStringLiteral("mathWarnings")).toArray();
+        QCOMPARE(warnings.size(), 1);
+        QCOMPARE(warnings.at(0).toObject().value(QStringLiteral("message")).toString(),
+                 QString("Unsupported math command: \\foobar"));
+    }
+
+    void checkReportsLineNumberedIssues() {
+        QTemporaryDir dir;
+        EnvGuard env(dir.filePath("decks"), dir.filePath("state.db"));
+        QVERIFY(QDir().mkpath(dir.filePath("decks")));
+        const QString path = dir.filePath("decks/Broken.txt");
+        QVERIFY(writeFile(path, R"deck(# Deck: Broken
+---
+Q: Same question
+A: one
+---
+Q: Same question
+A: two
+---
+Q: Good question
+A: ok
+oops: not a key
+   too much indent
+)deck"));
+
+        int code = -1;
+        const QJsonObject result = runCli({"check", "--json"}, dir.filePath("decks"),
+                                          dir.filePath("state.db"), &code);
+        QCOMPARE(code, 0);
+        QVERIFY(result.value(QStringLiteral("ok")).toBool());
+
+        const QJsonArray issues = result.value(QStringLiteral("issues")).toArray();
+        const QJsonObject counts = result.value(QStringLiteral("issueCounts")).toObject();
+        QCOMPARE(counts.value(QStringLiteral("error")).toInt(), 0);
+        QVERIFY(counts.value(QStringLiteral("warning")).toInt() >= 3);
+
+        bool sawDuplicate = false;
+        bool sawUnexpected = false;
+        bool sawIndent = false;
+        for (const QJsonValue &value : issues) {
+            const QJsonObject issue = value.toObject();
+            QVERIFY(!issue.value(QStringLiteral("hint")).toString().isEmpty());
+            const QString message = issue.value(QStringLiteral("message")).toString();
+            if (message == QStringLiteral("Duplicate question in deck")) {
+                sawDuplicate = true;
+                QCOMPARE(issue.value(QStringLiteral("line")).toInt(), 6);
+                QVERIFY(issue.value(QStringLiteral("hint")).toString().contains(QStringLiteral("line 3")));
+            } else if (message == QStringLiteral("Unexpected line in deck file")) {
+                sawUnexpected = true;
+                QCOMPARE(issue.value(QStringLiteral("line")).toInt(), 11);
+            } else if (message == QStringLiteral("Continuation line has more than two leading spaces")) {
+                sawIndent = true;
+                QCOMPARE(issue.value(QStringLiteral("line")).toInt(), 12);
+            }
+        }
+        QVERIFY(sawDuplicate);
+        QVERIFY(sawUnexpected);
+        QVERIFY(sawIndent);
+
+        runCli({"check", "--strict", "--json"}, dir.filePath("decks"), dir.filePath("state.db"), &code);
+        QCOMPARE(code, 1);
+    }
+
     void fsrsInitialState() {
         QCOMPARE(Fsrs::initial().reps, 0);
         QVERIFY(Fsrs::initialStability(3) > Fsrs::initialStability(1));
@@ -104,6 +293,14 @@ private slots:
         QCOMPARE(unicodeMath("\\alpha + \\beta"), QString("α + β"));
         QCOMPARE(unicodeMath("\\pm i"), QString("± i"));
         QCOMPARE(unicodeMath("\\frac{1}{2}"), QString("(1)/(2)"));
+        QCOMPARE(unicodeMath("\\frac{f^{(n)}(a)}{n!}"), QString("(f^(n)(a))/(n!)"));
+        QCOMPARE(unicodeMath("\\binom{r}{n}"), QString("C(r,n)"));
+        QCOMPARE(unicodeMath("\\sqrt{1+x}"), QString("√(1+x)"));
+        QCOMPARE(unicodeMath("x^{2n+1}"), QString("x^(2n+1)"));
+        QCOMPARE(unicodeMath("x \\le 2"), QString("x ≤ 2"));
+        QCOMPARE(unicodeMath("a \\cdots b"), QString("a ⋯ b"));
+        QVERIFY(renderer.warnings("\\(\\frac{1}{2}\\)").isEmpty());
+        QCOMPARE(renderer.warnings("\\(\\foobar{x}\\)").size(), 1);
     }
 
     void storeRoundTripsState() {
@@ -493,6 +690,26 @@ private slots:
     }
 
 private:
+    static QString appBinary() {
+        return QDir(QString(OMACARDS_SOURCE_DIR)).filePath("../build/omacards");
+    }
+
+    static QJsonObject runCli(const QStringList &arguments, const QString &decksDir,
+                              const QString &stateDb, int *exitCode = nullptr) {
+        QProcess process;
+        QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+        environment.insert(QStringLiteral("OMACARDS_DECKS_DIR"), decksDir);
+        environment.insert(QStringLiteral("OMACARDS_STATE_DB"), stateDb);
+        process.setProcessEnvironment(environment);
+        process.start(appBinary(), arguments);
+        if (!process.waitForFinished(10000)) {
+            if (exitCode) *exitCode = -1;
+            return {};
+        }
+        if (exitCode) *exitCode = process.exitCode();
+        return QJsonDocument::fromJson(process.readAllStandardOutput()).object();
+    }
+
     static bool writeFile(const QString &path, const QByteArray &contents) {
         QFile file(path);
         return file.open(QIODevice::WriteOnly) && file.write(contents) == contents.size();

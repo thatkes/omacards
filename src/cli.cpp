@@ -11,14 +11,16 @@
 
 #include <QDateTime>
 #include <QDir>
-#include <QObject>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QObject>
 #include <QStandardPaths>
 #include <algorithm>
 #include <cstdio>
+#include <unistd.h>
 
 namespace {
 struct Options {
@@ -30,11 +32,16 @@ struct Options {
     QString tags;
     QString card;
     QString path;
+    QString input;
+    QString description;
+    QString format = "text";
     int rating = 0;
     int steps = 10;
     int newPerDay = -1;
     double retention = -1.0;
     bool json = false;
+    bool math = false;
+    bool strict = false;
     bool questionSet = false;
     bool answerSet = false;
     bool typeSet = false;
@@ -43,9 +50,9 @@ struct Options {
 
 bool isHeadlessCommand(const QString &command) {
     static const QStringList commands{
-        "check", "decks", "cards", "search", "add-deck", "add-card", "edit-card",
-        "delete-card", "delete-deck", "import", "due", "review", "cram", "skill",
-        "stats", "config", "help",
+        "check", "decks", "cards", "search", "add-deck", "add-cards", "add-card", "edit-card",
+        "delete-card", "delete-deck", "import", "due", "review", "cram", "preview", "skill",
+        "stats", "config", "help", "--help", "-h",
     };
     return commands.contains(command);
 }
@@ -54,6 +61,8 @@ Options parse(const QStringList &arguments) {
     Options options;
     QStringList rest = arguments;
     rest.removeAll(QString("--json"));
+    rest.removeAll(QString("--math"));
+    rest.removeAll(QString("--strict"));
     if (!rest.isEmpty())
         options.command = rest.takeFirst();
     for (int i = 0; i < rest.size(); ++i) {
@@ -65,6 +74,9 @@ Options parse(const QStringList &arguments) {
         else if (arg == "--type") { options.type = value(); options.typeSet = true; }
         else if (arg == "--tags") { options.tags = value(); options.tagsSet = true; }
         else if (arg == "--card" || arg == "-c") options.card = value();
+        else if (arg == "--input" || arg == "-i") options.input = value();
+        else if (arg == "--description") options.description = value();
+        else if (arg == "--format") options.format = value();
         else if (arg == "--rating" || arg == "-r") options.rating = value().toInt();
         else if (arg == "--steps") options.steps = value().toInt();
         else if (arg == "--new-per-day") options.newPerDay = value().toInt();
@@ -72,9 +84,14 @@ Options parse(const QStringList &arguments) {
         else if (arg.startsWith("--deck=")) options.deck = arg.section('=', 1);
         else if (arg.startsWith("--question=")) { options.question = arg.section('=', 1); options.questionSet = true; }
         else if (arg.startsWith("--answer=")) { options.answer = arg.section('=', 1); options.answerSet = true; }
+        else if (arg.startsWith("--input=")) options.input = arg.section('=', 1);
+        else if (arg.startsWith("--description=")) options.description = arg.section('=', 1);
+        else if (arg.startsWith("--format=")) options.format = arg.section('=', 1);
         else if (options.path.isEmpty()) options.path = arg;
     }
     options.json = arguments.contains(QString("--json"));
+    options.math = arguments.contains(QString("--math"));
+    options.strict = arguments.contains(QString("--strict"));
     return options;
 }
 
@@ -124,16 +141,98 @@ QJsonObject cardJson(const Card &card) {
     return object;
 }
 
+bool readCardInput(const Options &options, QByteArray *bytes, QString *error) {
+    const QString source = options.input.isEmpty() ? options.path : options.input;
+    if (source.isEmpty() || source == QLatin1String("-")) {
+        if (::isatty(fileno(stdin))) {
+            if (error) *error = QObject::tr("Use --input FILE or pipe JSON to stdin");
+            return false;
+        }
+        char buffer[4096];
+        size_t count = 0;
+        while ((count = fread(buffer, 1, sizeof(buffer), stdin)) > 0)
+            bytes->append(buffer, static_cast<int>(count));
+        return true;
+    }
+    QFile file(source);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (error) *error = QObject::tr("Cannot read: %1").arg(source);
+        return false;
+    }
+    *bytes = file.readAll();
+    return true;
+}
+
+bool parseCardDrafts(const QByteArray &data, const QString &descriptionFlag,
+                     QVector<CardDraft> *drafts, QString *description, QString *error) {
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(data, &parseError);
+    if (parseError.error != QJsonParseError::NoError) {
+        if (error) *error = QObject::tr("Invalid JSON: %1").arg(parseError.errorString());
+        return false;
+    }
+
+    QJsonArray cards;
+    *description = descriptionFlag;
+    if (document.isArray()) {
+        cards = document.array();
+    } else if (document.isObject()) {
+        const QJsonObject root = document.object();
+        cards = root.value(QStringLiteral("cards")).toArray();
+        if (descriptionFlag.isEmpty())
+            *description = root.value(QStringLiteral("description")).toString();
+    } else {
+        if (error) *error = QObject::tr("Expected a JSON array or an object with a cards array");
+        return false;
+    }
+    if (cards.isEmpty()) {
+        if (error) *error = QObject::tr("No cards in JSON input");
+        return false;
+    }
+
+    for (int i = 0; i < cards.size(); ++i) {
+        if (!cards.at(i).isObject()) {
+            if (error) *error = QObject::tr("cards[%1] must be an object").arg(i);
+            return false;
+        }
+        const QJsonObject entry = cards.at(i).toObject();
+        CardDraft draft;
+        draft.question = entry.value(QStringLiteral("question")).toString();
+        draft.answer = entry.value(QStringLiteral("answer")).toString();
+        draft.type = entry.value(QStringLiteral("type")).toString(QStringLiteral("basic"));
+        const QJsonValue tags = entry.value(QStringLiteral("tags"));
+        if (tags.isArray()) {
+            for (const QJsonValue &tag : tags.toArray())
+                draft.tags << tag.toString();
+        } else if (!tags.isUndefined() && !tags.isNull()) {
+            draft.tags = tags.toString().split(',', Qt::SkipEmptyParts);
+        }
+        if (draft.question.trimmed().isEmpty()) {
+            if (error) *error = QObject::tr("cards[%1] needs a question").arg(i);
+            return false;
+        }
+        if (draft.type != QLatin1String("basic") && draft.type != QLatin1String("cloze")) {
+            if (error) *error = QObject::tr("cards[%1] has an invalid type: %2").arg(i).arg(draft.type);
+            return false;
+        }
+        drafts->append(draft);
+    }
+    return true;
+}
+
 QString usage() {
     return QStringLiteral(
         "omacards — keyboard flashcards for Omarchy\n\n"
         "Usage:\n"
         "  omacards [open]                  Start the GUI\n"
-        "  omacards check [--json]          Show decks, cards, due count and math engine\n"
+        "  omacards check [--math] [--strict] [--json]\n"
+        "                                   Show decks, cards, due count, math and issues\n"
         "  omacards decks [--json]          List decks\n"
         "  omacards cards [--deck D] [--json]\n"
         "  omacards search TERM [--deck D] [--json]\n"
-        "  omacards add-deck NAME [--json]\n"
+        "  omacards preview --deck D [--card ID] [--format text|html] [--json]\n"
+        "  omacards add-deck NAME [--description TEXT] [--json]\n"
+        "  omacards add-cards --deck NAME [--description TEXT] [--input FILE|-] [--json]\n"
         "  omacards add-card -q Q -a A [-d D] [--type cloze] [--tags a,b] [--json]\n"
         "  omacards edit-card -c ID [-q Q] [-a A] [--type T] [--tags a,b] [--json]\n"
         "  omacards delete-card -c ID [-d D] [--json]\n"
@@ -180,8 +279,56 @@ int run(const QStringList &arguments) {
             object.insert("cards", deck.cards.size());
             deckArray << object;
         }
+        QJsonArray mathWarnings;
+        QStringList warningLines;
+        if (options.math) {
+            MathRenderer renderer;
+            for (const Deck &deck : decks) {
+                for (const Card &card : deck.cards) {
+                    const auto checkField = [&](const QString &field, const QString &text) {
+                        for (const QString &message : renderer.warnings(text)) {
+                            QJsonObject warning;
+                            warning.insert("card", card.id);
+                            warning.insert("deck", deck.name);
+                            warning.insert("field", field);
+                            warning.insert("message", message);
+                            mathWarnings << warning;
+                            warningLines << QStringLiteral("%1 (%2.%3): %4")
+                                .arg(card.id, deck.name, field, message);
+                        }
+                    };
+                    checkField(QStringLiteral("question"), card.question);
+                    checkField(QStringLiteral("answer"), card.answer);
+                }
+            }
+        }
+
+        const QVector<DeckIssue> issues = DeckIO::lint(backend.decksDirectory());
+        QJsonArray issueArray;
+        QStringList issueLines;
+        int errors = 0;
+        int warnings = 0;
+        for (const DeckIssue &issue : issues) {
+            QJsonObject entry;
+            entry.insert("path", issue.path);
+            if (!issue.card.isEmpty())
+                entry.insert("card", issue.card);
+            if (issue.line > 0)
+                entry.insert("line", issue.line);
+            entry.insert("severity", issue.severity);
+            entry.insert("message", issue.message);
+            entry.insert("hint", issue.hint);
+            issueArray << entry;
+            if (issue.severity == QLatin1String("error"))
+                ++errors;
+            else
+                ++warnings;
+            issueLines << QStringLiteral("%1:%2 %3: %4 (%5)")
+                .arg(issue.path).arg(issue.line).arg(issue.severity, issue.message, issue.hint);
+        }
+
         QJsonObject object;
-        object.insert("ok", true);
+        object.insert("ok", errors == 0);
         object.insert("version", QString("0.1.0"));
         object.insert("decks", deckArray);
         object.insert("cards", total);
@@ -193,8 +340,65 @@ int run(const QStringList &arguments) {
         object.insert("math", backend.mathEngine());
         object.insert("decksDir", backend.decksDirectory());
         object.insert("database", backend.databasePath());
-        write(object, json, QObject::tr("%1 decks · %2 cards · %3 due · math: %4")
-              .arg(decks.size()).arg(total).arg(due).arg(backend.mathEngine()));
+        object.insert("issues", issueArray);
+        QJsonObject counts;
+        counts.insert("error", errors);
+        counts.insert("warning", warnings);
+        object.insert("issueCounts", counts);
+        if (options.math)
+            object.insert("mathWarnings", mathWarnings);
+        QString human = QObject::tr("%1 decks · %2 cards · %3 due · math: %4")
+            .arg(decks.size()).arg(total).arg(due).arg(backend.mathEngine());
+        human += QStringLiteral("\n%1 issues · %2 errors · %3 warnings")
+            .arg(issues.size()).arg(errors).arg(warnings);
+        if (!issueLines.isEmpty())
+            human += QLatin1String("\n") + issueLines.join(QLatin1String("\n"));
+        if (options.math) {
+            human += QLatin1String("\n");
+            human += warningLines.isEmpty() ? QObject::tr("No math warnings") : warningLines.join('\n');
+        }
+        write(object, json, human);
+        if (options.strict && !issues.isEmpty())
+            return 1;
+        return 0;
+    }
+
+    if (options.command == "preview") {
+        if (options.deck.isEmpty())
+            return fail(QObject::tr("Use --deck / -d"), json);
+        if (options.format != QLatin1String("text") && options.format != QLatin1String("html"))
+            return fail(QObject::tr("--format must be text or html"), json);
+        QVector<Card> cards = allCards(decks, options.deck);
+        if (!options.card.isEmpty()) {
+            QVector<Card> filtered;
+            for (const Card &card : cards)
+                if (card.id == options.card)
+                    filtered << card;
+            cards = filtered;
+        }
+        if (cards.isEmpty())
+            return fail(QObject::tr("No cards to preview"), json);
+
+        MathRenderer renderer;
+        QJsonArray items;
+        QStringList lines;
+        for (const Card &card : cards) {
+            const bool html = options.format == QLatin1String("html");
+            const QString question = html ? renderer.render(card.question) : renderer.renderPlain(card.question);
+            const QString answer = html ? renderer.render(card.answer) : renderer.renderPlain(card.answer);
+            QJsonObject item;
+            item.insert("id", card.id);
+            item.insert(html ? QStringLiteral("questionHtml") : QStringLiteral("question"), question);
+            item.insert(html ? QStringLiteral("answerHtml") : QStringLiteral("answer"), answer);
+            items << item;
+            lines << QStringLiteral("[%1]\nQ: %2\nA: %3").arg(card.id, question, answer);
+        }
+        QJsonObject object;
+        object.insert("ok", true);
+        object.insert("deck", options.deck);
+        object.insert("format", options.format);
+        object.insert("items", items);
+        write(object, json, lines.join(QStringLiteral("\n\n")));
         return 0;
     }
 
@@ -295,12 +499,38 @@ int run(const QStringList &arguments) {
     if (options.command == "add-deck") {
         if (options.path.isEmpty())
             return fail(QObject::tr("Give a deck name"), json);
-        if (!backend.createDeck(options.path, &error))
+        if (!backend.createDeck(options.path, &error, options.description))
             return fail(error, json);
         QJsonObject object;
         object.insert("ok", true);
         object.insert("deck", options.path);
         write(object, json, QObject::tr("Created deck %1").arg(options.path));
+        return 0;
+    }
+
+    if (options.command == "add-cards") {
+        if (options.deck.isEmpty())
+            return fail(QObject::tr("Use --deck / -d"), json);
+        QByteArray bytes;
+        if (!readCardInput(options, &bytes, &error))
+            return fail(error, json);
+        QVector<CardDraft> drafts;
+        QString description;
+        if (!parseCardDrafts(bytes, options.description, &drafts, &description, &error))
+            return fail(error, json);
+        QStringList ids;
+        if (!backend.createCards(options.deck, drafts, &description, &ids, &error))
+            return fail(error, json);
+
+        QJsonArray idArray;
+        for (const QString &id : ids)
+            idArray << id;
+        QJsonObject object;
+        object.insert("ok", true);
+        object.insert("deck", options.deck);
+        object.insert("created", drafts.size());
+        object.insert("ids", idArray);
+        write(object, json, QObject::tr("Added %1 cards to %2").arg(drafts.size()).arg(options.deck));
         return 0;
     }
 
@@ -388,6 +618,27 @@ int run(const QStringList &arguments) {
     if (options.command == "import") {
         if (options.path.isEmpty())
             return fail(QObject::tr("Give a file to import"), json);
+        if (options.path.endsWith(QStringLiteral(".json"), Qt::CaseInsensitive)) {
+            QFile file(options.path);
+            if (!file.open(QIODevice::ReadOnly))
+                return fail(QObject::tr("Cannot read: %1").arg(options.path), json);
+            QVector<CardDraft> drafts;
+            QString description;
+            if (!parseCardDrafts(file.readAll(), options.description, &drafts, &description, &error))
+                return fail(error, json);
+            const QString target = options.deck.isEmpty()
+                ? QFileInfo(options.path).completeBaseName() : options.deck;
+            QStringList ids;
+            if (!backend.createCards(target, drafts, &description, &ids, &error))
+                return fail(error, json);
+            QJsonObject object;
+            object.insert("ok", true);
+            object.insert("file", options.path);
+            object.insert("deck", target);
+            object.insert("cards", drafts.size());
+            write(object, json, QObject::tr("Imported %1 cards from %2").arg(drafts.size()).arg(options.path));
+            return 0;
+        }
         if (!backend.importFile(options.path, options.deck, &error))
             return fail(error, json);
         QJsonObject object;

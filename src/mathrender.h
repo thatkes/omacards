@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 // Renders inline LaTeX into rich text. When a TeX toolchain is installed the
 // expression becomes a cached SVG; otherwise a Unicode approximation keeps the
@@ -13,6 +14,8 @@ public:
     explicit MathRenderer(const QString &cacheDirectory = {}, QObject *parent = nullptr);
 
     QString render(const QString &text) const;
+    QString renderPlain(const QString &text) const;
+    QStringList warnings(const QString &text) const;
     QString renderExpression(const QString &expression) const;
     bool hasRenderer() const;
 

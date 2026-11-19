@@ -698,7 +698,7 @@ QString Backend::safeFileName(const QString &name) {
     return result.isEmpty() ? "Deck" : result;
 }
 
-bool Backend::createDeck(const QString &name, QString *error) {
+bool Backend::createDeck(const QString &name, QString *error, const QString &description) {
     const QString clean = name.trimmed();
     if (clean.isEmpty()) {
         if (error) *error = tr("Deck name cannot be empty");
@@ -710,6 +710,7 @@ bool Backend::createDeck(const QString &name, QString *error) {
     }
     Deck deck;
     deck.name = clean;
+    deck.description = description.trimmed();
     deck.path = QDir(m_decksDir).filePath(safeFileName(clean) + ".txt");
     const bool existed = QFileInfo::exists(deck.path);
     const QByteArray before = existed ? readFileBytes(deck.path) : QByteArray();
@@ -718,6 +719,95 @@ bool Backend::createDeck(const QString &name, QString *error) {
     recordHistory(deck.path, before, existed, tr("creating deck %1").arg(clean));
     refresh();
     selectDeck(clean);
+    return true;
+}
+
+bool Backend::setDeckDescription(const QString &deckName, const QString &description, QString *error) {
+    Deck *deck = deckByName(deckName.isEmpty() ? m_currentDeck : deckName);
+    if (!deck) {
+        if (error) *error = tr("No such deck: %1").arg(deckName);
+        return false;
+    }
+    const QString clean = description.trimmed();
+    if (deck->description == clean)
+        return true;
+    const QString previous = deck->description;
+    const QByteArray before = readFileBytes(deck->path);
+    deck->description = clean;
+    if (!DeckIO::save(*deck, error)) {
+        deck->description = previous;
+        return false;
+    }
+    recordHistory(deck->path, before, true, tr("editing deck description"));
+    refresh();
+    return true;
+}
+
+bool Backend::createCards(const QString &deckName, const QVector<CardDraft> &drafts,
+                          const QString *description, QStringList *createdIds, QString *error) {
+    const QString target = deckName.isEmpty() ? m_currentDeck : deckName.trimmed();
+    if (target.isEmpty()) {
+        if (error) *error = tr("Give a deck name");
+        return false;
+    }
+    if (drafts.isEmpty()) {
+        if (error) *error = tr("No cards to add");
+        return false;
+    }
+    for (int i = 0; i < drafts.size(); ++i) {
+        const CardDraft &draft = drafts.at(i);
+        if (draft.question.trimmed().isEmpty()) {
+            if (error) *error = tr("cards[%1] needs a question").arg(i);
+            return false;
+        }
+        const QString type = draft.type.isEmpty() ? QStringLiteral("basic") : draft.type;
+        if (type != QLatin1String("basic") && type != QLatin1String("cloze")) {
+            if (error) *error = tr("cards[%1] has an invalid type: %2").arg(i).arg(draft.type);
+            return false;
+        }
+    }
+
+    if (!deckByName(target) && !createDeck(target, error, description ? *description : QString()))
+        return false;
+    Deck *deck = deckByName(target);
+    if (!deck) {
+        if (error) *error = tr("No such deck: %1").arg(target);
+        return false;
+    }
+
+    const QByteArray before = readFileBytes(deck->path);
+    const QString previousDescription = deck->description;
+    if (description)
+        deck->description = description->trimmed();
+
+    QVector<Card> cards;
+    cards.reserve(drafts.size());
+    for (const CardDraft &draft : drafts) {
+        Card card;
+        card.deck = deck->name;
+        card.question = draft.question.trimmed();
+        card.answer = draft.answer.trimmed();
+        card.type = draft.type == QLatin1String("cloze") ? QStringLiteral("cloze") : QStringLiteral("basic");
+        for (const QString &tag : draft.tags) {
+            const QString clean = tag.trimmed();
+            if (!clean.isEmpty() && !card.tags.contains(clean))
+                card.tags << clean;
+        }
+        card.id = DeckIO::cardId(card);
+        cards << card;
+    }
+
+    deck->cards << cards;
+    if (!DeckIO::save(*deck, error)) {
+        deck->cards.resize(deck->cards.size() - cards.size());
+        deck->description = previousDescription;
+        return false;
+    }
+    if (createdIds)
+        for (const Card &card : cards)
+            createdIds->append(card.id);
+    recordHistory(deck->path, before, true, tr("adding %1 cards").arg(cards.size()));
+    refresh();
     return true;
 }
 

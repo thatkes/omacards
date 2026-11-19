@@ -5,7 +5,7 @@ pkgdesc='Keyboard-first flashcards with FSRS review and endless cram for Omarchy
 arch=('x86_64' 'aarch64')
 license=('MIT')
 depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland' 'xdg-desktop-portal')
-makedepends=('gcc' 'make')
+makedepends=('gcc' 'make' 'desktop-file-utils')
 optdepends=('unzip: import Anki .apkg packages'
             'tectonic: render LaTeX math as SVG'
             'pdftocairo: convert rendered math to SVG')
@@ -15,6 +15,7 @@ sha256sums=()
 build() {
   cd "$startdir/.."
   ./bin/build
+  desktop-file-validate "$startdir/omacards.desktop"
 }
 
 package() {
