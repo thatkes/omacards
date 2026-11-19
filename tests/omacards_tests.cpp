@@ -744,6 +744,17 @@ oops: not a key
         QCOMPARE(backend.correct(), 1);
     }
 
+    void createCardRejectsInvalidType() {
+        QTemporaryDir dir;
+        Backend backend(dir.path(), dir.filePath("state.db"));
+        QString error;
+        QVERIFY(backend.initialize(&error));
+        QVERIFY(backend.createDeck("Test", &error));
+        QVERIFY(!backend.createCard("Test", "Q", "A", "nonsense", {}, &error));
+        QVERIFY(!error.isEmpty());
+        QVERIFY(backend.allDecks().first().cards.isEmpty());
+    }
+
     void backendEditsCardsWithUndo() {
         QTemporaryDir dir;
         Backend backend(dir.path(), dir.filePath("state.db"));

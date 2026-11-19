@@ -774,7 +774,9 @@ bool Backend::createCards(const QString &deckName, const QVector<CardDraft> &dra
     }
 
     deck->cards << cards;
-    if (!commitDeckEdit(deck, original, before, tr("adding %1 cards").arg(cards.size()), error))
+    const QString action = cards.size() == 1 ? tr("adding a card")
+                                             : tr("adding %1 cards").arg(cards.size());
+    if (!commitDeckEdit(deck, original, before, action, error))
         return false;
     if (createdIds)
         for (const Card &card : cards)
@@ -784,30 +786,19 @@ bool Backend::createCards(const QString &deckName, const QVector<CardDraft> &dra
 
 bool Backend::createCard(const QString &deckName, const QString &question, const QString &answer,
                          const QString &type, const QString &tags, QString *error) {
-    Deck *deck = deckByName(deckName.isEmpty() ? m_currentDeck : deckName);
-    if (!deck) {
+    const QString target = deckName.isEmpty() ? m_currentDeck : deckName;
+    // Adding a single card from the UI still requires an existing deck; only
+    // the bulk/import path is allowed to create one implicitly.
+    if (!deckByName(target)) {
         if (error) *error = tr("No such deck: %1").arg(deckName);
         return false;
     }
-    if (question.trimmed().isEmpty()) {
-        if (error) *error = tr("A card needs a question");
-        return false;
-    }
-    Card card;
-    card.deck = deck->name;
-    card.question = question.trimmed();
-    card.answer = answer.trimmed();
-    card.type = Domain::toString(Domain::cardTypeFromString(type));
-    for (const QString &tag : tags.split(',', Qt::SkipEmptyParts)) {
-        const QString clean = tag.trimmed();
-        if (!clean.isEmpty() && !card.tags.contains(clean))
-            card.tags << clean;
-    }
-    card.id = DeckIO::cardId(card);
-    const Deck original = *deck;
-    const QByteArray before = FileHistory::readBytes(deck->path);
-    deck->cards << card;
-    return commitDeckEdit(deck, original, before, tr("adding a card"), error);
+    CardDraft draft;
+    draft.question = question;
+    draft.answer = answer;
+    draft.type = type;
+    draft.tags = tags.split(',', Qt::SkipEmptyParts);
+    return createCards(target, {draft}, nullptr, nullptr, error);
 }
 
 bool Backend::modifyCard(const QString &deckName, const QString &cardId, const QString &question,
@@ -818,14 +809,14 @@ bool Backend::modifyCard(const QString &deckName, const QString &cardId, const Q
         if (error) *error = tr("No such deck: %1").arg(deckName);
         return false;
     }
-    Card *card = nullptr;
-    for (Card &candidate : deck->cards)
-        if (candidate.id == cardId)
-            card = &candidate;
-    if (!card) {
+    const auto found = std::find_if(deck->cards.begin(), deck->cards.end(), [&](const Card &card) {
+        return card.id == cardId;
+    });
+    if (found == deck->cards.end()) {
         if (error) *error = tr("No such card: %1").arg(cardId);
         return false;
     }
+    Card *card = &*found;
     if (question.trimmed().isEmpty()) {
         if (error) *error = tr("A card needs a question");
         return false;
