@@ -13,6 +13,7 @@ HEADERS += \
     src/importer.h \
     src/mathrender.h \
     src/store.h \
+    src/studyqueue.h \
     src/theme.h \
     src/translator.h
 
@@ -26,6 +27,7 @@ SOURCES += \
     src/importer.cpp \
     src/mathrender.cpp \
     src/store.cpp \
+    src/studyqueue.cpp \
     src/theme.cpp \
     src/translator.cpp
 

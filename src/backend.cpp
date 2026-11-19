@@ -8,7 +8,6 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QRandomGenerator>
 #include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
@@ -234,7 +233,7 @@ int Backend::availableCount(const QString &deckName) const {
 void Backend::refreshDueCount() {
     // Pending Again repeats are not "due" in the database yet, but they are
     // still work waiting in this session.
-    m_dueCount = availableCount() + m_reviewAgainNotBefore.size();
+    m_dueCount = availableCount() + m_queue.pendingRepeatCount();
     emit dueCountChanged();
 }
 
@@ -282,33 +281,26 @@ void Backend::rebuildQueue() {
     // A watcher refresh can rebuild the queue while a repeat is pending. Keep
     // those deadlines for cards that are still available; explicit deck and
     // mode changes clear them instead.
-    const QHash<QString, qint64> pending = m_reviewAgainNotBefore;
-    m_reviewQueue.clear();
-    m_reviewAgainNotBefore.clear();
+    const QHash<QString, qint64> pending = m_queue.pendingRepeats();
     m_reviewAgainTimer.stop();
-    m_cramQueue.clear();
     m_currentId.clear();
 
     const Deck *deck = deckByName(m_currentDeck);
     if (deck && Domain::modeFromString(m_mode) == StudyMode::Cram) {
-        for (int i = 0; i < deck->cards.size(); ++i)
-            m_cramQueue.append(CramEntry{deck->cards.at(i).id, 0, i});
-        std::shuffle(m_cramQueue.begin(), m_cramQueue.end(), *QRandomGenerator::global());
+        m_queue.buildCram(deck->cards);
     } else if (deck) {
         const Availability available = availability(m_currentDeck);
         // Due reviews come first so lapses are not hidden behind new material;
         // new cards then follow in deck-file order up to the daily limit.
+        QStringList dueIds;
+        QStringList freshIds;
         for (const Card &card : available.due)
-            m_reviewQueue << card.id;
+            dueIds << card.id;
         for (const Card &card : available.fresh)
-            m_reviewQueue << card.id;
-        for (auto it = pending.constBegin(); it != pending.constEnd(); ++it) {
-            // The repeat's FSRS due date is in the future, so it is not part
-            // of the database-derived queue; keep it as session-only work.
-            if (!m_reviewQueue.contains(it.key()))
-                m_reviewQueue << it.key();
-            m_reviewAgainNotBefore.insert(it.key(), it.value());
-        }
+            freshIds << card.id;
+        m_queue.buildReview(dueIds, freshIds, pending);
+    } else {
+        m_queue.clear();
     }
 
     refreshDueCount();
@@ -317,87 +309,51 @@ void Backend::rebuildQueue() {
 
 void Backend::scheduleNextRepeat() {
     m_reviewAgainTimer.stop();
-    if (Domain::modeFromString(m_mode) != StudyMode::Review || m_reviewQueue.isEmpty())
+    if (Domain::modeFromString(m_mode) != StudyMode::Review)
         return;
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    qint64 next = 0;
-    bool haveNext = false;
-    for (const QString &id : m_reviewQueue) {
-        const auto it = m_reviewAgainNotBefore.constFind(id);
-        if (it != m_reviewAgainNotBefore.cend() && (!haveNext || it.value() < next)) {
-            next = it.value();
-            haveNext = true;
-        }
-    }
-    if (haveNext)
-        m_reviewAgainTimer.start(qMax<qint64>(1, next - now));
+    const qint64 wait = m_queue.nextWait(QDateTime::currentMSecsSinceEpoch());
+    if (wait > 0)
+        m_reviewAgainTimer.start(wait);
 }
 
 void Backend::presentCard() {
     m_showingAnswer = false;
     m_waitingForRepeat = false;
-    if (Domain::modeFromString(m_mode) == StudyMode::Cram) {
-        if (m_cramQueue.isEmpty()) {
-            m_currentId.clear();
-            m_question.clear();
-            m_answer.clear();
-            setStatus(tr("No cards yet. Press N to add one."));
-            emit cardChanged();
-            return;
-        }
-        int best = 0;
-        for (int i = 1; i < m_cramQueue.size(); ++i)
-            if (m_cramQueue.at(i).next < m_cramQueue.at(best).next)
-                best = i;
-        m_currentId = m_cramQueue.at(best).cardId;
-        m_box = m_cramQueue.at(best).box + 1;
-    } else {
-        if (m_reviewQueue.isEmpty()) {
-            m_currentId.clear();
-            m_question.clear();
-            m_answer.clear();
-            m_reviewAgainTimer.stop();
-            setStatus(tr("All caught up. Press C to cram or N to add a card."));
-            emit cardChanged();
-            return;
-        }
+    const bool cram = Domain::modeFromString(m_mode) == StudyMode::Cram;
+    QString nextId;
+    int nextBox = 0;
+    const StudyQueue::Next next = m_queue.next(
+        QDateTime::currentMSecsSinceEpoch(), &nextId, nullptr, &nextBox);
 
-        // Again cards stay in the session queue but wait a short beat before
-        // they are shown, so other cards can be reviewed in the meantime.
-        const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        int ready = -1;
-        for (int i = 0; i < m_reviewQueue.size(); ++i) {
-            const auto it = m_reviewAgainNotBefore.constFind(m_reviewQueue.at(i));
-            if (it == m_reviewAgainNotBefore.cend() || it.value() <= now) {
-                ready = i;
-                break;
-            }
-        }
-        if (ready < 0) {
-            scheduleNextRepeat();
-            m_waitingForRepeat = true;
-            m_currentId.clear();
-            m_question.clear();
-            m_answer.clear();
-            setStatus(tr("Repeating a card in a moment…"));
-            emit cardChanged();
-            return;
-        }
-        m_currentId = m_reviewQueue.takeAt(ready);
-        m_reviewAgainNotBefore.remove(m_currentId);
-        scheduleNextRepeat();
+    if (next == StudyQueue::Next::Finished) {
+        m_currentId.clear();
+        m_question.clear();
+        m_answer.clear();
+        m_reviewAgainTimer.stop();
+        setStatus(cram ? tr("No cards yet. Press N to add one.")
+                       : tr("All caught up. Press C to cram or N to add a card."));
+        emit cardChanged();
+        return;
     }
+    if (next == StudyQueue::Next::Waiting) {
+        scheduleNextRepeat();
+        m_waitingForRepeat = true;
+        m_currentId.clear();
+        m_question.clear();
+        m_answer.clear();
+        setStatus(tr("Repeating a card in a moment…"));
+        emit cardChanged();
+        return;
+    }
+
+    m_currentId = nextId;
+    if (cram)
+        m_box = nextBox;
+    scheduleNextRepeat();
 
     const Card *card = cardById(m_currentId);
     if (!card) {
-        if (m_mode == "cram") {
-            m_cramQueue.erase(std::remove_if(m_cramQueue.begin(), m_cramQueue.end(), [this](const CramEntry &entry) {
-                return entry.cardId == m_currentId;
-            }), m_cramQueue.end());
-        } else {
-            m_reviewQueue.removeAll(m_currentId);
-            m_reviewAgainNotBefore.remove(m_currentId);
-        }
+        m_queue.remove(m_currentId);
         m_currentId.clear();
         presentCard();
         return;
@@ -662,7 +618,6 @@ void Backend::setMode(const QString &mode) {
     m_mode = Domain::toString(Domain::modeFromString(mode));
     m_reviewed = 0;
     m_correct = 0;
-    m_cramReviews = 0;
     emit modeChanged();
     emit statsChanged();
     rebuildQueue();
@@ -717,31 +672,17 @@ void Backend::answerReview(Rating rating) {
         m_snapshot.newBudget = qMax(0, m_snapshot.newBudget - (wasNew ? 1 : 0));
         m_snapshot.now = now;
     }
-    if (!m_reviewQueue.isEmpty() && m_reviewQueue.first() == card->id)
-        m_reviewQueue.removeFirst();
-    else
-        m_reviewQueue.removeAll(card->id);
+    m_queue.remove(card->id);
     if (rating == Rating::Again) {
         // Keep the FSRS due date above, but give the card one more appearance
         // in this sitting after a short break.
-        m_reviewAgainNotBefore.insert(card->id, now + m_reviewAgainDelayMs);
-        m_reviewQueue.append(card->id);
+        m_queue.repeatAfter(card->id, now + m_reviewAgainDelayMs);
     }
     refreshDueCount();
 }
 
 void Backend::answerCram(Rating rating) {
-    static const int intervals[] = {1, 2, 4, 8, 16};
-    for (int i = 0; i < m_cramQueue.size(); ++i) {
-        if (m_cramQueue.at(i).cardId != m_currentId)
-            continue;
-        CramEntry entry = m_cramQueue.takeAt(i);
-        entry.box = rating == Rating::Again ? 0 : qMin(4, entry.box + 1);
-        entry.next = ++m_cramReviews + intervals[entry.box];
-        m_cramQueue.append(entry);
-        m_box = entry.box + 1;
-        break;
-    }
+    m_queue.advanceCram(m_currentId, rating, &m_box);
 }
 
 void Backend::showNext() {

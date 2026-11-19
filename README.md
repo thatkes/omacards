@@ -136,6 +136,7 @@ src/domain.{h,cpp}       shared mode, rating and card-type values
 src/fsrs.{h,cpp}         FSRS-5 model (Again=1, Good=3)
 src/deck.{h,cpp}         plain-text deck parser/writer
 src/store.{h,cpp}        SQLite sidecar
+src/studyqueue.{h,cpp}   in-session review/cram ordering
 src/mathrender.{h,cpp}   LaTeX to SVG with Unicode fallback
 src/main.cpp             app setup, system tray, CLI dispatch
 src/Main.qml             window, keyboard, layout

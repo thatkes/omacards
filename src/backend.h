@@ -5,6 +5,7 @@
 #include "fsrs.h"
 #include "mathrender.h"
 #include "store.h"
+#include "studyqueue.h"
 
 #include <QByteArray>
 #include <QFileSystemWatcher>
@@ -18,12 +19,6 @@
 namespace DeckImport {
 struct Result;
 }
-
-struct CramEntry {
-    QString cardId;
-    int box = 0; // 0..4, intervals of 1,2,4,8,16 cards
-    int next = 0;
-};
 
 class Backend : public QObject {
     Q_OBJECT
@@ -225,9 +220,7 @@ private:
     QString m_cardFilter;
     QStringList m_deckNames;
     QVector<Deck> m_decks;
-    QVector<CramEntry> m_cramQueue;
-    QStringList m_reviewQueue;
-    QHash<QString, qint64> m_reviewAgainNotBefore;
+    StudyQueue m_queue;
     QTimer m_reviewAgainTimer;
     QVector<FileSnapshot> m_undoStack;
     QVector<FileSnapshot> m_redoStack;
@@ -242,7 +235,6 @@ private:
     int m_reviewed = 0;
     int m_correct = 0;
     int m_box = 0;
-    int m_cramReviews = 0;
     int m_newPerDay = 20;
     double m_desiredRetention = 0.9;
     bool m_showingAnswer = false;
