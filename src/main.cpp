@@ -72,6 +72,12 @@ int main(int argc, char *argv[]) {
     if (!backend.initialize(&error))
         qWarning() << "omacards:" << error;
 
+    const auto syncMathColors = [&theme, &backend] {
+        backend.setMathColors(theme.foreground(), theme.accent());
+    };
+    QObject::connect(&theme, &Theme::changed, &backend, syncMathColors);
+    syncMathColors();
+
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     engine.rootContext()->setContextProperty("translator", &translator);

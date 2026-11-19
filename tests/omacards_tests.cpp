@@ -324,6 +324,104 @@ oops: not a key
         QCOMPARE(renderer.warnings("\\(\\foobar{x}\\)").size(), 1);
     }
 
+    void tectonicRendererUsesSupportedFlags() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString bin = dir.filePath("bin");
+        const QString cache = dir.filePath("cache");
+        const QString argsLog = dir.filePath("args.log");
+        QVERIFY(QDir().mkpath(bin));
+        QVERIFY(QDir().mkpath(cache));
+
+        const auto makeTool = [&](const QString &name, const QByteArray &script) {
+            const QString path = bin + "/" + name;
+            QVERIFY(writeFile(path, script));
+            QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner
+                                           | QFile::ReadGroup | QFile::ExeGroup
+                                           | QFile::ReadOther | QFile::ExeOther);
+        };
+        const auto script = [](const QStringList &lines) {
+            return (lines.join('\n') + '\n').toUtf8();
+        };
+        makeTool("tectonic", script({
+            "#!/bin/sh",
+            "printf 'tectonic' >> \"$OMACARDS_TEST_ARGS\"",
+            "for arg do printf ' %s' \"$arg\" >> \"$OMACARDS_TEST_ARGS\"; done",
+            "printf '\\n' >> \"$OMACARDS_TEST_ARGS\"",
+            "cached=0",
+            "for arg do if [ \"$arg\" = \"--only-cached\" ]; then cached=1; fi; done",
+            "if [ \"$cached\" = \"1\" ] && [ \"$OMACARDS_TEST_MISSING_BUNDLE\" = \"1\" ]; then exit 1; fi",
+            "out=",
+            "tex=",
+            "for arg do",
+            "    case \"$arg\" in --outdir=*) out=${arg#--outdir=} ;; esac",
+            "    tex=\"$arg\"",
+            "done",
+            "base=$(basename \"$tex\" .tex)",
+            "printf '%%PDF-1.4\\n' > \"$out/$base.pdf\"",
+        }));
+        makeTool("pdftocairo", script({
+            "#!/bin/sh",
+            "printf 'pdftocairo' >> \"$OMACARDS_TEST_ARGS\"",
+            "for arg do printf ' %s' \"$arg\" >> \"$OMACARDS_TEST_ARGS\"; done",
+            "printf '\\n' >> \"$OMACARDS_TEST_ARGS\"",
+            "printf '<svg xmlns=\"http://www.w3.org/2000/svg\"><g fill=\"rgb(0%%, 0%%, 0%%)\"/></svg>\\n' > \"$3\"",
+        }));
+
+        struct PathGuard {
+            QByteArray original;
+            explicit PathGuard(const QString &binDir)
+                : original(qgetenv("PATH")) {
+                qputenv("PATH", (binDir + ":" + QString::fromLocal8Bit(original)).toLocal8Bit());
+            }
+            ~PathGuard() { qputenv("PATH", original); }
+        } pathGuard(bin);
+        qputenv("OMACARDS_TEST_ARGS", argsLog.toUtf8());
+        qputenv("OMACARDS_TEST_MISSING_BUNDLE", "1");
+        struct TestVarGuard {
+            ~TestVarGuard() {
+                qunsetenv("OMACARDS_TEST_ARGS");
+                qunsetenv("OMACARDS_TEST_MISSING_BUNDLE");
+            }
+        } varGuard;
+
+        MathRenderer renderer(cache);
+        QVERIFY(renderer.hasRenderer());
+        QVERIFY(renderer.renderExpression("x^2").startsWith("<img "));
+        QVERIFY(!QDir(cache).entryList({"*.svg"}).isEmpty());
+
+        const QStringList texFiles = QDir(cache + "/tex").entryList({"*.tex"});
+        QVERIFY(!texFiles.isEmpty());
+        QFile texFile(cache + "/tex/" + texFiles.first());
+        QVERIFY(texFile.open(QIODevice::ReadOnly));
+        const QString tex = QString::fromUtf8(texFile.readAll());
+        QVERIFY(tex.contains("\\hoffset=-1in"));
+        QVERIFY(tex.contains("\\pdfpagewidth=\\wd0"));
+        QVERIFY(tex.contains("\\shipout\\vbox"));
+
+        // Ink is part of the cache key so themed equations do not reuse black SVGs.
+        MathRenderer themed(cache);
+        QVERIFY(themed.renderExpression("x^2", "#c0caf5").startsWith("<img "));
+        bool foundThemedSvg = false;
+        for (const QString &name : QDir(cache).entryList({"*.svg"})) {
+            QFile svg(cache + "/" + name);
+            if (!svg.open(QIODevice::ReadOnly))
+                continue;
+            const QString content = QString::fromUtf8(svg.readAll());
+            if (content.contains("#c0caf5") && !content.contains("rgb(0%, 0%, 0%)"))
+                foundThemedSvg = true;
+        }
+        QVERIFY(foundThemedSvg);
+
+        QFile logFile(argsLog);
+        QVERIFY(logFile.open(QIODevice::ReadOnly));
+        const QString log = QString::fromUtf8(logFile.readAll());
+        QVERIFY(log.contains("tectonic --untrusted --only-cached --outdir="));
+        QVERIFY(log.contains("tectonic --untrusted --outdir="));
+        QVERIFY(!log.contains("-no-shell-escape"));
+        QVERIFY(log.contains("pdftocairo -svg "));
+    }
+
     void storeRoundTripsState() {
         QTemporaryDir dir;
         Store store(dir.filePath("state.db"));

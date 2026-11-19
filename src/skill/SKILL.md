@@ -136,10 +136,17 @@ a notation that survives that fallback:
 - Unknown macros stay visible and are reported by `check --math`; they are
   advisory and do not flip `ok`.
 - Installing `tectonic` + `pdftocairo` enables real LaTeX SVG rendering; omit
-  that dependency to keep the Unicode fallback as the default.
+  those dependencies to keep the Unicode fallback as the default. On Arch/Omarchy:
+  `sudo pacman -S tectonic poppler` (poppler provides `pdftocairo`), then prewarm
+  the TeX bundle once with
+  `printf '\\documentclass{article}\n\\begin{document}$x^2$\\end{document}\n' > /tmp/warm.tex && tectonic --untrusted --outdir=/tmp /tmp/warm.tex`.
+  Restart the app after installing. `omacards check --json` reports
+  `math: LaTeX (SVG)` when the renderer is active; SVGs cache in
+  `~/.cache/omacards/math`.
 
 Check how a card actually renders with `omacards preview --deck X --format text
---json` before authoring many similar cards.
+--json` before authoring many similar cards. Use `--format html` with a running
+LaTeX toolchain to inspect the generated `<img>` references.
 
 ## Validation loop
 

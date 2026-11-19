@@ -2,6 +2,7 @@
 // TeX is untrusted card content, so shell escape is always disabled.
 #include "mathrender.h"
 
+#include <QColor>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -102,7 +103,7 @@ BraceGroup readGroup(const QString &text, int open) {
 MathRenderer::MathRenderer(const QString &cacheDirectory, QObject *parent)
     : QObject(parent),
       m_cache(cacheDirectory.isEmpty()
-                  ? QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/math"
+                  ? QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/omacards/math"
                   : cacheDirectory) {
 }
 
@@ -132,8 +133,8 @@ bool MathRenderer::hasRenderer() const {
     return m_available;
 }
 
-QString MathRenderer::render(const QString &text) const {
-    return mapMath(text, [this](const QString &expression) { return renderExpression(expression); }, true);
+QString MathRenderer::render(const QString &text, const QString &ink) const {
+    return mapMath(text, [this, ink](const QString &expression) { return renderExpression(expression, ink); }, true);
 }
 
 QString MathRenderer::renderPlain(const QString &text) const {
@@ -159,8 +160,8 @@ QStringList MathRenderer::warnings(const QString &text) const {
     return result;
 }
 
-QString MathRenderer::renderExpression(const QString &expression) const {
-    const QString image = renderLatex(expression);
+QString MathRenderer::renderExpression(const QString &expression, const QString &ink) const {
+    const QString image = renderLatex(expression, ink);
     if (!image.isEmpty())
         return QString("<img src='file://%1' alt='%2' style='vertical-align: middle;'>")
             .arg(image, expression.toHtmlEscaped());
@@ -168,56 +169,115 @@ QString MathRenderer::renderExpression(const QString &expression) const {
         .arg(unicodeMath(expression).toHtmlEscaped());
 }
 
-QString MathRenderer::renderLatex(const QString &expression) const {
+namespace {
+QString normalizeInk(const QString &ink) {
+    if (ink.isEmpty())
+        return "#000000";
+    const QColor color(ink);
+    return color.isValid() ? color.name() : QStringLiteral("#000000");
+}
+
+void colorizeSvg(const QString &path, const QString &ink) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return;
+    QString svg = QString::fromUtf8(file.readAll());
+    file.close();
+    static const QRegularExpression black(
+        R"re(rgb\(\s*0%\s*,\s*0%\s*,\s*0%\s*\)|#(?:000|000000)\b|\bblack\b)re",
+        QRegularExpression::CaseInsensitiveOption);
+    svg.replace(black, ink);
+    if (file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        file.write(svg.toUtf8());
+}
+} // namespace
+
+QString MathRenderer::renderLatex(const QString &expression, const QString &ink) const {
     detect();
     if (!m_available)
         return {};
 
-    const QString base = "eq-" + QString::fromLatin1(
-        QCryptographicHash::hash(expression.toUtf8(), QCryptographicHash::Sha256).toHex().left(20));
+    // The cache key includes the ink so question/answer colors never share a
+    // tinted file. The prefix also invalidates SVGs from the old full-page
+    // renderer, which made equations tiny inside a 612pt page.
+    const QString key = expression + "\n" + normalizeInk(ink);
+    const QString base = "eq2-" + QString::fromLatin1(
+        QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha256).toHex().left(20));
     const QString svgPath = m_cache + "/" + base + ".svg";
     if (QFileInfo::exists(svgPath))
         return svgPath;
 
     const QString texDir = m_cache + "/tex";
     QDir().mkpath(texDir);
+    QFile::remove(svgPath);
     const QString stem = texDir + "/" + base;
+    // Typeset directly into a page sized to the expression. Shipout bypasses
+    // the article output routine, so pdftocairo gets a tight page instead of a
+    // letter-sized one with the formula lost in the top-left corner.
     const QString tex = QString(
         "\\documentclass[12pt]{article}\n"
         "\\usepackage{amsmath,amssymb}\n"
         "\\pagestyle{empty}\n"
-        "\\begin{document}\n$%1$\n\\end{document}\n").arg(expression);
+        "\\begin{document}\n"
+        "\\hoffset=-1in \\voffset=-1in\n"
+        "\\setbox0=\\hbox{$\\displaystyle %1$}\n"
+        "\\pdfpagewidth=\\wd0 \\advance\\pdfpagewidth by 8pt\n"
+        "\\pdfpageheight=\\ht0 \\advance\\pdfpageheight by \\dp0 \\advance\\pdfpageheight by 8pt\n"
+        "\\shipout\\vbox{\\kern4pt\\hbox{\\kern4pt\\box0\\kern4pt}}\n"
+        "\\end{document}\n").arg(expression);
     QFile file(stem + ".tex");
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
         return {};
     file.write(tex.toUtf8());
     file.close();
 
-    auto run = [](const QString &program, const QStringList &arguments) {
+    constexpr int localTimeoutMs = 5000;
+    constexpr int downloadTimeoutMs = 120000; // Tectonic fetches its TeX bundle on first use.
+    auto run = [](const QString &program, const QStringList &arguments, int timeoutMs) {
         QProcess process;
         process.setWorkingDirectory(QFileInfo(arguments.last()).absolutePath());
         process.start(program, arguments);
-        return process.waitForFinished(2000) && process.exitCode() == 0;
+        return process.waitForFinished(timeoutMs) && process.exitCode() == 0;
     };
 
     bool ok = false;
     if (m_converter == "pdf") {
-        const QString engine = QStandardPaths::findExecutable("tectonic");
+        const QString tectonic = QStandardPaths::findExecutable("tectonic");
         const QString pdf = stem + ".pdf";
-        ok = run(engine.isEmpty() ? QStandardPaths::findExecutable("pdflatex") : engine,
-                 {engine.isEmpty() ? QString("-interaction=nonstopmode") : QString("--outdir=" + QFileInfo(stem).absolutePath()),
-                  "-no-shell-escape", stem + ".tex"})
-             && QFileInfo::exists(pdf)
-             && run(QStandardPaths::findExecutable("pdftocairo"), {"-svg", pdf, svgPath});
+        const QString outputDirectory = QFileInfo(stem).absolutePath();
+        QFile::remove(pdf);
+        if (!tectonic.isEmpty()) {
+            // Tectonic uses --untrusted (not pdflatex's -no-shell-escape) to disable
+            // shell escape. Prefer its cached-only mode so normal renders stay fast;
+            // fall back to one download-enabled pass when the bundle is missing.
+            ok = run(tectonic, {"--untrusted", "--only-cached", "--outdir=" + outputDirectory, stem + ".tex"},
+                     localTimeoutMs)
+                 && QFileInfo::exists(pdf);
+            if (!ok) {
+                QFile::remove(pdf);
+                ok = run(tectonic, {"--untrusted", "--outdir=" + outputDirectory, stem + ".tex"}, downloadTimeoutMs)
+                     && QFileInfo::exists(pdf);
+            }
+        } else {
+            ok = run(QStandardPaths::findExecutable("pdflatex"),
+                     {"-interaction=nonstopmode", "-no-shell-escape", stem + ".tex"}, localTimeoutMs)
+                 && QFileInfo::exists(pdf);
+        }
+        ok = ok && run(QStandardPaths::findExecutable("pdftocairo"), {"-svg", pdf, svgPath}, localTimeoutMs);
     } else {
         const QString dvi = stem + ".dvi";
+        QFile::remove(dvi);
         ok = run(QStandardPaths::findExecutable("latex"),
                  {"-interaction=nonstopmode", "-no-shell-escape", "-output-directory=" + QFileInfo(stem).absolutePath(),
-                  stem + ".tex"})
+                  stem + ".tex"}, localTimeoutMs)
              && QFileInfo::exists(dvi)
-             && run(QStandardPaths::findExecutable("dvisvgm"), {"--no-fonts", "-o", svgPath, dvi});
+             && run(QStandardPaths::findExecutable("dvisvgm"), {"--no-fonts", "-o", svgPath, dvi}, localTimeoutMs);
     }
-    return ok && QFileInfo::exists(svgPath) ? svgPath : QString();
+    if (ok && QFileInfo::exists(svgPath)) {
+        colorizeSvg(svgPath, normalizeInk(ink));
+        return svgPath;
+    }
+    return {};
 }
 
 QString unicodeMath(const QString &expression) {

@@ -63,6 +63,9 @@ public:
 
     bool initialize(QString *error = nullptr);
 
+    // Keeps equations in the same ink as the surrounding QML labels.
+    void setMathColors(const QString &questionColor, const QString &answerColor);
+
     QStringList decks() const { return m_deckNames; }
     QString currentDeck() const { return m_currentDeck; }
     QString mode() const { return m_mode; }
@@ -197,6 +200,8 @@ private:
     QString m_mode = "review";
     QString m_question;
     QString m_answer;
+    QString m_questionInk = "#000000";
+    QString m_answerInk = "#000000";
     QString m_status;
     QString m_currentId;
     QString m_cardFilter;

@@ -106,6 +106,19 @@ bool Backend::initialize(QString *error) {
     return true;
 }
 
+void Backend::setMathColors(const QString &questionColor, const QString &answerColor) {
+    if (m_questionInk == questionColor && m_answerInk == answerColor)
+        return;
+    m_questionInk = questionColor;
+    m_answerInk = answerColor;
+    const Card *card = cardById(m_currentId);
+    if (!card)
+        return;
+    m_question = m_math.render(DeckIO::displayQuestion(*card), m_questionInk);
+    m_answer = m_math.render(DeckIO::displayAnswer(*card), m_answerInk);
+    emit cardChanged();
+}
+
 void Backend::load() {
     QString error;
     const auto decks = DeckIO::loadAll(m_decksDir, &error);
@@ -351,8 +364,8 @@ void Backend::presentCard() {
         presentCard();
         return;
     }
-    m_question = m_math.render(DeckIO::displayQuestion(*card));
-    m_answer = m_math.render(DeckIO::displayAnswer(*card));
+    m_question = m_math.render(DeckIO::displayQuestion(*card), m_questionInk);
+    m_answer = m_math.render(DeckIO::displayAnswer(*card), m_answerInk);
 
     if (m_mode == "review") {
         const auto state = m_store.states().value(card->id);

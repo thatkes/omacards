@@ -21,6 +21,19 @@ Deck content lives in plain text files under `~/.local/share/omacards/decks/`, s
 
 Requirements: Qt 6 (base, declarative, wayland, SQL), qmake6, gcc/make. Optional: `unzip` for Anki `.apkg` imports, `tectonic`/`pdftocairo` or `latex`/`dvisvgm` for LaTeX math. Without a TeX toolchain, math is rendered as Unicode.
 
+## LaTeX math
+
+Math inside `\(...\)` or `$$...$$` becomes a cached SVG when a TeX toolchain is available. On Omarchy/Arch:
+
+```sh
+sudo pacman -S tectonic poppler   # poppler provides pdftocairo
+mkdir -p /tmp/omacards-tex
+printf '\\documentclass{article}\n\\begin{document}$x^2$\\end{document}\n' > /tmp/omacards-tex/warm.tex
+tectonic --untrusted --outdir=/tmp/omacards-tex /tmp/omacards-tex/warm.tex
+```
+
+The one-off `tectonic` run downloads the TeX bundle into `~/.cache/tectonic`; doing it ahead of time avoids a long pause on the first card. Normal renders then use Tectonic's `--only-cached` mode. Restart omacards after installing so it detects the toolchain, and confirm with `omacards check --json` (`"math": "LaTeX (SVG)"`). SVGs are cached under `~/.cache/omacards/math`; delete that directory to force a re-render.
+
 ## Keyboard shortcuts
 
 | Key | Action |

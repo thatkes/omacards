@@ -13,10 +13,12 @@ class MathRenderer : public QObject {
 public:
     explicit MathRenderer(const QString &cacheDirectory = {}, QObject *parent = nullptr);
 
-    QString render(const QString &text) const;
+    // `ink` colors the rendered SVG; an empty value keeps the renderer's
+    // neutral black (used by headless output).
+    QString render(const QString &text, const QString &ink = {}) const;
     QString renderPlain(const QString &text) const;
     QStringList warnings(const QString &text) const;
-    QString renderExpression(const QString &expression) const;
+    QString renderExpression(const QString &expression, const QString &ink = {}) const;
     bool hasRenderer() const;
 
 private:
@@ -26,7 +28,7 @@ private:
     mutable QString m_converter; // "pdf" or "dvi"
 
     void detect() const;
-    QString renderLatex(const QString &expression) const;
+    QString renderLatex(const QString &expression, const QString &ink) const;
 };
 
 QString unicodeMath(const QString &expression);
