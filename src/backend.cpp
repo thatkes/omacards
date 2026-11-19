@@ -37,6 +37,13 @@ QString replaceRegex(const QString &text, const QRegularExpression &expression, 
     return out + text.mid(last);
 }
 
+qint64 reviewAgainDelayMs() {
+    const QByteArray override = qgetenv("OMACARDS_AGAIN_DELAY_MS");
+    bool ok = false;
+    const qint64 value = override.toLongLong(&ok);
+    return ok ? qBound<qint64>(qint64(0), value, qint64(600000)) : qint64(60000);
+}
+
 QString defaultDataDirectory() {
     // Use a deterministic base directory that does not depend on whether
     // QCoreApplication::setOrganizationName() has been called yet: the GUI
@@ -72,6 +79,10 @@ Backend::Backend(const QString &decksDirectory, const QString &databasePath, QOb
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, [this] { m_reloadTimer.start(); });
     connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, [this] { m_reloadTimer.start(); });
     connect(&m_reloadTimer, &QTimer::timeout, this, &Backend::refresh);
+
+    m_reviewAgainDelayMs = reviewAgainDelayMs();
+    m_reviewAgainTimer.setSingleShot(true);
+    connect(&m_reviewAgainTimer, &QTimer::timeout, this, &Backend::presentCard);
 }
 
 bool Backend::initialize(QString *error) {
@@ -193,6 +204,13 @@ int Backend::availableCount(const QString &deckName) const {
     return count;
 }
 
+void Backend::refreshDueCount() {
+    // Pending Again repeats are not "due" in the database yet, but they are
+    // still work waiting in this session.
+    m_dueCount = availableCount() + m_reviewAgainNotBefore.size();
+    emit dueCountChanged();
+}
+
 void Backend::refresh() {
     load();
     rebuildQueue();
@@ -278,6 +296,8 @@ QVariantList Backend::deckSummaries() const {
 
 void Backend::rebuildQueue() {
     m_reviewQueue.clear();
+    m_reviewAgainNotBefore.clear();
+    m_reviewAgainTimer.stop();
     m_cramQueue.clear();
     m_currentId.clear();
 
@@ -322,13 +342,13 @@ void Backend::rebuildQueue() {
             m_reviewQueue << id;
     }
 
-    m_dueCount = availableCount();
-    emit dueCountChanged();
+    refreshDueCount();
     presentCard();
 }
 
 void Backend::presentCard() {
     m_showingAnswer = false;
+    m_waitingForRepeat = false;
     if (m_mode == "cram") {
         if (m_cramQueue.isEmpty()) {
             m_currentId.clear();
@@ -349,11 +369,47 @@ void Backend::presentCard() {
             m_currentId.clear();
             m_question.clear();
             m_answer.clear();
+            m_reviewAgainTimer.stop();
             setStatus(tr("All caught up. Press C to cram or N to add a card."));
             emit cardChanged();
             return;
         }
-        m_currentId = m_reviewQueue.first();
+
+        // Again cards stay in the session queue but wait a short beat before
+        // they are shown, so other cards can be reviewed in the meantime.
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        int ready = -1;
+        for (int i = 0; i < m_reviewQueue.size(); ++i) {
+            const auto it = m_reviewAgainNotBefore.constFind(m_reviewQueue.at(i));
+            if (it == m_reviewAgainNotBefore.cend() || it.value() <= now) {
+                ready = i;
+                break;
+            }
+        }
+        if (ready < 0) {
+            m_reviewAgainTimer.stop();
+            bool haveNext = false;
+            qint64 next = now;
+            for (const QString &id : m_reviewQueue) {
+                const auto it = m_reviewAgainNotBefore.constFind(id);
+                if (it != m_reviewAgainNotBefore.cend() && (!haveNext || it.value() < next)) {
+                    next = it.value();
+                    haveNext = true;
+                }
+            }
+            if (haveNext)
+                m_reviewAgainTimer.start(qMax<qint64>(1, next - now));
+            m_waitingForRepeat = true;
+            m_currentId.clear();
+            m_question.clear();
+            m_answer.clear();
+            setStatus(tr("Repeating a card in a moment…"));
+            emit cardChanged();
+            return;
+        }
+        m_currentId = m_reviewQueue.takeAt(ready);
+        m_reviewAgainNotBefore.remove(m_currentId);
+        m_reviewAgainTimer.stop();
     }
 
     const Card *card = cardById(m_currentId);
@@ -364,6 +420,7 @@ void Backend::presentCard() {
             }), m_cramQueue.end());
         } else {
             m_reviewQueue.removeAll(m_currentId);
+            m_reviewAgainNotBefore.remove(m_currentId);
         }
         m_currentId.clear();
         presentCard();
@@ -688,8 +745,13 @@ void Backend::answerReview(int rating) {
         m_reviewQueue.removeFirst();
     else
         m_reviewQueue.removeAll(card->id);
-    m_dueCount = availableCount();
-    emit dueCountChanged();
+    if (rating == 1) {
+        // Keep the FSRS due date above, but give the card one more appearance
+        // in this sitting after a short break.
+        m_reviewAgainNotBefore.insert(card->id, now + m_reviewAgainDelayMs);
+        m_reviewQueue.append(card->id);
+    }
+    refreshDueCount();
 }
 
 void Backend::answerCram(int rating) {

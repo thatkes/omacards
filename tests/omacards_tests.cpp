@@ -1,3 +1,4 @@
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -794,6 +795,52 @@ oops: not a key
         QVERIFY(reopened.initialize(&error));
         QCOMPARE(reopened.newPerDay(), 3);
         QCOMPARE(reopened.desiredRetention(), 0.85);
+    }
+
+    void backendRequeuesAgainInSameSession() {
+        QTemporaryDir dir;
+        const QByteArray previousDelay = qgetenv("OMACARDS_AGAIN_DELAY_MS");
+        qputenv("OMACARDS_AGAIN_DELAY_MS", "20");
+        {
+            Backend backend(dir.path(), dir.filePath("state.db"));
+            QString error;
+            QVERIFY(backend.initialize(&error));
+            QVERIFY(backend.createDeck("Repeats", &error));
+            QVERIFY(backend.createCard("Repeats", "Q1", "A1", "basic", {}, &error));
+            QVERIFY(backend.createCard("Repeats", "Q2", "A2", "basic", {}, &error));
+            backend.selectDeck("Repeats");
+            QVERIFY(backend.question().contains("Q1"));
+
+            backend.flip();
+            backend.rate(1); // Again: Q1 waits, Q2 is shown next.
+            QVERIFY(backend.hasCard());
+            QVERIFY(backend.question().contains("Q2"));
+
+            backend.flip();
+            backend.rate(3); // Good: the waiting Q1 comes back after the break.
+            QVERIFY(backend.waitingForRepeat());
+            QTRY_VERIFY_WITH_TIMEOUT(backend.question().contains("Q1"), 2000);
+            QVERIFY(!backend.waitingForRepeat());
+
+            const QVariantList cards = backend.cardList();
+            QVariantMap againCard;
+            for (const QVariant &entry : cards) {
+                const QVariantMap map = entry.toMap();
+                if (map.value("question").toString() == "Q1")
+                    againCard = map;
+            }
+            QVERIFY(!againCard.isEmpty());
+            QCOMPARE(againCard.value("reps").toInt(), 1);
+            QVERIFY(againCard.value("due").toLongLong() > QDateTime::currentMSecsSinceEpoch());
+
+            backend.flip();
+            backend.rate(3);
+            QVERIFY(!backend.hasCard());
+        }
+        if (previousDelay.isNull())
+            qunsetenv("OMACARDS_AGAIN_DELAY_MS");
+        else
+            qputenv("OMACARDS_AGAIN_DELAY_MS", previousDelay);
     }
 
     void themeFallsBack() {

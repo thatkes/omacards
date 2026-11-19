@@ -130,12 +130,6 @@ ApplicationWindow {
         return qsTr("Nothing is due in %1. Cram a deck or import new material.").arg(backend.currentDeck)
     }
 
-    onClosing: {
-        // Keep the app alive in the tray; Q is the explicit quit shortcut.
-        close.accepted = false;
-        hide();
-    }
-
     component ActionButton: Rectangle {
         id: control
         property string label
@@ -735,7 +729,7 @@ ApplicationWindow {
                                         Label {
                                             Layout.fillWidth: true
                                             horizontalAlignment: Text.AlignHCenter
-                                            text: qsTr("All caught up.")
+                                            text: backend.waitingForRepeat ? qsTr("One more try in a moment…") : qsTr("All caught up.")
                                             color: win.text
                                             font.pixelSize: 34
                                             font.weight: Font.DemiBold
@@ -744,7 +738,9 @@ ApplicationWindow {
                                             Layout.fillWidth: true
                                             horizontalAlignment: Text.AlignHCenter
                                             wrapMode: Text.Wrap
-                                            text: qsTr("Nothing is waiting in this deck. Add a card, import a file, or keep the material warm with cram.")
+                                            text: backend.waitingForRepeat
+                                                  ? qsTr("A card you got wrong is coming back shortly.")
+                                                  : qsTr("Nothing is waiting in this deck. Add a card, import a file, or keep the material warm with cram.")
                                             color: win.soft
                                             font.pixelSize: 15
                                         }

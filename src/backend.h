@@ -36,6 +36,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString answer READ answer NOTIFY cardChanged)
     Q_PROPERTY(bool showingAnswer READ showingAnswer NOTIFY cardChanged)
     Q_PROPERTY(bool hasCard READ hasCard NOTIFY cardChanged)
+    Q_PROPERTY(bool waitingForRepeat READ waitingForRepeat NOTIFY cardChanged)
     Q_PROPERTY(int dueCount READ dueCount NOTIFY dueCountChanged)
     Q_PROPERTY(int newCount READ newCount NOTIFY dueCountChanged)
     Q_PROPERTY(int deckDue READ deckDue NOTIFY dueCountChanged)
@@ -73,6 +74,7 @@ public:
     QString answer() const { return m_answer; }
     bool showingAnswer() const { return m_showingAnswer; }
     bool hasCard() const { return !m_currentId.isEmpty(); }
+    bool waitingForRepeat() const { return m_waitingForRepeat; }
     int dueCount() const { return m_dueCount; }
     int newCount() const;
     int deckDue() const;
@@ -175,6 +177,7 @@ private:
 
     void load();
     void rebuildQueue();
+    void refreshDueCount();
     void presentCard();
     void setStatus(const QString &status);
     void reportError(const QString &message);
@@ -209,12 +212,15 @@ private:
     QVector<Deck> m_decks;
     QVector<CramEntry> m_cramQueue;
     QStringList m_reviewQueue;
+    QHash<QString, qint64> m_reviewAgainNotBefore;
+    QTimer m_reviewAgainTimer;
     QVector<FileSnapshot> m_undoStack;
     QVector<FileSnapshot> m_redoStack;
     Store m_store;
     MathRenderer m_math;
     QFileSystemWatcher m_watcher;
     QTimer m_reloadTimer;
+    qint64 m_reviewAgainDelayMs = 60000;
     int m_dueCount = 0;
     int m_reviewed = 0;
     int m_correct = 0;
@@ -223,4 +229,5 @@ private:
     int m_newPerDay = 20;
     double m_desiredRetention = 0.9;
     bool m_showingAnswer = false;
+    bool m_waitingForRepeat = false;
 };

@@ -6,7 +6,7 @@
 
 A keyboard-first flashcards app for Omarchy. It has two study modes:
 
-- **Review** — FSRS-5 long-term scheduling with Again and Good.
+- **Review** — FSRS-5 long-term scheduling with Again and Good. Again moves the card to a future due date but also brings it back for one more try after a short break in the same session.
 - **Cram** — endless in-session Leitner boxes (1, 2, 4, 8, 16 cards) that reset on Again and re-surface weak cards until you quit.
 
 Deck content lives in plain text files under `~/.local/share/omacards/decks/`, so agents and editors can change it directly. Scheduling state lives in a SQLite sidecar at `~/.local/share/omacards/state.db`; deleting the database never deletes a card.
@@ -58,7 +58,7 @@ The one-off `tectonic` run downloads the TeX bundle into `~/.cache/tectonic`; do
 | `?`, `F1` | Shortcut overlay |
 | `Q` | Quit |
 
-Closing the window hides it to the system tray. The tray tooltip shows the number of due cards; clicking it opens a review session.
+Closing the window quits the app. While omacards is open, the tray tooltip shows the number of due cards; clicking it opens a review session.
 
 `B` opens the card browser. It searches questions, answers and tags, and each card can be edited or deleted there. The selected row is highlighted; `J`/`K` (or the arrow keys) move it, `Enter` edits it and `Delete` removes it. Clicking a row selects it, and `/` jumps to the search field. Card and deck edits are undoable with `Ctrl+Z`; `Ctrl+Shift+Z` (or `Ctrl+Y`) redoes them. The same history covers cards added from the GUI, CLI imports and deck deletions. Review answers are intentionally not undoable, so a lapse cannot be erased by accident.
 
@@ -70,6 +70,8 @@ Press `,` (or the gear button) to open settings. Both values are stored in the S
 
 - **New cards per day** (default 20) caps how many never-reviewed cards enter a review session. This keeps a large Anki import manageable. Set it to 0 to study only cards that are already in review.
 - **Desired retention** (default 90%) is the FSRS target used when intervals are calculated. Higher values shorten intervals and mean more reviews; lower values stretch intervals. The change affects future answers, not existing due dates.
+
+Again repeats come back after a 60-second break in the same session. Set `OMACARDS_AGAIN_DELAY_MS` (milliseconds) to adjust that break; `0` shows the card immediately.
 
 Due reviews are shown before new cards, and new cards follow deck-file order. The tray count and due badge reflect the cards actually available now, after the daily limit. `omacards config` exposes the same two settings to agents.
 
