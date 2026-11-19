@@ -68,15 +68,17 @@ int main(int argc, char *argv[]) {
 
     Theme theme;
     Backend backend;
-    QString error;
-    if (!backend.initialize(&error))
-        qWarning() << "omacards:" << error;
-
     const auto syncMathColors = [&theme, &backend] {
         backend.setMathColors(theme.foreground(), theme.accent());
     };
     QObject::connect(&theme, &Theme::changed, &backend, syncMathColors);
+    // Set the ink before the first render so startup does not cache black SVGs
+    // that are immediately replaced with themed ones.
     syncMathColors();
+
+    QString error;
+    if (!backend.initialize(&error))
+        qWarning() << "omacards:" << error;
 
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);

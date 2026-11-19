@@ -365,7 +365,7 @@ oops: not a key
             "printf 'pdftocairo' >> \"$OMACARDS_TEST_ARGS\"",
             "for arg do printf ' %s' \"$arg\" >> \"$OMACARDS_TEST_ARGS\"; done",
             "printf '\\n' >> \"$OMACARDS_TEST_ARGS\"",
-            "printf '<svg xmlns=\"http://www.w3.org/2000/svg\"><g fill=\"rgb(0%%, 0%%, 0%%)\"/></svg>\\n' > \"$3\"",
+            "printf '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10pt\" height=\"5pt\" viewBox=\"0 0 10 5\"><g fill=\"rgb(0%%, 0%%, 0%%)\"/></svg>\\n' > \"$3\"",
         }));
 
         struct PathGuard {
@@ -412,6 +412,22 @@ oops: not a key
                 foundThemedSvg = true;
         }
         QVERIFY(foundThemedSvg);
+
+        // Scale enlarges the SVG itself and the <img> pixel dimensions so the
+        // 12pt TeX glyphs stay readable beside 24-30px QML labels.
+        const QString scaledHtml = themed.renderExpression("x^2", "#70d6ff", 2.0);
+        QVERIFY(scaledHtml.contains("width='27'"));
+        QVERIFY(scaledHtml.contains("height='13'"));
+        bool foundScaledSvg = false;
+        for (const QString &name : QDir(cache).entryList({"*.svg"})) {
+            QFile svg(cache + "/" + name);
+            if (!svg.open(QIODevice::ReadOnly))
+                continue;
+            const QString content = QString::fromUtf8(svg.readAll());
+            if (content.contains("#70d6ff") && content.contains("width=\"54px\" height=\"26px\""))
+                foundScaledSvg = true;
+        }
+        QVERIFY(foundScaledSvg);
 
         QFile logFile(argsLog);
         QVERIFY(logFile.open(QIODevice::ReadOnly));

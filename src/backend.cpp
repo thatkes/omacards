@@ -55,6 +55,11 @@ QString defaultDatabasePath() {
     return fromEnv.isEmpty() ? defaultDataDirectory() + "/state.db" : fromEnv;
 }
 
+// TeX typesets at 12pt (~16px at 96dpi) while the QML labels use 30px/24px.
+// Scaling the SVG keeps inline math legible next to the surrounding text.
+constexpr double kQuestionMathScale = 2.0;
+constexpr double kAnswerMathScale = 1.6;
+
 }
 
 Backend::Backend(const QString &decksDirectory, const QString &databasePath, QObject *parent)
@@ -114,8 +119,8 @@ void Backend::setMathColors(const QString &questionColor, const QString &answerC
     const Card *card = cardById(m_currentId);
     if (!card)
         return;
-    m_question = m_math.render(DeckIO::displayQuestion(*card), m_questionInk);
-    m_answer = m_math.render(DeckIO::displayAnswer(*card), m_answerInk);
+    m_question = m_math.render(DeckIO::displayQuestion(*card), m_questionInk, kQuestionMathScale);
+    m_answer = m_math.render(DeckIO::displayAnswer(*card), m_answerInk, kAnswerMathScale);
     emit cardChanged();
 }
 
@@ -364,8 +369,8 @@ void Backend::presentCard() {
         presentCard();
         return;
     }
-    m_question = m_math.render(DeckIO::displayQuestion(*card), m_questionInk);
-    m_answer = m_math.render(DeckIO::displayAnswer(*card), m_answerInk);
+    m_question = m_math.render(DeckIO::displayQuestion(*card), m_questionInk, kQuestionMathScale);
+    m_answer = m_math.render(DeckIO::displayAnswer(*card), m_answerInk, kAnswerMathScale);
 
     if (m_mode == "review") {
         const auto state = m_store.states().value(card->id);

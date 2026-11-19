@@ -379,13 +379,16 @@ int run(const QStringList &arguments) {
         if (cards.isEmpty())
             return fail(QObject::tr("No cards to preview"), json);
 
+        constexpr double previewMathScale = 1.6; // Match the review answer label size.
         MathRenderer renderer;
         QJsonArray items;
         QStringList lines;
         for (const Card &card : cards) {
             const bool html = options.format == QLatin1String("html");
-            const QString question = html ? renderer.render(card.question) : renderer.renderPlain(card.question);
-            const QString answer = html ? renderer.render(card.answer) : renderer.renderPlain(card.answer);
+            const QString question = html ? renderer.render(card.question, {}, previewMathScale)
+                                          : renderer.renderPlain(card.question);
+            const QString answer = html ? renderer.render(card.answer, {}, previewMathScale)
+                                        : renderer.renderPlain(card.answer);
             QJsonObject item;
             item.insert("id", card.id);
             item.insert(html ? QStringLiteral("questionHtml") : QStringLiteral("question"), question);

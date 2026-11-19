@@ -10,6 +10,7 @@
 #include <QHash>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QSize>
 #include <QStandardPaths>
 
 namespace {
@@ -133,8 +134,10 @@ bool MathRenderer::hasRenderer() const {
     return m_available;
 }
 
-QString MathRenderer::render(const QString &text, const QString &ink) const {
-    return mapMath(text, [this, ink](const QString &expression) { return renderExpression(expression, ink); }, true);
+QString MathRenderer::render(const QString &text, const QString &ink, double scale) const {
+    return mapMath(text, [this, ink, scale](const QString &expression) {
+        return renderExpression(expression, ink, scale);
+    }, true);
 }
 
 QString MathRenderer::renderPlain(const QString &text) const {
@@ -160,16 +163,31 @@ QStringList MathRenderer::warnings(const QString &text) const {
     return result;
 }
 
-QString MathRenderer::renderExpression(const QString &expression, const QString &ink) const {
-    const QString image = renderLatex(expression, ink);
-    if (!image.isEmpty())
-        return QString("<img src='file://%1' alt='%2' style='vertical-align: middle;'>")
-            .arg(image, expression.toHtmlEscaped());
+namespace {
+QSize svgPixelSize(const QString &path);
+}
+
+QString MathRenderer::renderExpression(const QString &expression, const QString &ink, double scale) const {
+    const QString image = renderLatex(expression, ink, scale);
+    if (!image.isEmpty()) {
+        // QML's rich-text engine sizes <img> from these attributes; the SVG's
+        // intrinsic size is scaled too, so the vector stays sharp either way.
+        const QSize pixels = svgPixelSize(image);
+        return QString("<img src='file://%1' alt='%2' width='%3' height='%4' align='middle' style='vertical-align: middle;'>")
+            .arg(image, expression.toHtmlEscaped())
+            .arg(pixels.width())
+            .arg(pixels.height());
+    }
     return QString("<span style='font-family: \"Noto Sans Math\", serif;'>%1</span>")
         .arg(unicodeMath(expression).toHtmlEscaped());
 }
 
 namespace {
+// QTextDocument rasterizes an <img> at the SVG's intrinsic size, then scales
+// it to the element's logical size. Publishing 2x intrinsic pixels keeps the
+// glyphs crisp on HiDPI screens (and supersamples nicely on 1x displays).
+constexpr int kSvgSupersample = 2;
+
 QString normalizeInk(const QString &ink) {
     if (ink.isEmpty())
         return "#000000";
@@ -177,7 +195,36 @@ QString normalizeInk(const QString &ink) {
     return color.isValid() ? color.name() : QStringLiteral("#000000");
 }
 
-void colorizeSvg(const QString &path, const QString &ink) {
+QString svgRootTag(const QString &svg) {
+    static const QRegularExpression root(R"re(<svg\b[^>]*>)re");
+    const QRegularExpressionMatch match = root.match(svg);
+    return match.hasMatch() ? match.captured() : QString();
+}
+
+void scaleSvgRoot(QString &svg, double scale) {
+    const QString tag = svgRootTag(svg);
+    if (tag.isEmpty())
+        return;
+    // Qt's SVG renderer treats `pt` values as pixels, so pdftocairo's pt-sized
+    // root is rasterized too small and then stretched by the <img> element.
+    // Publish explicit pixel dimensions that match the rich-text image size.
+    static const QRegularExpression dimension(R"re((\b(?:width|height)=")([0-9]*\.?[0-9]+)(pt|px)("))re");
+    QString scaled;
+    qsizetype last = 0;
+    auto matches = dimension.globalMatch(tag);
+    while (matches.hasNext()) {
+        const QRegularExpressionMatch match = matches.next();
+        const double factor = match.captured(3) == QLatin1String("pt") ? 4.0 / 3.0 : 1.0;
+        const int pixels = qRound(match.captured(2).toDouble() * scale * factor) * kSvgSupersample;
+        scaled += tag.mid(last, match.capturedStart() - last);
+        scaled += match.captured(1) + QString::number(pixels) + "px" + match.captured(4);
+        last = match.capturedEnd();
+    }
+    scaled += tag.mid(last);
+    svg.replace(svg.indexOf(tag), tag.size(), scaled);
+}
+
+void colorizeSvg(const QString &path, const QString &ink, double scale) {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly))
         return;
@@ -187,21 +234,40 @@ void colorizeSvg(const QString &path, const QString &ink) {
         R"re(rgb\(\s*0%\s*,\s*0%\s*,\s*0%\s*\)|#(?:000|000000)\b|\bblack\b)re",
         QRegularExpression::CaseInsensitiveOption);
     svg.replace(black, ink);
+    scaleSvgRoot(svg, scale);
     if (file.open(QIODevice::WriteOnly | QIODevice::Truncate))
         file.write(svg.toUtf8());
 }
+
+QSize svgPixelSize(const QString &path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    const QString tag = svgRootTag(QString::fromUtf8(file.readAll()));
+    if (tag.isEmpty())
+        return {};
+    const auto dimension = [&tag](const QString &name) {
+        const QRegularExpression pattern("\\b" + name + R"re(="([0-9]*\.?[0-9]+)(pt|px)")re");
+        const QRegularExpressionMatch match = pattern.match(tag);
+        if (!match.hasMatch())
+            return 0;
+        const double factor = match.captured(2) == QLatin1String("pt") ? 4.0 / 3.0 : 1.0;
+        return qRound(match.captured(1).toDouble() * factor / kSvgSupersample);
+    };
+    return QSize(dimension("width"), dimension("height"));
+}
 } // namespace
 
-QString MathRenderer::renderLatex(const QString &expression, const QString &ink) const {
+QString MathRenderer::renderLatex(const QString &expression, const QString &ink, double scale) const {
     detect();
     if (!m_available)
         return {};
 
-    // The cache key includes the ink so question/answer colors never share a
-    // tinted file. The prefix also invalidates SVGs from the old full-page
-    // renderer, which made equations tiny inside a 612pt page.
-    const QString key = expression + "\n" + normalizeInk(ink);
-    const QString base = "eq2-" + QString::fromLatin1(
+    // Ink and scale are part of the key so question/answer colors and label
+    // sizes never share a cached file. The prefix invalidates SVGs from the
+    // old unscaled/full-page renderers.
+    const QString key = expression + "\n" + normalizeInk(ink) + "\n" + QString::number(scale, 'f', 3);
+    const QString base = "eq4-" + QString::fromLatin1(
         QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha256).toHex().left(20));
     const QString svgPath = m_cache + "/" + base + ".svg";
     if (QFileInfo::exists(svgPath))
@@ -274,7 +340,7 @@ QString MathRenderer::renderLatex(const QString &expression, const QString &ink)
              && run(QStandardPaths::findExecutable("dvisvgm"), {"--no-fonts", "-o", svgPath, dvi}, localTimeoutMs);
     }
     if (ok && QFileInfo::exists(svgPath)) {
-        colorizeSvg(svgPath, normalizeInk(ink));
+        colorizeSvg(svgPath, normalizeInk(ink), scale);
         return svgPath;
     }
     return {};
