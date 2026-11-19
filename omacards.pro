@@ -9,6 +9,7 @@ HEADERS += \
     src/cli.h \
     src/deck.h \
     src/fsrs.h \
+    src/importer.h \
     src/mathrender.h \
     src/store.h \
     src/theme.h \
@@ -20,6 +21,7 @@ SOURCES += \
     src/cli.cpp \
     src/deck.cpp \
     src/fsrs.cpp \
+    src/importer.cpp \
     src/mathrender.cpp \
     src/store.cpp \
     src/theme.cpp \

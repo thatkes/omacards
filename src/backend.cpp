@@ -1,42 +1,22 @@
 // Backend owns cards, scheduling and files. QML only binds to properties and
 // calls the small set of Q_INVOKABLE actions below.
 #include "backend.h"
+#include "importer.h"
 
 #include <QDateTime>
 #include <QDesktopServices>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QProcess>
 #include <QRandomGenerator>
-#include <QRegularExpression>
 #include <QSaveFile>
 #include <QSet>
-#include <QSqlQuery>
 #include <QStandardPaths>
-#include <QTemporaryDir>
-#include <QTextStream>
 #include <QUrl>
 #include <QVariantMap>
-#include <QCryptographicHash>
 #include <algorithm>
 
 namespace {
-template <typename Replacement>
-QString replaceRegex(const QString &text, const QRegularExpression &expression, Replacement replacement) {
-    QString out;
-    qsizetype last = 0;
-    auto matches = expression.globalMatch(text);
-    while (matches.hasNext()) {
-        const auto match = matches.next();
-        out += text.mid(last, match.capturedStart() - last) + replacement(match);
-        last = match.capturedEnd();
-    }
-    return out + text.mid(last);
-}
-
 qint64 reviewAgainDelayMs() {
     const QByteArray override = qgetenv("OMACARDS_AGAIN_DELAY_MS");
     bool ok = false;
@@ -774,13 +754,6 @@ void Backend::newDeck(const QString &name) {
         reportError(error);
 }
 
-QString Backend::safeFileName(const QString &name) {
-    QString result = name.trimmed();
-    result.replace(QRegularExpression(R"re([^\w.-]+)re"), "-");
-    result.remove(QRegularExpression(R"re(^-+|-+$)re"));
-    return result.isEmpty() ? "Deck" : result;
-}
-
 bool Backend::createDeck(const QString &name, QString *error, const QString &description) {
     const QString clean = name.trimmed();
     if (clean.isEmpty()) {
@@ -794,7 +767,7 @@ bool Backend::createDeck(const QString &name, QString *error, const QString &des
     Deck deck;
     deck.name = clean;
     deck.description = description.trimmed();
-    deck.path = QDir(m_decksDir).filePath(safeFileName(clean) + ".txt");
+    deck.path = QDir(m_decksDir).filePath(DeckIO::safeFileName(clean) + ".txt");
     for (const Deck &existing : m_decks) {
         if (QFileInfo(existing.path).absoluteFilePath() == QFileInfo(deck.path).absoluteFilePath()) {
             if (error) *error = tr("Deck file already used by %1").arg(existing.name);
@@ -1099,290 +1072,38 @@ void Backend::importFrom(const QString &path, const QString &deckName) {
         setStatus(tr("Imported %1").arg(QFileInfo(path).fileName()));
 }
 
-QStringList Backend::splitDelimited(const QString &line, QChar delimiter) {
-    QStringList cells;
-    QString cell;
-    bool quoted = false;
-    for (int i = 0; i < line.size(); ++i) {
-        const QChar ch = line.at(i);
-        if (ch == '"') {
-            if (quoted && i + 1 < line.size() && line.at(i + 1) == '"') {
-                cell += '"';
-                ++i;
-            } else {
-                quoted = !quoted;
-            }
-        } else if (ch == delimiter && !quoted) {
-            cells << cell;
-            cell.clear();
-        } else {
-            cell += ch;
-        }
+bool Backend::commitImport(const DeckImport::Result &result, QString *error) {
+    if (result.cards.isEmpty()) {
+        setStatus(tr("Imported 0 cards"));
+        return true;
     }
-    cells << cell;
-    return cells;
+    // Only a new deck receives an imported description; an existing deck keeps
+    // the description its owner wrote.
+    QString description;
+    const QString *descriptionPtr = nullptr;
+    if (!deckByName(result.deckName) && !result.description.isEmpty()) {
+        description = result.description;
+        descriptionPtr = &description;
+    }
+    if (!createCards(result.deckName, result.cards, descriptionPtr, nullptr, error))
+        return false;
+    setStatus(tr("Imported %1 cards").arg(result.cards.size()));
+    return true;
 }
 
 bool Backend::importCsv(const QString &path, const QString &deckName, QString *error) {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        if (error) *error = tr("Cannot read: %1").arg(path);
-        return false;
-    }
-    const QChar delimiter = path.endsWith(".tsv", Qt::CaseInsensitive) ? '\t' : ',';
-    QStringList rows = QString::fromUtf8(file.readAll()).split('\n', Qt::SkipEmptyParts);
-    if (rows.isEmpty()) {
-        if (error) *error = tr("No rows in %1").arg(path);
-        return false;
-    }
-    const auto first = splitDelimited(rows.first(), delimiter);
-    const bool hasHeader = !first.isEmpty()
-        && (first.first().contains("question", Qt::CaseInsensitive)
-            || first.first().contains("front", Qt::CaseInsensitive));
-    if (hasHeader)
-        rows.removeFirst();
-
-    QString target = deckName;
-    if (target.isEmpty())
-        target = QFileInfo(path).completeBaseName();
-    if (!deckByName(target) && !createDeck(target, error))
-        return false;
-
-    int imported = 0;
-    for (const QString &row : rows) {
-        const QStringList cells = splitDelimited(row, delimiter);
-        if (cells.size() < 2)
-            continue;
-        const QString question = cells.at(0).trimmed();
-        const QString answer = cells.at(1).trimmed();
-        if (question.isEmpty() || answer.isEmpty())
-            continue;
-        const QString tags = cells.size() > 2 ? cells.at(2) : QString();
-        if (!createCard(target, question, answer, "basic", tags, error))
-            return false;
-        ++imported;
-    }
-    setStatus(tr("Imported %1 cards").arg(imported));
-    return true;
-}
-
-QString Backend::decodeEntities(const QString &text) {
-    QString out = text;
-    out.replace("&nbsp;", QChar(0x00A0));
-    out.replace("&amp;", "&");
-    out.replace("&lt;", "<");
-    out.replace("&gt;", ">");
-    out.replace("&quot;", "\"");
-    out.replace("&apos;", "'");
-    out.replace("&#39;", "'");
-    static const QRegularExpression numeric(R"re(&#(?:x([0-9a-fA-F]+)|([0-9]+));)re");
-    out = replaceRegex(out, numeric, [](const QRegularExpressionMatch &match) {
-        bool ok = false;
-        const int code = match.captured(1).isEmpty()
-                             ? match.captured(2).toInt(&ok, 10)
-                             : match.captured(1).toInt(&ok, 16);
-        return ok && code > 0 && code <= 0x10ffff ? QString(QChar(code)) : match.captured();
-    });
-    // Anki cloze hints are written as {{c1::answer::hint}}; our deck format
-    // keeps just the answer so the plain-text source stays easy to edit.
-    static const QRegularExpression clozeHint(R"re(\{\{(c\d+::[^:]+)::[^}]*\}\})re");
-    out = replaceRegex(out, clozeHint, [](const QRegularExpressionMatch &match) {
-        return QStringLiteral("{{%1}}").arg(match.captured(1));
-    });
-    return out;
-}
-
-QString Backend::stripHtml(const QString &html) {
-    QString text = html;
-    text.replace(QRegularExpression(R"re(<br\s*/?>)re"), "\n");
-    // Keep image tags so imported media can still be shown in the RichText
-    // study view; replace them with markers while the other tags are removed.
-    QVector<QString> images;
-    static const QRegularExpression imageTag(R"re(<img\b[^>]*>)re",
-                                             QRegularExpression::CaseInsensitiveOption);
-    QString marked;
-    int last = 0;
-    auto matches = imageTag.globalMatch(text);
-    while (matches.hasNext()) {
-        const auto match = matches.next();
-        marked += text.mid(last, match.capturedStart() - last);
-        images << match.captured();
-        marked += QString("\x01%1\x02").arg(images.size() - 1);
-        last = match.capturedEnd();
-    }
-    marked += text.mid(last);
-    marked.replace(QRegularExpression(R"re(<[^>]+>)re"), "");
-    text = decodeEntities(marked);
-    for (int i = 0; i < images.size(); ++i)
-        text.replace(QString("\x01%1\x02").arg(i), images.at(i));
-    return text.trimmed();
-}
-
-QString Backend::rewriteAnkiMedia(const QString &html, const QHash<QString, QString> &media) {
-    QString text = html;
-    for (auto it = media.constBegin(); it != media.constEnd(); ++it) {
-        for (const QString &quote : {QStringLiteral("\""), QStringLiteral("'")}) {
-            const QString from = QStringLiteral("src=%1%2%1").arg(quote, it.key());
-            const QString to = QStringLiteral("src=%1%2%1").arg(quote, it.value());
-            text.replace(from, to, Qt::CaseInsensitive);
-        }
-    }
-    return text;
-}
-
-QHash<QString, QString> Backend::apkgMedia(const QString &path, const QString &directory,
-                                            const QString &unzip, QString *error) {
-    QHash<QString, QString> media;
-    QProcess mapping;
-    mapping.start(unzip, {"-p", path, "media"});
-    if (!mapping.waitForFinished(10000) || mapping.exitCode() != 0)
-        return media; // packages without media are common
-    const QJsonDocument document = QJsonDocument::fromJson(mapping.readAllStandardOutput());
-    if (!document.isObject())
-        return media;
-
-    const QDir target(directory);
-    if (!target.mkpath(QStringLiteral(".")))
-        return media;
-    const QJsonObject entries = document.object();
-    for (auto it = entries.constBegin(); it != entries.constEnd(); ++it) {
-        const QString name = QFileInfo(it.value().toString()).fileName();
-        if (name.isEmpty() || name == QStringLiteral(".") || name == QStringLiteral(".."))
-            continue;
-        const QString destination = target.filePath(name);
-        QProcess extract;
-        extract.setStandardOutputFile(destination);
-        extract.start(unzip, {"-p", path, it.key()});
-        if (!extract.waitForFinished(10000) || extract.exitCode() != 0) {
-            QFile::remove(destination);
-            if (error)
-                *error = tr("Could not extract media %1").arg(name);
-            continue;
-        }
-        media.insert(it.key(), QUrl::fromLocalFile(destination).toString());
-    }
-    return media;
+    DeckImport::Result result;
+    return DeckImport::csv(path, deckName, &result, error) && commitImport(result, error);
 }
 
 bool Backend::importApkg(const QString &path, const QString &deckName, QString *error) {
-    QTemporaryDir temp;
-    if (!temp.isValid()) {
-        if (error) *error = tr("Cannot create a temporary directory");
-        return false;
-    }
-    const QString database = temp.filePath("collection.db");
-    const auto unzip = QStandardPaths::findExecutable("unzip");
-    if (unzip.isEmpty()) {
-        if (error) *error = tr("Importing .apkg needs the unzip command");
-        return false;
-    }
-    auto extract = [&](const QString &entry) {
-        QProcess process;
-        process.setStandardOutputFile(database);
-        process.start(unzip, {"-p", path, entry});
-        return process.waitForFinished(10000) && process.exitCode() == 0 && QFileInfo::exists(database);
-    };
-
-    bool ok = extract("collection.anki2") || extract("collection.anki21");
-    if (!ok) {
-        // Anki 21b is a gzip-compressed SQLite file inside the archive.
-        QProcess unzipper;
-        unzipper.start(unzip, {"-p", path, "collection.anki21b"});
-        if (unzipper.waitForFinished(10000) && unzipper.exitCode() == 0) {
-            QProcess gzip;
-            gzip.setStandardOutputFile(database);
-            gzip.start(QStandardPaths::findExecutable("gzip"), {"-dc"});
-            gzip.write(unzipper.readAllStandardOutput());
-            gzip.closeWriteChannel();
-            ok = gzip.waitForFinished(10000) && gzip.exitCode() == 0 && QFileInfo::exists(database);
-        }
-    }
-    if (!ok) {
-        if (error) *error = tr("Not a readable Anki package: %1").arg(path);
-        return false;
-    }
-
-    const QString connection = "omacards-apkg-" + QString::number(QRandomGenerator::global()->generate());
-    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connection);
-    db.setDatabaseName(database);
-    QSqlQuery query;
-    // Every exit path must release the named connection; leaks accumulate
-    // across imports and keep the temporary database file alive.
-    auto closeCollection = [&] {
-        query.finish();
-        query.clear();
-        db.close();
-        db = QSqlDatabase();
-        QSqlDatabase::removeDatabase(connection);
-    };
-    if (!db.open()) {
-        if (error) *error = tr("Cannot read the Anki collection");
-        closeCollection();
-        return false;
-    }
-    // Cloze notes use model type 1; their text lives in a single field with
-    // {{c1::...}} markers. Older collections may lack the type column.
-    query = QSqlQuery(db);
-    bool clozeColumn = query.exec("SELECT type FROM models LIMIT 1");
-    if (clozeColumn)
-        clozeColumn = query.exec("SELECT n.flds, n.tags, COALESCE(m.type, 0) "
-                                 "FROM notes n LEFT JOIN models m ON n.mid = m.id");
-    if (!clozeColumn && !query.exec("SELECT flds, tags FROM notes")) {
-        if (error) *error = tr("The Anki collection has no notes table");
-        closeCollection();
-        return false;
-    }
-    QString target = deckName.isEmpty() ? QFileInfo(path).completeBaseName() : deckName;
-    if (!deckByName(target) && !createDeck(target, error)) {
-        closeCollection();
-        return false;
-    }
-    const QHash<QString, QString> media = apkgMedia(
-        path, m_decksDir + "/media/" + safeFileName(target), unzip, error);
-    int imported = 0;
-    while (query.next()) {
-        const QStringList fields = query.value(0).toString().split(QChar(0x1f));
-        if (fields.isEmpty())
-            continue;
-        const bool cloze = clozeColumn && query.value(2).toInt() == 1;
-        QString front = stripHtml(fields.at(0));
-        QString back = !cloze && fields.size() > 1 ? stripHtml(fields.at(1)) : QString();
-        if (cloze) {
-            static const QRegularExpression clozeNumber(R"re(\{\{c\d+::(.*?)::[^}]*\}\})re");
-            front = replaceRegex(front, clozeNumber, [](const QRegularExpressionMatch &match) {
-                return QStringLiteral("{{c1::%1}}").arg(match.captured(1));
-            });
-        }
-        front = rewriteAnkiMedia(front, media);
-        if (!cloze) {
-            static const QRegularExpression imageSrc(R"re(<img\b[^>]*\bsrc="([^"]+)"[^>]*>)re");
-            back = replaceRegex(back, imageSrc, [&](const QRegularExpressionMatch &match) {
-                return QStringLiteral("<img src=\"%1\">").arg(media.value(match.captured(1), match.captured(1)));
-            });
-        }
-        if (front.isEmpty())
-            continue;
-        QString tags = query.value(1).toString().simplified();
-        tags.replace(' ', ',');
-        if (!createCard(target, front, back, cloze ? "cloze" : "basic", tags, error)) {
-            closeCollection();
-            return false;
-        }
-        ++imported;
-    }
-    closeCollection();
-    setStatus(tr("Imported %1 cards").arg(imported));
-    return true;
+    DeckImport::Result result;
+    return DeckImport::apkg(path, deckName, m_decksDir, &result, error) && commitImport(result, error);
 }
 
 bool Backend::importFile(const QString &path, const QString &deckName, QString *error) {
-    const QString lower = path.toLower();
-    if (lower.endsWith(".apkg"))
-        return importApkg(path, deckName, error);
-    if (lower.endsWith(".csv") || lower.endsWith(".tsv") || lower.endsWith(".txt"))
-        return importCsv(path, deckName, error);
-    if (error) *error = tr("Unsupported import format: %1").arg(path);
-    return false;
+    DeckImport::Result result;
+    return DeckImport::file(path, deckName, m_decksDir, &result, error) && commitImport(result, error);
 }
 
 void Backend::editDeckFile() {

@@ -22,6 +22,13 @@ struct Deck {
     QVector<Card> cards;
 };
 
+struct CardDraft {
+    QString question;
+    QString answer;
+    QString type = "basic"; // basic | cloze
+    QStringList tags;
+};
+
 struct DeckIssue {
     QString path;     // deck file the issue belongs to
     QString card;     // card id, when the issue is about a card
@@ -42,6 +49,7 @@ namespace DeckIO {
     bool save(const Deck &deck, QString *error = nullptr);
     QString cardId(const Card &card);
     QString contentHash(const Card &card);
+    QString safeFileName(const QString &name);
     QString displayQuestion(const Card &card);
     QString displayAnswer(const Card &card);
 }

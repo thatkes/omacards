@@ -14,17 +14,14 @@
 #include <QVariantList>
 #include <QVector>
 
+namespace DeckImport {
+struct Result;
+}
+
 struct CramEntry {
     QString cardId;
     int box = 0; // 0..4, intervals of 1,2,4,8,16 cards
     int next = 0;
-};
-
-struct CardDraft {
-    QString question;
-    QString answer;
-    QString type = "basic"; // basic | cloze
-    QStringList tags;
 };
 
 class Backend : public QObject {
@@ -193,6 +190,7 @@ private:
         QVector<int> dueIncludingNewPerDeck; // totalDue in CLI stats includes new cards
     };
 
+    bool commitImport(const DeckImport::Result &result, QString *error);
     void load();
     bool refreshSnapshot();
     FsrsState effectiveState(const Card &card) const;
@@ -213,13 +211,6 @@ private:
                        const QString &description);
     bool applySnapshot(const FileSnapshot &snapshot, bool restoreBefore, QString *error);
     static QByteArray readFileBytes(const QString &path);
-    static QString safeFileName(const QString &name);
-    static QStringList splitDelimited(const QString &line, QChar delimiter);
-    static QString stripHtml(const QString &html);
-    static QString decodeEntities(const QString &text);
-    static QString rewriteAnkiMedia(const QString &html, const QHash<QString, QString> &media);
-    static QHash<QString, QString> apkgMedia(const QString &path, const QString &directory,
-                                              const QString &unzip, QString *error);
 
     QString m_decksDir;
     QString m_currentDeck;

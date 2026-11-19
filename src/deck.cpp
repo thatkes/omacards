@@ -355,6 +355,13 @@ QString contentHash(const Card &card) {
     return QString::fromLatin1(QCryptographicHash::hash(source.toUtf8(), QCryptographicHash::Sha256).toHex().left(16));
 }
 
+QString safeFileName(const QString &name) {
+    QString result = name.trimmed();
+    result.replace(QRegularExpression(R"re([^\w.-]+)re"), "-");
+    result.remove(QRegularExpression(R"re(^-+|-+$)re"));
+    return result.isEmpty() ? QStringLiteral("Deck") : result;
+}
+
 QString displayQuestion(const Card &card) {
     if (card.type == "cloze")
         return stripCloze(card.question, false);
