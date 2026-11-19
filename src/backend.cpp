@@ -290,7 +290,7 @@ void Backend::rebuildQueue() {
     m_currentId.clear();
 
     const Deck *deck = deckByName(m_currentDeck);
-    if (deck && m_mode == "cram") {
+    if (deck && Domain::modeFromString(m_mode) == StudyMode::Cram) {
         for (int i = 0; i < deck->cards.size(); ++i)
             m_cramQueue.append(CramEntry{deck->cards.at(i).id, 0, i});
         std::shuffle(m_cramQueue.begin(), m_cramQueue.end(), *QRandomGenerator::global());
@@ -317,7 +317,7 @@ void Backend::rebuildQueue() {
 
 void Backend::scheduleNextRepeat() {
     m_reviewAgainTimer.stop();
-    if (m_mode != "review" || m_reviewQueue.isEmpty())
+    if (Domain::modeFromString(m_mode) != StudyMode::Review || m_reviewQueue.isEmpty())
         return;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     qint64 next = 0;
@@ -336,7 +336,7 @@ void Backend::scheduleNextRepeat() {
 void Backend::presentCard() {
     m_showingAnswer = false;
     m_waitingForRepeat = false;
-    if (m_mode == "cram") {
+    if (Domain::modeFromString(m_mode) == StudyMode::Cram) {
         if (m_cramQueue.isEmpty()) {
             m_currentId.clear();
             m_question.clear();
@@ -405,7 +405,7 @@ void Backend::presentCard() {
     m_question = m_math.render(DeckIO::displayQuestion(*card), m_questionInk, kQuestionMathScale);
     m_answer = m_math.render(DeckIO::displayAnswer(*card), m_answerInk, kAnswerMathScale);
 
-    if (m_mode == "review") {
+    if (Domain::modeFromString(m_mode) == StudyMode::Review) {
         const FsrsState state = effectiveState(*card);
         const double recall = state.reps > 0
             ? Fsrs::retrievability(state, QDateTime::currentMSecsSinceEpoch())
@@ -659,7 +659,7 @@ void Backend::selectDeck(const QString &name) {
 void Backend::setMode(const QString &mode) {
     if (mode == m_mode)
         return;
-    m_mode = mode == "cram" ? "cram" : "review";
+    m_mode = Domain::toString(Domain::modeFromString(mode));
     m_reviewed = 0;
     m_correct = 0;
     m_cramReviews = 0;
@@ -678,22 +678,23 @@ void Backend::flip() {
 void Backend::rate(int rating) {
     if (!hasCard())
         return;
-    if (rating != 1 && rating != 3)
+    const Rating parsed = Domain::ratingFromInt(rating);
+    if (parsed == Rating::Invalid)
         return;
     ++m_reviewed;
-    if (rating == 3)
+    if (parsed == Rating::Good)
         ++m_correct;
-    if (m_mode == "cram")
-        answerCram(rating);
+    if (Domain::modeFromString(m_mode) == StudyMode::Cram)
+        answerCram(parsed);
     else
-        answerReview(rating);
+        answerReview(parsed);
     emit statsChanged();
     presentCard();
     emit cardsChanged();
     emit decksChanged();
 }
 
-void Backend::answerReview(int rating) {
+void Backend::answerReview(Rating rating) {
     Card *card = cardById(m_currentId);
     if (!card)
         return;
@@ -702,10 +703,10 @@ void Backend::answerReview(int rating) {
 
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const bool wasNew = state.reps == 0;
-    const ReviewResult result = Fsrs::review(state, rating, now, m_desiredRetention);
+    const ReviewResult result = Fsrs::review(state, Domain::toInt(rating), now, m_desiredRetention);
     m_store.clearError();
     m_store.save(card->id, hash, result.state);
-    m_store.logReview(card->id, rating, now, result.state, result.intervalDays, wasNew);
+    m_store.logReview(card->id, Domain::toInt(rating), now, result.state, result.intervalDays, wasNew);
     if (!m_store.lastError().isEmpty()) {
         reportError(tr("Cannot save review: %1").arg(m_store.lastError()));
     } else if (m_snapshotValid) {
@@ -720,7 +721,7 @@ void Backend::answerReview(int rating) {
         m_reviewQueue.removeFirst();
     else
         m_reviewQueue.removeAll(card->id);
-    if (rating == 1) {
+    if (rating == Rating::Again) {
         // Keep the FSRS due date above, but give the card one more appearance
         // in this sitting after a short break.
         m_reviewAgainNotBefore.insert(card->id, now + m_reviewAgainDelayMs);
@@ -729,13 +730,13 @@ void Backend::answerReview(int rating) {
     refreshDueCount();
 }
 
-void Backend::answerCram(int rating) {
+void Backend::answerCram(Rating rating) {
     static const int intervals[] = {1, 2, 4, 8, 16};
     for (int i = 0; i < m_cramQueue.size(); ++i) {
         if (m_cramQueue.at(i).cardId != m_currentId)
             continue;
         CramEntry entry = m_cramQueue.takeAt(i);
-        entry.box = rating == 1 ? 0 : qMin(4, entry.box + 1);
+        entry.box = rating == Rating::Again ? 0 : qMin(4, entry.box + 1);
         entry.next = ++m_cramReviews + intervals[entry.box];
         m_cramQueue.append(entry);
         m_box = entry.box + 1;
@@ -827,8 +828,7 @@ bool Backend::createCards(const QString &deckName, const QVector<CardDraft> &dra
             if (error) *error = tr("cards[%1] needs a question").arg(i);
             return false;
         }
-        const QString type = draft.type.isEmpty() ? QStringLiteral("basic") : draft.type;
-        if (type != QLatin1String("basic") && type != QLatin1String("cloze")) {
+        if (Domain::cardTypeFromString(draft.type) == CardType::Invalid) {
             if (error) *error = tr("cards[%1] has an invalid type: %2").arg(i).arg(draft.type);
             return false;
         }
@@ -854,7 +854,7 @@ bool Backend::createCards(const QString &deckName, const QVector<CardDraft> &dra
         card.deck = deck->name;
         card.question = draft.question.trimmed();
         card.answer = draft.answer.trimmed();
-        card.type = draft.type == QLatin1String("cloze") ? QStringLiteral("cloze") : QStringLiteral("basic");
+        card.type = Domain::toString(Domain::cardTypeFromString(draft.type));
         for (const QString &tag : draft.tags) {
             const QString clean = tag.trimmed();
             if (!clean.isEmpty() && !card.tags.contains(clean))
@@ -892,7 +892,7 @@ bool Backend::createCard(const QString &deckName, const QString &question, const
     card.deck = deck->name;
     card.question = question.trimmed();
     card.answer = answer.trimmed();
-    card.type = type == "cloze" ? "cloze" : "basic";
+    card.type = Domain::toString(Domain::cardTypeFromString(type));
     for (const QString &tag : tags.split(',', Qt::SkipEmptyParts)) {
         const QString clean = tag.trimmed();
         if (!clean.isEmpty() && !card.tags.contains(clean))
@@ -935,7 +935,7 @@ bool Backend::modifyCard(const QString &deckName, const QString &cardId, const Q
     const Deck original = *deck;
     card->question = question.trimmed();
     card->answer = answer.trimmed();
-    card->type = type == "cloze" ? "cloze" : "basic";
+    card->type = Domain::toString(Domain::cardTypeFromString(type));
     card->tags.clear();
     for (const QString &tag : tags.split(',', Qt::SkipEmptyParts)) {
         const QString clean = tag.trimmed();
@@ -1012,7 +1012,7 @@ bool Backend::removeDeck(const QString &name, QString *error) {
 
 void Backend::addCard(const QString &question, const QString &answer) {
     QString error;
-    if (!createCard(m_currentDeck, question, answer, "basic", {}, &error))
+    if (!createCard(m_currentDeck, question, answer, Domain::toString(CardType::Basic), {}, &error))
         reportError(error);
     else
         setStatus(tr("Card added"));

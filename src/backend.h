@@ -1,6 +1,7 @@
 #pragma once
 
 #include "deck.h"
+#include "domain.h"
 #include "fsrs.h"
 #include "mathrender.h"
 #include "store.h"
@@ -205,8 +206,8 @@ private:
     const Deck *deckByName(const QString &name) const;
     int deckIndex(const QString &name) const;
     Card *cardById(const QString &id);
-    void answerCram(int rating);
-    void answerReview(int rating);
+    void answerCram(Rating rating);
+    void answerReview(Rating rating);
     void recordHistory(const QString &path, const QByteArray &before, bool existedBefore,
                        const QString &description);
     bool applySnapshot(const FileSnapshot &snapshot, bool restoreBefore, QString *error);

@@ -132,6 +132,7 @@ Cram needs no persistent state, must never end, and should re-show weak cards qu
 ```text
 src/backend.{h,cpp}      cards, files, SQLite, modes, study sessions
 src/importer.{h,cpp}     CSV/TSV and Anki parsing into card drafts
+src/domain.{h,cpp}       shared mode, rating and card-type values
 src/fsrs.{h,cpp}         FSRS-5 model (Again=1, Good=3)
 src/deck.{h,cpp}         plain-text deck parser/writer
 src/store.{h,cpp}        SQLite sidecar

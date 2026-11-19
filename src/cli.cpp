@@ -5,6 +5,7 @@
 
 #include "backend.h"
 #include "deck.h"
+#include "domain.h"
 #include "fsrs.h"
 #include "mathrender.h"
 #include "store.h"
@@ -211,7 +212,7 @@ bool parseCardDrafts(const QByteArray &data, const QString &descriptionFlag,
             if (error) *error = QObject::tr("cards[%1] needs a question").arg(i);
             return false;
         }
-        if (draft.type != QLatin1String("basic") && draft.type != QLatin1String("cloze")) {
+        if (Domain::cardTypeFromString(draft.type) == CardType::Invalid) {
             if (error) *error = QObject::tr("cards[%1] has an invalid type: %2").arg(i).arg(draft.type);
             return false;
         }
@@ -673,20 +674,27 @@ int run(const QStringList &arguments) {
                 target = &card;
         if (!target)
             return fail(QObject::tr("No such card: %1").arg(options.card), json);
-        if (options.rating != 1 && options.rating != 3)
+        const Rating rating = Domain::ratingFromInt(options.rating);
+        if (rating == Rating::Invalid)
             return fail(QObject::tr("Rating must be 1 (Again) or 3 (Good)"), json);
 
         Store store(backend.databasePath());
         if (!store.open(&error))
             return fail(error, json);
+        store.clearError();
         FsrsState state = store.states().value(target->id);
         if (store.hashes().value(target->id) != DeckIO::contentHash(*target))
             state = FsrsState{};
+        if (!store.lastError().isEmpty())
+            return fail(QObject::tr("Cannot read scheduling state: %1").arg(store.lastError()), json);
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         const bool wasNew = state.reps == 0;
-        const ReviewResult result = Fsrs::review(state, options.rating, now, backend.desiredRetention());
+        store.clearError();
+        const ReviewResult result = Fsrs::review(state, Domain::toInt(rating), now, backend.desiredRetention());
         store.save(target->id, DeckIO::contentHash(*target), result.state);
-        store.logReview(target->id, options.rating, now, result.state, result.intervalDays, wasNew);
+        store.logReview(target->id, Domain::toInt(rating), now, result.state, result.intervalDays, wasNew);
+        if (!store.lastError().isEmpty())
+            return fail(QObject::tr("Cannot save review: %1").arg(store.lastError()), json);
 
         QJsonObject object;
         object.insert("ok", true);
@@ -715,9 +723,9 @@ int run(const QStringList &arguments) {
             queue.first() = {next, queue.first().second};
             std::sort(queue.begin(), queue.end());
             const int index = queue.takeFirst().second;
-            const int rating = (step % 4 == 3) ? 1 : 3;
-            box = rating == 1 ? 0 : qMin(4, box + 1);
-            if (rating == 3) ++correct;
+            const Rating rating = (step % 4 == 3) ? Rating::Again : Rating::Good;
+            box = rating == Rating::Again ? 0 : qMin(4, box + 1);
+            if (rating == Rating::Good) ++correct;
             next = ++reviews + intervals[box];
             queue.append({next, index});
             std::sort(queue.begin(), queue.end());

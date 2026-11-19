@@ -18,6 +18,7 @@
 #include "backend.h"
 #include "cli.h"
 #include "deck.h"
+#include "domain.h"
 #include "fsrs.h"
 #include "mathrender.h"
 #include "store.h"
@@ -231,6 +232,18 @@ oops: not a key
 
         if (!oldDecks.isNull()) qputenv("OMACARDS_DECKS_DIR", oldDecks);
         if (!oldState.isNull()) qputenv("OMACARDS_STATE_DB", oldState);
+    }
+
+    void domainParsesSharedValues() {
+        QCOMPARE(Domain::modeFromString("cram"), StudyMode::Cram);
+        QCOMPARE(Domain::modeFromString("anything"), StudyMode::Review);
+        QCOMPARE(Domain::toString(StudyMode::Review), QString("review"));
+        QCOMPARE(Domain::ratingFromInt(1), Rating::Again);
+        QCOMPARE(Domain::ratingFromInt(3), Rating::Good);
+        QCOMPARE(Domain::ratingFromInt(2), Rating::Invalid);
+        QCOMPARE(Domain::cardTypeFromString("cloze"), CardType::Cloze);
+        QCOMPARE(Domain::cardTypeFromString(""), CardType::Basic);
+        QCOMPARE(Domain::cardTypeFromString("other"), CardType::Invalid);
     }
 
     void fsrsInitialState() {
