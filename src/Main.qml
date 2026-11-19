@@ -5,23 +5,61 @@ import QtQuick.Layouts
 
 ApplicationWindow {
     id: win
-    width: 940
-    height: 660
-    minimumWidth: 600
-    minimumHeight: 460
+    width: 960
+    height: 680
+    minimumWidth: 760
+    minimumHeight: 540
     visible: true
     title: qsTr("omacards")
-    color: "#0e0e10"
+    color: theme.background
 
-    Material.theme: Material.Dark
+    Material.theme: theme.dark ? Material.Dark : Material.Light
     Material.accent: theme.accent
     Material.roundedScale: theme.radius
 
+    readonly property color text: theme.foreground
+    readonly property color soft: theme.soft
+    readonly property color muted: theme.muted
+    readonly property color panel: theme.panel
+    readonly property color raised: theme.raised
+    readonly property color border: theme.border
+    readonly property color accentInk: theme.accentForeground === "white" ? "#ffffff" : "#0e0e10"
+
+    property string screen: "home"
     property bool helpVisible: false
     property bool statsVisible: false
-    property bool settingsVisible: false
     property var statsData: ({})
     property string editCardId: ""
+    property string pendingDeck: ""
+
+    function withAlpha(color, alpha) {
+        return Qt.rgba(color.r, color.g, color.b, alpha)
+    }
+
+    function startStudy(mode) {
+        backend.setMode(mode)
+        backend.refresh()
+        screen = "study"
+        keyHandler.forceActiveFocus()
+    }
+
+    function goHome() {
+        screen = "home"
+        helpVisible = false
+        statsVisible = false
+        keyHandler.forceActiveFocus()
+    }
+
+    function openLibrary() {
+        backend.refresh()
+        screen = "library"
+        keyHandler.forceActiveFocus()
+    }
+
+    function openSettings() {
+        screen = "settings"
+        keyHandler.forceActiveFocus()
+    }
 
     function openStats() {
         statsData = backend.statsSummary()
@@ -37,578 +75,1505 @@ ApplicationWindow {
         editCardDialog.open()
     }
 
+    function heroTitle() {
+        if (backend.totalCards === 0)
+            return qsTr("Start your first deck.")
+        if (backend.dueCount > 0)
+            return qsTr("Time to review.")
+        if (backend.newCount > 0)
+            return qsTr("New cards are waiting.")
+        return qsTr("All caught up.")
+    }
+
+    function heroDetail() {
+        if (backend.totalCards === 0)
+            return qsTr("Decks are plain text files, so you or your agent can edit them directly.")
+        if (backend.deckDue > 0)
+            return qsTr("%1 due in %2. One card at a time, Again or Good.")
+                .arg(backend.deckDue).arg(backend.currentDeck)
+        if (backend.deckNew > 0)
+            return qsTr("%1 new card%2 left today in %3.")
+                .arg(backend.deckNew).arg(backend.deckNew === 1 ? "" : "s").arg(backend.currentDeck)
+        if (backend.dueCount > 0)
+            return qsTr("%1 cards are due in other decks. Open the library to switch.")
+                .arg(backend.dueCount)
+        return qsTr("Nothing is due in %1. Cram a deck or import new material.").arg(backend.currentDeck)
+    }
+
     onClosing: {
         // Keep the app alive in the tray; Q is the explicit quit shortcut.
         close.accepted = false;
         hide();
     }
 
-    Item {
-        id: keyHandler
-        anchors.fill: parent
-        focus: true
-        LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
-        LayoutMirroring.childrenInherit: true
+    component ActionButton: Rectangle {
+        id: control
+        property string label
+        property string hint
+        property bool primary: false
+        property bool danger: false
+        property bool compact: false
+        signal clicked()
 
-        Keys.onPressed: function(event) {
-            if (event.modifiers & Qt.ControlModifier) {
-                if (event.key === Qt.Key_Z) {
-                    if (event.modifiers & Qt.ShiftModifier)
-                        backend.redo()
-                    else
-                        backend.undo()
-                    event.accepted = true
-                } else if (event.key === Qt.Key_Y) {
-                    backend.redo()
-                    event.accepted = true
-                }
-                return
-            }
-            if (newDeckDialog.opened || newCardDialog.opened || importDialog.opened
-                    || editCardDialog.opened || deleteDeckDialog.opened) {
-                if (event.key === Qt.Key_Escape) {
-                    newDeckDialog.close();
-                    newCardDialog.close();
-                    importDialog.close();
-                    editCardDialog.close();
-                    deleteDeckDialog.close();
-                    event.accepted = true;
-                }
-                return;
-            }
-            if (settingsVisible) {
-                if (event.key === Qt.Key_Escape) {
-                    settingsVisible = false;
-                    keyHandler.forceActiveFocus();
-                    event.accepted = true;
-                }
-                return;
-            }
-            switch (event.key) {
-            case Qt.Key_Space:
-            case Qt.Key_Up:
-            case Qt.Key_Down:
-            case Qt.Key_Return:
-                backend.flip();
-                event.accepted = true;
-                break;
-            case Qt.Key_1:
-            case Qt.Key_A:
-            case Qt.Key_Left:
-                backend.showingAnswer ? backend.answer(1) : backend.flip();
-                event.accepted = true;
-                break;
-            case Qt.Key_2:
-            case Qt.Key_G:
-            case Qt.Key_Right:
-                backend.showingAnswer ? backend.answer(3) : backend.flip();
-                event.accepted = true;
-                break;
-            case Qt.Key_N:
-                newCardDialog.open();
-                event.accepted = true;
-                break;
-            case Qt.Key_B:
-                if (browserDrawer.opened) {
-                    browserDrawer.close();
-                    keyHandler.forceActiveFocus();
-                } else {
-                    browserDrawer.open();
-                    browserSearch.forceActiveFocus();
-                }
-                event.accepted = true;
-                break;
-            case Qt.Key_S:
-                openStats();
-                event.accepted = true;
-                break;
-            case Qt.Key_Comma:
-                newPerDaySpin.value = backend.newPerDay
-                retentionSlider.value = backend.desiredRetention
-                settingsVisible = true;
-                newPerDaySpin.forceActiveFocus();
-                event.accepted = true;
-                break;
-            case Qt.Key_D:
-                newDeckDialog.open();
-                event.accepted = true;
-                break;
-            case Qt.Key_I:
-                importDialog.open();
-                event.accepted = true;
-                break;
-            case Qt.Key_E:
-                backend.editDeckFile();
-                event.accepted = true;
-                break;
-            case Qt.Key_C:
-                backend.setMode("cram");
-                event.accepted = true;
-                break;
-            case Qt.Key_R:
-                backend.setMode("review");
-                event.accepted = true;
-                break;
-            case Qt.Key_Question:
-                helpVisible = !helpVisible;
-                event.accepted = true;
-                break;
-            case Qt.Key_F1:
-                helpVisible = !helpVisible;
-                event.accepted = true;
-                break;
-            case Qt.Key_Q:
-                Qt.quit();
-                event.accepted = true;
-                break;
-            case Qt.Key_Escape:
-                helpVisible = false;
-                statsVisible = false;
-                settingsVisible = false;
-                if (browserDrawer.opened)
-                    browserDrawer.close()
-                keyHandler.forceActiveFocus();
-                event.accepted = true;
-                break;
-            }
-        }
+        implicitWidth: buttonRow.implicitWidth + (compact ? 22 : 40)
+        implicitHeight: compact ? 32 : 46
+        radius: Math.min(10, theme.radius)
+        color: primary ? theme.accent : (hover.hovered ? raised : panel)
+        border.width: primary ? 0 : 1
+        border.color: danger ? withAlpha(theme.red, 0.6) : border
+        opacity: enabled ? 1 : 0.4
+        Behavior on color { ColorAnimation { duration: 90 } }
 
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 18
-            spacing: 14
-
-            ToolBar {
-                Layout.fillWidth: true
-                background: Rectangle {
-                    color: "#17171b"
-                    radius: Math.min(4, theme.radius)
-                }
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.margins: 8
-                    spacing: 10
-
-                    Label {
-                        text: qsTr("Deck")
-                        color: "#a8a8b0"
-                    }
-                    ComboBox {
-                        id: deckCombo
-                        Layout.preferredWidth: 210
-                        model: backend.decks
-                        currentIndex: Math.max(0, model.indexOf(backend.currentDeck))
-                        onActivated: { backend.selectDeck(modelData); keyHandler.forceActiveFocus() }
-                    }
-                    Button {
-                        text: qsTr("Review (R)")
-                        highlighted: backend.mode === "review"
-                        onClicked: { backend.setMode("review"); keyHandler.forceActiveFocus() }
-                    }
-                    Button {
-                        text: qsTr("Cram (C)")
-                        highlighted: backend.mode === "cram"
-                        onClicked: { backend.setMode("cram"); keyHandler.forceActiveFocus() }
-                    }
-                    Item { Layout.fillWidth: true }
-                    ToolButton {
-                        text: "↶"
-                        enabled: backend.canUndo
-                        ToolTip.visible: hovered
-                        ToolTip.text: qsTr("Undo (Ctrl+Z)")
-                        onClicked: { backend.undo(); keyHandler.forceActiveFocus() }
-                    }
-                    ToolButton {
-                        text: "↷"
-                        enabled: backend.canRedo
-                        ToolTip.visible: hovered
-                        ToolTip.text: qsTr("Redo (Ctrl+Shift+Z)")
-                        onClicked: { backend.redo(); keyHandler.forceActiveFocus() }
-                    }
-                    Button {
-                        text: qsTr("Cards (B)")
-                        onClicked: { browserDrawer.open(); browserSearch.forceActiveFocus() }
-                    }
-                    Label {
-                        text: qsTr("%1 due").arg(backend.dueCount)
-                        color: theme.accent
-                    }
-                    ToolButton {
-                        text: "⚙"
-                        ToolTip.visible: hovered
-                        ToolTip.text: qsTr("Settings (,)")
-                        onClicked: {
-                            newPerDaySpin.value = backend.newPerDay
-                            retentionSlider.value = backend.desiredRetention
-                            settingsVisible = !settingsVisible
-                            if (settingsVisible)
-                                newPerDaySpin.forceActiveFocus()
-                            else
-                                keyHandler.forceActiveFocus()
-                        }
-                    }
-                    ToolButton {
-                        text: "?"
-                        onClicked: { helpVisible = !helpVisible; keyHandler.forceActiveFocus() }
-                    }
-                }
-            }
+        RowLayout {
+            id: buttonRow
+            anchors.centerIn: parent
+            spacing: 9
 
             Label {
-                Layout.fillWidth: true
-                text: backend.status
-                color: "#8e8e98"
-                elide: Text.ElideRight
+                text: control.label
+                color: control.primary ? win.accentInk : control.danger ? theme.red : win.text
+                font.pixelSize: control.compact ? 12 : 15
+                font.weight: Font.DemiBold
             }
 
             Rectangle {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                color: "#17171b"
-                radius: Math.min(8, theme.radius)
-                border.color: "#2a2a32"
-                border.width: 1
+                visible: control.hint.length > 0
+                implicitWidth: hintLabel.implicitWidth + 12
+                implicitHeight: 20
+                radius: 4
+                color: control.primary ? win.withAlpha(win.accentInk, 0.14) : raised
 
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 28
-                    spacing: 18
+                Label {
+                    id: hintLabel
+                    anchors.centerIn: parent
+                    text: control.hint
+                    color: control.primary ? win.withAlpha(win.accentInk, 0.78) : win.muted
+                    font.pixelSize: 11
+                    font.family: "monospace"
+                }
+            }
+        }
 
-                    Text {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        text: backend.question
-                        textFormat: Text.RichText
-                        wrapMode: Text.WordWrap
-                        font.pixelSize: 30
-                        color: "#f2f2f4"
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: backend.showingAnswer ? Text.AlignTop : Text.AlignVCenter
-                        onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+        HoverHandler { id: hover }
+
+        MouseArea {
+            anchors.fill: parent
+            enabled: control.enabled
+            cursorShape: Qt.PointingHandCursor
+            onClicked: control.clicked()
+        }
+    }
+
+    component LinkButton: Label {
+        signal clicked()
+        color: hover.hovered ? theme.accent : muted
+        font.pixelSize: 12
+        font.family: "monospace"
+
+        HoverHandler { id: hover }
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: parent.clicked()
+        }
+    }
+
+    component Stat: ColumnLayout {
+        property string value
+        property string label
+        property color valueColor: win.text
+
+        spacing: 2
+        Label {
+            text: parent.value
+            color: parent.valueColor
+            font.pixelSize: 30
+            font.weight: Font.DemiBold
+        }
+        Label {
+            text: parent.label
+            color: win.muted
+            font.pixelSize: 12
+        }
+    }
+
+    component Panel: Rectangle {
+        color: win.panel
+        radius: Math.min(12, theme.radius)
+        border.width: 1
+        border.color: win.border
+    }
+
+    component InputField: TextField {
+        color: win.text
+        placeholderTextColor: win.muted
+        selectionColor: win.withAlpha(theme.accent, 0.35)
+        selectedTextColor: win.text
+        font.pixelSize: 14
+        leftPadding: 12
+        rightPadding: 12
+        background: Rectangle {
+            color: win.raised
+            radius: Math.min(7, theme.radius)
+            border.width: 1
+            border.color: parent.activeFocus ? win.withAlpha(theme.accent, 0.7) : win.border
+        }
+    }
+
+    component TextBox: TextArea {
+        color: win.text
+        placeholderTextColor: win.muted
+        selectionColor: win.withAlpha(theme.accent, 0.35)
+        selectedTextColor: win.text
+        font.pixelSize: 14
+        leftPadding: 12
+        rightPadding: 12
+        topPadding: 10
+        bottomPadding: 10
+        wrapMode: TextArea.Wrap
+        background: Rectangle {
+            color: win.raised
+            radius: Math.min(7, theme.radius)
+            border.width: 1
+            border.color: parent.activeFocus ? win.withAlpha(theme.accent, 0.7) : win.border
+        }
+    }
+
+    Item {
+        anchors.fill: parent
+
+        Rectangle {
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: 3
+            color: theme.accent
+        }
+
+        Item {
+            id: keyHandler
+            anchors.fill: parent
+            anchors.topMargin: 3
+            focus: true
+            LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+            LayoutMirroring.childrenInherit: true
+
+            Keys.onPressed: function(event) {
+                if (event.modifiers & Qt.ControlModifier) {
+                    if (event.key === Qt.Key_Z) {
+                        if (event.modifiers & Qt.ShiftModifier)
+                            backend.redo()
+                        else
+                            backend.undo()
+                        event.accepted = true
+                    } else if (event.key === Qt.Key_Y) {
+                        backend.redo()
+                        event.accepted = true
                     }
+                    return
+                }
+
+                if (newDeckDialog.opened || newCardDialog.opened || importDialog.opened
+                        || editCardDialog.opened || deleteDeckDialog.opened) {
+                    if (event.key === Qt.Key_Escape) {
+                        newDeckDialog.close()
+                        newCardDialog.close()
+                        importDialog.close()
+                        editCardDialog.close()
+                        deleteDeckDialog.close()
+                        keyHandler.forceActiveFocus()
+                        event.accepted = true
+                    }
+                    return
+                }
+
+                if (helpVisible || statsVisible) {
+                    if (event.key === Qt.Key_Escape || event.key === Qt.Key_Question
+                            || event.key === Qt.Key_F1 || event.key === Qt.Key_S) {
+                        helpVisible = false
+                        statsVisible = false
+                        event.accepted = true
+                    }
+                    return
+                }
+
+                switch (event.key) {
+                case Qt.Key_Q:
+                    Qt.quit()
+                    event.accepted = true
+                    return
+                case Qt.Key_Question:
+                case Qt.Key_F1:
+                    helpVisible = true
+                    event.accepted = true
+                    return
+                case Qt.Key_S:
+                    openStats()
+                    event.accepted = true
+                    return
+                case Qt.Key_Comma:
+                    if (screen === "settings") goHome()
+                    else openSettings()
+                    event.accepted = true
+                    return
+                case Qt.Key_B:
+                    if (screen === "library") goHome()
+                    else openLibrary()
+                    event.accepted = true
+                    return
+                case Qt.Key_N:
+                    newCardDialog.open()
+                    event.accepted = true
+                    return
+                case Qt.Key_D:
+                    newDeckDialog.open()
+                    event.accepted = true
+                    return
+                case Qt.Key_I:
+                    importDialog.open()
+                    event.accepted = true
+                    return
+                case Qt.Key_E:
+                    backend.editDeckFile()
+                    event.accepted = true
+                    return
+                case Qt.Key_Escape:
+                    if (screen === "study") {
+                        goHome()
+                    } else if (screen === "library" || screen === "settings") {
+                        goHome()
+                    }
+                    event.accepted = true
+                    return
+                }
+
+                if (screen === "home") {
+                    switch (event.key) {
+                    case Qt.Key_Space:
+                    case Qt.Key_Return:
+                    case Qt.Key_Enter:
+                    case Qt.Key_R:
+                        startStudy("review")
+                        event.accepted = true
+                        break
+                    case Qt.Key_C:
+                        startStudy("cram")
+                        event.accepted = true
+                        break
+                    }
+                    return
+                }
+
+                if (screen === "study") {
+                    switch (event.key) {
+                    case Qt.Key_Space:
+                    case Qt.Key_Up:
+                    case Qt.Key_Down:
+                    case Qt.Key_Return:
+                    case Qt.Key_Enter:
+                        backend.flip()
+                        event.accepted = true
+                        break
+                    case Qt.Key_1:
+                    case Qt.Key_A:
+                    case Qt.Key_Left:
+                        backend.showingAnswer ? backend.answer(1) : backend.flip()
+                        event.accepted = true
+                        break
+                    case Qt.Key_2:
+                    case Qt.Key_G:
+                    case Qt.Key_Right:
+                        backend.showingAnswer ? backend.answer(3) : backend.flip()
+                        event.accepted = true
+                        break
+                    case Qt.Key_R:
+                        startStudy("review")
+                        event.accepted = true
+                        break
+                    case Qt.Key_C:
+                        startStudy("cram")
+                        event.accepted = true
+                        break
+                    }
+                }
+            }
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 28
+                spacing: 16
+
+                StackLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    currentIndex: win.screen === "study" ? 1
+                                  : win.screen === "library" ? 2
+                                  : win.screen === "settings" ? 3 : 0
+
+                    // ---------------------------------------------------- home
+                    Item {
+                        ColumnLayout {
+                            anchors.centerIn: parent
+                            width: Math.min(parent.width, 660)
+                            spacing: 24
+
+                            RowLayout {
+                                Layout.alignment: Qt.AlignHCenter
+                                spacing: 12
+
+                                Rectangle {
+                                    width: 22
+                                    height: 22
+                                    radius: Math.min(5, theme.radius)
+                                    color: theme.accent
+                                }
+
+                                Label {
+                                    text: "omacards"
+                                    color: win.text
+                                    font.pixelSize: 22
+                                    font.weight: Font.DemiBold
+                                }
+
+                                Label {
+                                    text: qsTr("flashcards for Omarchy")
+                                    color: win.muted
+                                    font.pixelSize: 14
+                                    Layout.alignment: Qt.AlignBaseline
+                                }
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                horizontalAlignment: Text.AlignHCenter
+                                text: win.heroTitle()
+                                color: win.text
+                                font.pixelSize: 38
+                                font.weight: Font.DemiBold
+                                wrapMode: Text.Wrap
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                horizontalAlignment: Text.AlignHCenter
+                                text: win.heroDetail()
+                                color: win.soft
+                                font.pixelSize: 16
+                                wrapMode: Text.Wrap
+                            }
+
+                            Panel {
+                                Layout.fillWidth: true
+                                implicitHeight: 112
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 22
+                                    spacing: 20
+
+                                    Stat {
+                                        Layout.fillWidth: true
+                                        value: backend.dueCount
+                                        label: qsTr("Due now")
+                                        valueColor: theme.accent
+                                    }
+
+                                    Rectangle { width: 1; Layout.fillHeight: true; color: win.border }
+
+                                    Stat {
+                                        Layout.fillWidth: true
+                                        value: backend.newCount
+                                        label: qsTr("New left today")
+                                        valueColor: theme.green
+                                    }
+
+                                    Rectangle { width: 1; Layout.fillHeight: true; color: win.border }
+
+                                    Stat {
+                                        Layout.fillWidth: true
+                                        value: backend.streak
+                                        label: qsTr("Day streak")
+                                        valueColor: theme.yellow
+                                    }
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.alignment: Qt.AlignHCenter
+                                spacing: 10
+
+                                ActionButton {
+                                    primary: true
+                                    label: backend.dueCount > 0 || backend.newCount > 0
+                                           ? qsTr("Start review") : qsTr("Review anyway")
+                                    hint: "R"
+                                    onClicked: win.startStudy("review")
+                                }
+
+                                ActionButton {
+                                    label: qsTr("Cram")
+                                    hint: "C"
+                                    onClicked: win.startStudy("cram")
+                                }
+
+                                ActionButton {
+                                    label: qsTr("Library")
+                                    hint: "B"
+                                    onClicked: win.openLibrary()
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.alignment: Qt.AlignHCenter
+                                spacing: 16
+
+                                Label {
+                                    text: backend.currentDeck.length > 0
+                                          ? qsTr("%1 · %2 cards").arg(backend.currentDeck).arg(backend.totalCards)
+                                          : qsTr("No decks yet")
+                                    color: win.muted
+                                    font.pixelSize: 12
+                                }
+
+                                LinkButton {
+                                    text: qsTr("Settings (,)")
+                                    onClicked: win.openSettings()
+                                }
+                            }
+                        }
+                    }
+
+                    // --------------------------------------------------- study
+                    Item {
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 16
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 12
+
+                                ColumnLayout {
+                                    spacing: 2
+                                    Label {
+                                        text: backend.currentDeck.length > 0
+                                              ? backend.currentDeck : qsTr("No deck")
+                                        color: win.text
+                                        font.pixelSize: 20
+                                        font.weight: Font.DemiBold
+                                    }
+                                    Label {
+                                        text: backend.mode === "cram"
+                                              ? qsTr("Cram · endless, in-session boxes")
+                                              : qsTr("Review · FSRS-5 scheduling")
+                                        color: win.muted
+                                        font.pixelSize: 12
+                                    }
+                                }
+
+                                Item { Layout.fillWidth: true }
+
+                                ActionButton {
+                                    compact: true
+                                    label: qsTr("Review")
+                                    hint: "R"
+                                    primary: backend.mode === "review"
+                                    onClicked: win.startStudy("review")
+                                }
+                                ActionButton {
+                                    compact: true
+                                    label: qsTr("Cram")
+                                    hint: "C"
+                                    primary: backend.mode === "cram"
+                                    onClicked: win.startStudy("cram")
+                                }
+                                ActionButton {
+                                    compact: true
+                                    label: qsTr("Home")
+                                    hint: "Esc"
+                                    onClicked: win.goHome()
+                                }
+                            }
+
+                            Panel {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                border.color: win.withAlpha(theme.accent, 0.32)
+
+                                ColumnLayout {
+                                    anchors.centerIn: parent
+                                    width: Math.min(parent.width - 96, 660)
+                                    spacing: 18
+
+                                    Label {
+                                        Layout.alignment: Qt.AlignHCenter
+                                        text: {
+                                            if (!backend.hasCard)
+                                                return qsTr("SESSION")
+                                            return backend.mode === "cram"
+                                                   ? qsTr("CRAM · BOX %1 OF 5").arg(backend.box)
+                                                   : qsTr("REVIEW · %1 DUE").arg(backend.dueCount)
+                                        }
+                                        color: win.muted
+                                        font.pixelSize: 12
+                                        font.letterSpacing: 1.5
+                                    }
+
+                                    Label {
+                                        Layout.fillWidth: true
+                                        visible: backend.hasCard
+                                        horizontalAlignment: Text.AlignHCenter
+                                        wrapMode: Text.Wrap
+                                        textFormat: Text.RichText
+                                        text: backend.question
+                                        color: win.text
+                                        font.pixelSize: 30
+                                        font.weight: Font.DemiBold
+                                        onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+                                    }
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        implicitHeight: 1
+                                        color: win.border
+                                        visible: backend.hasCard && backend.showingAnswer
+                                    }
+
+                                    Label {
+                                        Layout.fillWidth: true
+                                        visible: backend.hasCard && backend.showingAnswer
+                                        horizontalAlignment: Text.AlignHCenter
+                                        wrapMode: Text.Wrap
+                                        textFormat: Text.RichText
+                                        text: backend.answer
+                                        color: theme.accent
+                                        font.pixelSize: 24
+                                    }
+
+                                    ActionButton {
+                                        Layout.alignment: Qt.AlignHCenter
+                                        visible: backend.hasCard && !backend.showingAnswer
+                                        primary: true
+                                        label: qsTr("Show answer")
+                                        hint: "Space"
+                                        onClicked: backend.flip()
+                                    }
+
+                                    Label {
+                                        Layout.fillWidth: true
+                                        visible: backend.hasCard && !backend.showingAnswer
+                                        horizontalAlignment: Text.AlignHCenter
+                                        text: qsTr("Click the card, or press Space.")
+                                        color: win.muted
+                                        font.pixelSize: 12
+                                    }
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        visible: !backend.hasCard
+                                        spacing: 18
+
+                                        Label {
+                                            Layout.fillWidth: true
+                                            horizontalAlignment: Text.AlignHCenter
+                                            text: qsTr("All caught up.")
+                                            color: win.text
+                                            font.pixelSize: 34
+                                            font.weight: Font.DemiBold
+                                        }
+                                        Label {
+                                            Layout.fillWidth: true
+                                            horizontalAlignment: Text.AlignHCenter
+                                            wrapMode: Text.Wrap
+                                            text: qsTr("Nothing is waiting in this deck. Add a card, import a file, or keep the material warm with cram.")
+                                            color: win.soft
+                                            font.pixelSize: 15
+                                        }
+                                        RowLayout {
+                                            Layout.alignment: Qt.AlignHCenter
+                                            spacing: 10
+                                            ActionButton {
+                                                primary: true
+                                                label: qsTr("Cram this deck")
+                                                hint: "C"
+                                                onClicked: win.startStudy("cram")
+                                            }
+                                            ActionButton {
+                                                label: qsTr("Back home")
+                                                hint: "Esc"
+                                                onClicked: win.goHome()
+                                            }
+                                        }
+                                    }
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    enabled: backend.hasCard
+                                    onClicked: backend.flip()
+                                    z: -1
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 12
+
+                                ActionButton {
+                                    danger: true
+                                    label: qsTr("Again")
+                                    hint: "1"
+                                    enabled: backend.hasCard && backend.showingAnswer
+                                    onClicked: { backend.answer(1); keyHandler.forceActiveFocus() }
+                                }
+
+                                ActionButton {
+                                    primary: true
+                                    label: qsTr("Good")
+                                    hint: "2"
+                                    enabled: backend.hasCard && backend.showingAnswer
+                                    onClicked: { backend.answer(3); keyHandler.forceActiveFocus() }
+                                }
+
+                                Item { Layout.fillWidth: true }
+
+                                Label {
+                                    text: qsTr("%1 reviewed · %2 correct").arg(backend.reviewed).arg(backend.correct)
+                                    color: win.muted
+                                    font.pixelSize: 12
+                                }
+                            }
+                        }
+                    }
+
+                    // ------------------------------------------------- library
+                    Item {
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 14
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+
+                                ColumnLayout {
+                                    spacing: 2
+                                    Label {
+                                        text: qsTr("Library")
+                                        color: win.text
+                                        font.pixelSize: 26
+                                        font.weight: Font.DemiBold
+                                    }
+                                    Label {
+                                        text: qsTr("%1 decks · %2 cards · plain-text files")
+                                              .arg(backend.deckList.length).arg(backend.totalCards)
+                                        color: win.muted
+                                        font.pixelSize: 12
+                                    }
+                                }
+
+                                Item { Layout.fillWidth: true }
+
+                                ActionButton {
+                                    compact: true
+                                    label: qsTr("New deck")
+                                    hint: "D"
+                                    onClicked: newDeckDialog.open()
+                                }
+                                ActionButton {
+                                    compact: true
+                                    label: qsTr("Import")
+                                    hint: "I"
+                                    onClicked: importDialog.open()
+                                }
+                                ActionButton {
+                                    compact: true
+                                    label: qsTr("Home")
+                                    hint: "Esc"
+                                    onClicked: win.goHome()
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                spacing: 14
+
+                                Panel {
+                                    Layout.preferredWidth: 250
+                                    Layout.fillHeight: true
+
+                                    ColumnLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 14
+                                        spacing: 8
+
+                                        Label {
+                                            text: qsTr("DECKS")
+                                            color: win.muted
+                                            font.pixelSize: 11
+                                            font.letterSpacing: 1.2
+                                        }
+
+                                        ListView {
+                                            id: deckList
+                                            Layout.fillWidth: true
+                                            Layout.fillHeight: true
+                                            clip: true
+                                            spacing: 6
+                                            model: backend.deckList
+
+                                            delegate: Rectangle {
+                                                id: deckRow
+                                                required property var modelData
+                                                width: ListView.view.width
+                                                height: 58
+                                                radius: Math.min(8, theme.radius)
+                                                color: modelData.active
+                                                       ? win.withAlpha(theme.accent, 0.14)
+                                                       : hover.hovered ? win.raised : "transparent"
+                                                border.width: modelData.active ? 1 : 0
+                                                border.color: win.withAlpha(theme.accent, 0.5)
+
+                                                Rectangle {
+                                                    anchors.left: parent.left
+                                                    anchors.top: parent.top
+                                                    anchors.bottom: parent.bottom
+                                                    width: 3
+                                                    radius: 2
+                                                    visible: modelData.active
+                                                    color: theme.accent
+                                                }
+
+                                                ColumnLayout {
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: 14
+                                                    anchors.rightMargin: 10
+                                                    spacing: 2
+
+                                                    Label {
+                                                        Layout.fillWidth: true
+                                                        text: modelData.name
+                                                        color: win.text
+                                                        font.pixelSize: 14
+                                                        font.weight: Font.DemiBold
+                                                        elide: Text.ElideRight
+                                                    }
+                                                    Label {
+                                                        Layout.fillWidth: true
+                                                        text: modelData.cards + (modelData.cards === 1 ? qsTr(" card") : qsTr(" cards"))
+                                                              + " · " + modelData.due + qsTr(" due")
+                                                              + (modelData["new"] > 0 ? " · " + modelData["new"] + qsTr(" new") : "")
+                                                        color: win.muted
+                                                        font.pixelSize: 11
+                                                        elide: Text.ElideRight
+                                                    }
+                                                }
+
+                                                HoverHandler { id: hover }
+
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: backend.selectDeck(deckRow.modelData.name)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Panel {
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+
+                                    ColumnLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 16
+                                        spacing: 10
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 10
+
+                                            ColumnLayout {
+                                                Layout.fillWidth: true
+                                                spacing: 2
+                                                Label {
+                                                    Layout.fillWidth: true
+                                                    text: backend.currentDeck.length > 0
+                                                          ? backend.currentDeck : qsTr("No deck selected")
+                                                    color: win.text
+                                                    font.pixelSize: 20
+                                                    font.weight: Font.DemiBold
+                                                    elide: Text.ElideRight
+                                                }
+                                                Label {
+                                                    Layout.fillWidth: true
+                                                    text: backend.cardList.length + (backend.cardList.length === 1 ? qsTr(" card") : qsTr(" cards"))
+                                                          + " · " + backend.dueCount + qsTr(" due")
+                                                    color: win.muted
+                                                    font.pixelSize: 12
+                                                }
+                                            }
+
+                                            ActionButton {
+                                                compact: true
+                                                label: qsTr("New card")
+                                                hint: "N"
+                                                onClicked: newCardDialog.open()
+                                            }
+                                            ActionButton {
+                                                compact: true
+                                                danger: true
+                                                label: qsTr("Delete deck")
+                                                onClicked: {
+                                                    win.pendingDeck = backend.currentDeck
+                                                    deleteDeckDialog.open()
+                                                }
+                                            }
+                                        }
+
+                                        InputField {
+                                            id: librarySearch
+                                            Layout.fillWidth: true
+                                            placeholderText: qsTr("Search questions, answers and tags")
+                                            text: backend.cardFilter
+                                            onTextChanged: backend.cardFilter = text
+                                            onAccepted: keyHandler.forceActiveFocus()
+                                            Keys.onEscapePressed: {
+                                                win.goHome()
+                                                event.accepted = true
+                                            }
+                                        }
+
+                                        Label {
+                                            Layout.fillWidth: true
+                                            visible: backend.cardList.length === 0
+                                            wrapMode: Text.WordWrap
+                                            text: backend.cardFilter.length > 0
+                                                  ? qsTr("No cards match “%1”.").arg(backend.cardFilter)
+                                                  : qsTr("No cards yet. Press N to add one.")
+                                            color: win.muted
+                                            font.pixelSize: 12
+                                        }
+
+                                        ListView {
+                                            Layout.fillWidth: true
+                                            Layout.fillHeight: true
+                                            clip: true
+                                            spacing: 6
+                                            model: backend.cardList
+
+                                            delegate: Rectangle {
+                                                id: cardRow
+                                                required property var modelData
+                                                width: ListView.view.width
+                                                height: 52
+                                                radius: Math.min(8, theme.radius)
+                                                color: hover.hovered ? win.raised : win.withAlpha(win.raised, 0.45)
+
+                                                Rectangle {
+                                                    width: 3
+                                                    height: parent.height - 16
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    anchors.left: parent.left
+                                                    radius: 2
+                                                    color: modelData.isDue ? theme.accent : win.border
+                                                }
+
+                                                RowLayout {
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: 14
+                                                    anchors.rightMargin: 8
+                                                    spacing: 10
+
+                                                    ColumnLayout {
+                                                        Layout.fillWidth: true
+                                                        spacing: 2
+
+                                                        Label {
+                                                            Layout.fillWidth: true
+                                                            text: modelData.question
+                                                            color: win.text
+                                                            font.pixelSize: 13
+                                                            maximumLineCount: 1
+                                                            elide: Text.ElideRight
+                                                        }
+                                                        Label {
+                                                            Layout.fillWidth: true
+                                                            text: (modelData.tags.length > 0 ? modelData.tags + " · " : "")
+                                                                  + modelData.dueText
+                                                            color: modelData.isDue ? theme.accent : win.muted
+                                                            font.pixelSize: 11
+                                                            elide: Text.ElideRight
+                                                        }
+                                                    }
+
+                                                    LinkButton {
+                                                        text: qsTr("Edit")
+                                                        onClicked: win.openEditor(cardRow.modelData)
+                                                    }
+                                                    LinkButton {
+                                                        text: qsTr("Delete")
+                                                        color: hover.hovered ? theme.red : win.muted
+                                                        onClicked: backend.removeCard(cardRow.modelData.id)
+                                                    }
+                                                }
+
+                                                HoverHandler { id: hover }
+                                            }
+                                        }
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            Label {
+                                                text: qsTr("Ctrl+Z undo")
+                                                color: win.muted
+                                                font.pixelSize: 11
+                                            }
+                                            Item { Layout.fillWidth: true }
+                                            LinkButton {
+                                                text: qsTr("Edit deck file")
+                                                onClicked: backend.editDeckFile()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ------------------------------------------------ settings
+                    Item {
+                        ScrollView {
+                            anchors.fill: parent
+                            clip: true
+                            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+                            ColumnLayout {
+                                width: Math.min(parent.width, 560)
+                                x: Math.max(0, (parent.width - width) / 2)
+                                spacing: 14
+
+                            Label {
+                                text: qsTr("Settings")
+                                color: win.text
+                                font.pixelSize: 26
+                                font.weight: Font.DemiBold
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                                text: qsTr("Changes are saved immediately and apply from now on.")
+                                color: win.muted
+                                font.pixelSize: 12
+                            }
+
+                            Panel {
+                                Layout.fillWidth: true
+                                implicitHeight: 72
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 16
+                                    spacing: 12
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 2
+                                        Label { text: qsTr("New cards per day"); color: win.text; font.pixelSize: 14 }
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: qsTr("Keeps a large import manageable. 0 means review only.")
+                                            color: win.muted
+                                            font.pixelSize: 11
+                                            wrapMode: Text.Wrap
+                                        }
+                                    }
+
+                                    ActionButton {
+                                        compact: true
+                                        label: "−"
+                                        implicitWidth: 38
+                                        onClicked: backend.setNewPerDay(Math.max(0, backend.newPerDay - 1))
+                                    }
+
+                                    Label {
+                                        text: backend.newPerDay
+                                        color: win.text
+                                        font.pixelSize: 17
+                                        font.family: "monospace"
+                                        Layout.preferredWidth: 34
+                                        horizontalAlignment: Text.AlignHCenter
+                                    }
+
+                                    ActionButton {
+                                        compact: true
+                                        label: "+"
+                                        implicitWidth: 38
+                                        onClicked: backend.setNewPerDay(Math.min(999, backend.newPerDay + 1))
+                                    }
+                                }
+                            }
+
+                            Panel {
+                                Layout.fillWidth: true
+                                implicitHeight: 104
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 16
+                                    spacing: 6
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: qsTr("Desired retention")
+                                            color: win.text
+                                            font.pixelSize: 14
+                                        }
+                                        Label {
+                                            text: Math.round(retentionSlider.value * 100) + "%"
+                                            color: theme.accent
+                                            font.pixelSize: 14
+                                            font.weight: Font.DemiBold
+                                        }
+                                    }
+
+                                    Slider {
+                                        id: retentionSlider
+                                        Layout.fillWidth: true
+                                        from: 0.70
+                                        to: 0.99
+                                        stepSize: 0.01
+                                        snapMode: Slider.SnapAlways
+                                        value: backend.desiredRetention
+                                        onMoved: backend.setDesiredRetention(value)
+                                    }
+
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: qsTr("Higher retention shortens intervals and means more reviews.")
+                                        color: win.muted
+                                        font.pixelSize: 11
+                                        wrapMode: Text.Wrap
+                                    }
+                                }
+                            }
+
+                            Panel {
+                                Layout.fillWidth: true
+                                implicitHeight: 72
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 16
+                                    spacing: 12
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 2
+                                        Label { text: qsTr("Math"); color: win.text; font.pixelSize: 14 }
+                                        Label {
+                                            text: qsTr("Cached under ~/.cache/omacards/math")
+                                            color: win.muted
+                                            font.pixelSize: 11
+                                        }
+                                    }
+
+                                    Label {
+                                        text: backend.mathEngine
+                                        color: win.muted
+                                        font.pixelSize: 12
+                                    }
+                                }
+                            }
+
+                            Panel {
+                                Layout.fillWidth: true
+                                implicitHeight: 72
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 16
+                                    spacing: 12
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 2
+                                        Label { text: qsTr("Deck files"); color: win.text; font.pixelSize: 14 }
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: backend.decksDirectory
+                                            color: win.muted
+                                            font.pixelSize: 11
+                                            elide: Text.ElideMiddle
+                                        }
+                                    }
+
+                                    ActionButton {
+                                        compact: true
+                                        label: qsTr("Edit file")
+                                        hint: "E"
+                                        onClicked: backend.editDeckFile()
+                                    }
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Layout.topMargin: 4
+                                Layout.bottomMargin: 8
+                                spacing: 10
+
+                                ActionButton {
+                                    label: qsTr("Back")
+                                    hint: "Esc"
+                                    onClicked: win.goHome()
+                                }
+
+                                Item { Layout.fillWidth: true }
+                            }
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
 
                     Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 1
-                        color: "#2a2a32"
-                        visible: backend.showingAnswer
+                        width: 8
+                        height: 8
+                        radius: 4
+                        color: backend.totalCards > 0 ? theme.green : win.muted
                     }
 
-                    Text {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        visible: backend.showingAnswer
-                        text: backend.answer
-                        textFormat: Text.RichText
-                        wrapMode: Text.WordWrap
-                        font.pixelSize: 26
-                        color: theme.accent
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
+                    Label {
+                        text: win.screen === "study"
+                              ? backend.status
+                              : backend.currentDeck.length > 0
+                                  ? qsTr("%1 · %2 cards · plain text").arg(backend.currentDeck).arg(backend.totalCards)
+                                  : qsTr("No decks yet")
+                        color: win.muted
+                        font.pixelSize: 11
+                        elide: Text.ElideRight
+                        Layout.maximumWidth: 460
                     }
-                }
 
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: backend.flip()
-                    z: 2
-                }
-            }
+                    Item { Layout.fillWidth: true }
 
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 10
-
-                Button {
-                    text: qsTr("Again (1)")
-                    enabled: backend.hasCard && backend.showingAnswer
-                    onClicked: { backend.answer(1); keyHandler.forceActiveFocus() }
-                }
-                Button {
-                    text: qsTr("Good (2)")
-                    enabled: backend.hasCard && backend.showingAnswer
-                    highlighted: true
-                    onClicked: { backend.answer(3); keyHandler.forceActiveFocus() }
-                }
-                Item { Layout.fillWidth: true }
-                Label {
-                    text: backend.statsText()
-                    color: "#8e8e98"
-                }
-                ToolButton {
-                    text: qsTr("+ Card (N)")
-                    onClicked: { newCardDialog.open(); keyHandler.forceActiveFocus() }
-                }
-                ToolButton {
-                    text: qsTr("+ Deck (D)")
-                    onClicked: { newDeckDialog.open(); keyHandler.forceActiveFocus() }
+                    LinkButton {
+                        text: qsTr("? help")
+                        onClicked: win.helpVisible = !win.helpVisible
+                    }
                 }
             }
         }
     }
 
-    Popup {
-        id: helpPopup
-        parent: win.contentItem
-        visible: helpVisible
-        anchors.centerIn: parent
-        width: Math.min(560, win.width - 40)
-        height: Math.min(480, win.height - 40)
-        modal: true
-        closePolicy: Popup.CloseOnEscape
-        padding: 24
-        onClosed: { helpVisible = false; keyHandler.forceActiveFocus() }
-        background: Rectangle {
-            color: "#17171b"
-            radius: Math.min(8, theme.radius)
-            border.color: "#33333d"
-        }
-        ColumnLayout {
+    // ------------------------------------------------------------ overlays
+    Rectangle {
+        anchors.fill: parent
+        visible: win.helpVisible
+        color: win.withAlpha(theme.background, 0.88)
+
+        MouseArea {
             anchors.fill: parent
-            spacing: 10
-            Label {
-                text: qsTr("Keyboard shortcuts")
-                font.pixelSize: 22
-                font.bold: true
-            }
-            GridLayout {
-                Layout.fillWidth: true
-                columns: 2
-                rowSpacing: 8
-                columnSpacing: 18
+            onClicked: win.helpVisible = false
+        }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: Math.min(parent.width - 80, 540)
+            implicitHeight: helpColumn.implicitHeight + 56
+            radius: Math.min(12, theme.radius)
+            color: win.panel
+            border.width: 1
+            border.color: win.withAlpha(theme.accent, 0.5)
+
+            ColumnLayout {
+                id: helpColumn
+                anchors.centerIn: parent
+                width: parent.width - 56
+                spacing: 12
+
+                Label {
+                    text: qsTr("Keyboard")
+                    color: win.text
+                    font.pixelSize: 19
+                    font.weight: Font.DemiBold
+                }
+
                 Repeater {
                     model: [
-                        [qsTr("Flip / main action"), "Space, ↑, ↓, Enter"],
-                        [qsTr("Again"), "1, A, ←"],
-                        [qsTr("Good"), "2, G, →"],
-                        [qsTr("New card"), "N"],
-                        [qsTr("New deck"), "D"],
-                        [qsTr("Browse / search"), "B"],
-                        [qsTr("Stats"), "S"],
-                        [qsTr("Settings"), ","],
-                        [qsTr("Undo / redo"), "Ctrl+Z / Ctrl+Shift+Z"],
-                        [qsTr("Import"), "I"],
-                        [qsTr("Edit deck file"), "E"],
-                        [qsTr("Cram mode"), "C"],
-                        [qsTr("Review mode"), "R"],
-                        [qsTr("This help"), "?, F1"],
-                        [qsTr("Quit"), "Q"],
+                        { keys: "Space", action: qsTr("Start review, flip the card, or continue") },
+                        { keys: "1 / A / ←", action: qsTr("Again") },
+                        { keys: "2 / G / →", action: qsTr("Good") },
+                        { keys: "R / C", action: qsTr("Review or cram mode") },
+                        { keys: "B", action: qsTr("Open the library") },
+                        { keys: "S", action: qsTr("Stats for today and this session") },
+                        { keys: ",", action: qsTr("Settings") },
+                        { keys: "N / D", action: qsTr("New card or new deck") },
+                        { keys: "I / E", action: qsTr("Import a file, or edit the deck file") },
+                        { keys: "Ctrl+Z", action: qsTr("Undo a card or deck edit") },
+                        { keys: "Esc", action: qsTr("Close, or go back home") },
+                        { keys: "Q", action: qsTr("Quit") }
                     ]
-                    Label { text: modelData[0]; color: "#c8c8d0" }
-                    Label { text: modelData[1]; color: theme.accent; font.bold: true }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 20
+
+                        Label {
+                            text: modelData.keys
+                            color: theme.accent
+                            font.pixelSize: 13
+                            font.family: "monospace"
+                            Layout.preferredWidth: 100
+                        }
+
+                        Label {
+                            text: modelData.action
+                            color: win.soft
+                            font.pixelSize: 13
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                        }
+                    }
                 }
-            }
-            Item { Layout.fillHeight: true }
-            Label {
-                text: qsTr("Press Escape to close")
-                color: "#8e8e98"
+
+                Label {
+                    Layout.topMargin: 4
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    text: qsTr("Review answers are not undoable, so a lapse cannot be erased by accident. Card and deck edits are.")
+                    color: win.muted
+                    font.pixelSize: 12
+                }
             }
         }
     }
 
-    Popup {
-        id: statsPopup
-        parent: win.contentItem
-        visible: statsVisible
+    Rectangle {
+        anchors.fill: parent
+        visible: win.statsVisible
+        color: win.withAlpha(theme.background, 0.88)
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: win.statsVisible = false
+        }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: Math.min(parent.width - 80, 460)
+            implicitHeight: statsColumn.implicitHeight + 56
+            radius: Math.min(12, theme.radius)
+            color: win.panel
+            border.width: 1
+            border.color: win.withAlpha(theme.accent, 0.5)
+
+            ColumnLayout {
+                id: statsColumn
+                anchors.centerIn: parent
+                width: parent.width - 56
+                spacing: 10
+
+                Label {
+                    text: qsTr("Stats")
+                    color: win.text
+                    font.pixelSize: 19
+                    font.weight: Font.DemiBold
+                }
+
+                Repeater {
+                    model: [
+                        [qsTr("Reviews today"), (statsData.today || 0)],
+                        [qsTr("Accuracy today"), (statsData.accuracy || 0) + "%"],
+                        [qsTr("New cards today"), qsTr("%1 of %2").arg(statsData.newToday || 0).arg(statsData.newPerDay || 0)],
+                        [qsTr("Due now"), (statsData.due || 0)],
+                        [qsTr("Streak"), qsTr("%1 days").arg(statsData.streakDays || 0)],
+                        [qsTr("Total reviews"), (statsData.totalReviews || 0)],
+                        [qsTr("Cards"), (statsData.cards || 0)],
+                        [qsTr("Decks"), (statsData.decks || 0)],
+                        [qsTr("This session"), qsTr("%1 reviews · %2 correct").arg(statsData.sessionReviewed || 0).arg(statsData.sessionCorrect || 0)]
+                    ]
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label {
+                            Layout.fillWidth: true
+                            text: modelData[0]
+                            color: win.muted
+                            font.pixelSize: 13
+                        }
+                        Label {
+                            text: modelData[1]
+                            color: theme.accent
+                            font.pixelSize: 13
+                            font.weight: Font.DemiBold
+                        }
+                    }
+                }
+
+                Label {
+                    Layout.topMargin: 4
+                    text: qsTr("Press S or Esc to close")
+                    color: win.muted
+                    font.pixelSize: 11
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ dialogs
+    Dialog {
+        id: newDeckDialog
+        modal: true
         anchors.centerIn: parent
         width: Math.min(420, win.width - 40)
-        height: Math.min(430, win.height - 40)
-        modal: true
-        closePolicy: Popup.CloseOnEscape
         padding: 24
-        onClosed: { statsVisible = false; keyHandler.forceActiveFocus() }
+        closePolicy: Popup.CloseOnEscape
         background: Rectangle {
-            color: "#17171b"
-            radius: Math.min(8, theme.radius)
-            border.color: "#33333d"
+            color: win.panel
+            radius: Math.min(12, theme.radius)
+            border.width: 1
+            border.color: win.border
         }
+        onOpened: deckNameField.forceActiveFocus()
+        onClosed: keyHandler.forceActiveFocus()
+
         ColumnLayout {
             anchors.fill: parent
             spacing: 12
-            Label {
-                text: qsTr("Stats")
-                font.pixelSize: 22
-                font.bold: true
-            }
-            Repeater {
-                model: [
-                    [qsTr("Reviews today"), (statsData.today || 0)],
-                    [qsTr("Accuracy today"), (statsData.accuracy || 0) + "%"],
-                    [qsTr("New cards today"), qsTr("%1 of %2").arg((statsData.newToday || 0)).arg((statsData.newPerDay || 0))],
-                    [qsTr("Desired retention"), (statsData.retention || 90) + "%"],
-                    [qsTr("Streak"), qsTr("%1 days").arg((statsData.streakDays || 0))],
-                    [qsTr("Total reviews"), (statsData.totalReviews || 0)],
-                    [qsTr("Due now"), (statsData.due || 0)],
-                    [qsTr("Cards"), (statsData.cards || 0)],
-                    [qsTr("Decks"), (statsData.decks || 0)],
-                    [qsTr("This session"), qsTr("%1 reviews · %2 correct").arg((statsData.sessionReviewed || 0)).arg((statsData.sessionCorrect || 0))]
-                ]
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label { text: modelData[0]; color: "#a8a8b0"; Layout.fillWidth: true }
-                    Label { text: modelData[1]; color: theme.accent; font.bold: true }
-                }
-            }
-            Item { Layout.fillHeight: true }
-            Label {
-                text: qsTr("Press Escape to close")
-                color: "#8e8e98"
-            }
-        }
-    }
 
-    Popup {
-        id: settingsPopup
-        parent: win.contentItem
-        visible: settingsVisible
-        anchors.centerIn: parent
-        width: Math.min(440, win.width - 40)
-        height: 360
-        modal: true
-        closePolicy: Popup.CloseOnEscape
-        padding: 24
-        onClosed: { settingsVisible = false; keyHandler.forceActiveFocus() }
-        background: Rectangle {
-            color: "#17171b"
-            radius: Math.min(8, theme.radius)
-            border.color: "#33333d"
-        }
-        ColumnLayout {
-            anchors.fill: parent
-            spacing: 14
             Label {
-                text: qsTr("Settings")
-                font.pixelSize: 22
-                font.bold: true
+                text: qsTr("New deck")
+                color: win.text
+                font.pixelSize: 20
+                font.weight: Font.DemiBold
             }
-            RowLayout {
+
+            InputField {
+                id: deckNameField
                 Layout.fillWidth: true
-                Label { text: qsTr("New cards per day"); Layout.fillWidth: true }
-                SpinBox {
-                    id: newPerDaySpin
-                    from: 0
-                    to: 999
-                    editable: true
+                placeholderText: qsTr("Deck name")
+                onAccepted: {
+                    if (text.trim().length > 0) {
+                        backend.newDeck(text.trim())
+                        text = ""
+                    }
+                    newDeckDialog.close()
                 }
             }
-            Label {
-                Layout.fillWidth: true
-                text: qsTr("New cards join review sessions up to this limit each day. Set 0 to study only cards already in review.")
-                color: "#8e8e98"
-                wrapMode: Text.WordWrap
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                Label { text: qsTr("Desired retention"); Layout.fillWidth: true }
-                Label {
-                    text: Math.round(retentionSlider.value * 100) + "%"
-                    color: theme.accent
-                    font.bold: true
-                }
-            }
-            Slider {
-                id: retentionSlider
-                Layout.fillWidth: true
-                from: 0.70
-                to: 0.99
-                stepSize: 0.01
-                snapMode: Slider.SnapAlways
-            }
-            Label {
-                Layout.fillWidth: true
-                text: qsTr("Higher retention shortens intervals and means more reviews. Changes apply to future answers.")
-                color: "#8e8e98"
-                wrapMode: Text.WordWrap
-            }
-            Label {
-                Layout.fillWidth: true
-                text: qsTr("Math: %1").arg(backend.mathEngine)
-                color: "#8e8e98"
-            }
-            Item { Layout.fillHeight: true }
+
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
-                Button {
-                    text: qsTr("Cancel")
-                    onClicked: settingsVisible = false
+                ActionButton {
+                    label: qsTr("Cancel")
+                    onClicked: newDeckDialog.close()
                 }
-                Button {
-                    text: qsTr("Save")
-                    highlighted: true
+                ActionButton {
+                    primary: true
+                    label: qsTr("Create")
                     onClicked: {
-                        backend.setNewPerDay(newPerDaySpin.value)
-                        backend.setDesiredRetention(retentionSlider.value)
-                        settingsVisible = false
-                        keyHandler.forceActiveFocus()
+                        if (deckNameField.text.trim().length > 0) {
+                            backend.newDeck(deckNameField.text.trim())
+                            deckNameField.text = ""
+                        }
+                        newDeckDialog.close()
                     }
                 }
             }
-        }
-    }
-
-    Dialog {
-        id: newDeckDialog
-        title: qsTr("New deck")
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        modal: true
-        anchors.centerIn: parent
-        width: Math.min(420, win.width - 40)
-        onAccepted: {
-            backend.newDeck(deckNameField.text.trim());
-            deckNameField.clear();
-            keyHandler.forceActiveFocus();
-        }
-        TextField {
-            id: deckNameField
-            anchors.fill: parent
-            placeholderText: qsTr("Deck name")
         }
     }
 
     Dialog {
         id: newCardDialog
-        title: qsTr("New card")
-        standardButtons: Dialog.Ok | Dialog.Cancel
         modal: true
         anchors.centerIn: parent
-        width: Math.min(560, win.width - 40)
-        onAccepted: {
-            backend.addCardDetails(newQuestion.text, newAnswer.text,
-                                   newType.currentIndex === 1 ? "cloze" : "basic", newTags.text);
-            newQuestion.clear();
-            newAnswer.clear();
-            newTags.clear();
-            newType.currentIndex = 0;
-            keyHandler.forceActiveFocus();
+        width: Math.min(580, win.width - 40)
+        padding: 24
+        closePolicy: Popup.CloseOnEscape
+        background: Rectangle {
+            color: win.panel
+            radius: Math.min(12, theme.radius)
+            border.width: 1
+            border.color: win.border
         }
+        onOpened: newQuestion.forceActiveFocus()
+        onClosed: keyHandler.forceActiveFocus()
+
         ColumnLayout {
             anchors.fill: parent
-            spacing: 8
-            TextArea {
+            spacing: 10
+
+            Label {
+                text: qsTr("New card")
+                color: win.text
+                font.pixelSize: 20
+                font.weight: Font.DemiBold
+            }
+
+            TextBox {
                 id: newQuestion
                 Layout.fillWidth: true
                 Layout.preferredHeight: 84
                 placeholderText: qsTr("Question (LaTeX with \\( ... \\))")
-                wrapMode: TextArea.Wrap
             }
-            TextArea {
+
+            TextBox {
                 id: newAnswer
                 Layout.fillWidth: true
                 Layout.preferredHeight: 84
                 placeholderText: qsTr("Answer (cloze cards: write the sentence in the question)")
-                wrapMode: TextArea.Wrap
             }
+
             RowLayout {
                 Layout.fillWidth: true
                 ComboBox {
                     id: newType
                     model: [qsTr("Basic"), qsTr("Cloze")]
                 }
-                TextField {
+                InputField {
                     id: newTags
                     Layout.fillWidth: true
                     placeholderText: qsTr("Tags, comma separated")
+                }
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: backend.currentDeck.length === 0
+                text: qsTr("Create a deck first with D.")
+                color: theme.yellow
+                font.pixelSize: 11
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                ActionButton {
+                    label: qsTr("Cancel")
+                    onClicked: newCardDialog.close()
+                }
+                ActionButton {
+                    primary: true
+                    label: qsTr("Add card")
+                    onClicked: {
+                        backend.addCardDetails(newQuestion.text, newAnswer.text,
+                                               newType.currentIndex === 1 ? "cloze" : "basic", newTags.text)
+                        newQuestion.text = ""
+                        newAnswer.text = ""
+                        newTags.text = ""
+                        newType.currentIndex = 0
+                        newCardDialog.close()
+                    }
                 }
             }
         }
@@ -616,42 +1581,70 @@ ApplicationWindow {
 
     Dialog {
         id: editCardDialog
-        title: qsTr("Edit card")
-        standardButtons: Dialog.Ok | Dialog.Cancel
         modal: true
         anchors.centerIn: parent
-        width: Math.min(560, win.width - 40)
-        onAccepted: {
-            backend.updateCard(editCardId, editQuestion.text, editAnswer.text,
-                               editType.currentIndex === 1 ? "cloze" : "basic", editTags.text);
-            keyHandler.forceActiveFocus();
+        width: Math.min(580, win.width - 40)
+        padding: 24
+        closePolicy: Popup.CloseOnEscape
+        background: Rectangle {
+            color: win.panel
+            radius: Math.min(12, theme.radius)
+            border.width: 1
+            border.color: win.border
         }
         onClosed: keyHandler.forceActiveFocus()
+
         ColumnLayout {
             anchors.fill: parent
-            spacing: 8
-            TextArea {
+            spacing: 10
+
+            Label {
+                text: qsTr("Edit card")
+                color: win.text
+                font.pixelSize: 20
+                font.weight: Font.DemiBold
+            }
+
+            TextBox {
                 id: editQuestion
                 Layout.fillWidth: true
                 Layout.preferredHeight: 84
-                wrapMode: TextArea.Wrap
             }
-            TextArea {
+
+            TextBox {
                 id: editAnswer
                 Layout.fillWidth: true
                 Layout.preferredHeight: 84
-                wrapMode: TextArea.Wrap
             }
+
             RowLayout {
                 Layout.fillWidth: true
                 ComboBox {
                     id: editType
                     model: [qsTr("Basic"), qsTr("Cloze")]
                 }
-                TextField {
+                InputField {
                     id: editTags
                     Layout.fillWidth: true
                     placeholderText: qsTr("Tags, comma separated")
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                ActionButton {
+                    label: qsTr("Cancel")
+                    onClicked: editCardDialog.close()
+                }
+                ActionButton {
+                    primary: true
+                    label: qsTr("Save")
+                    onClicked: {
+                        backend.updateCard(win.editCardId, editQuestion.text, editAnswer.text,
+                                           editType.currentIndex === 1 ? "cloze" : "basic", editTags.text)
+                        editCardDialog.close()
+                    }
                 }
             }
         }
@@ -659,169 +1652,121 @@ ApplicationWindow {
 
     Dialog {
         id: deleteDeckDialog
-        title: qsTr("Delete deck?")
-        standardButtons: Dialog.Ok | Dialog.Cancel
         modal: true
         anchors.centerIn: parent
         width: Math.min(440, win.width - 40)
-        onAccepted: {
-            backend.deleteCurrentDeck();
-            keyHandler.forceActiveFocus();
+        padding: 24
+        closePolicy: Popup.CloseOnEscape
+        background: Rectangle {
+            color: win.panel
+            radius: Math.min(12, theme.radius)
+            border.width: 1
+            border.color: win.withAlpha(theme.red, 0.5)
         }
         onClosed: keyHandler.forceActiveFocus()
-        Label {
-            text: qsTr("Remove “%1” and all of its cards? Ctrl+Z can undo this.").arg(backend.currentDeck)
-            wrapMode: Text.WordWrap
+
+        ColumnLayout {
             anchors.fill: parent
+            spacing: 12
+
+            Label {
+                text: qsTr("Delete deck?")
+                color: win.text
+                font.pixelSize: 20
+                font.weight: Font.DemiBold
+            }
+
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: qsTr("Remove “%1” and all of its cards? Ctrl+Z can undo this.")
+                      .arg(win.pendingDeck)
+                color: win.soft
+                font.pixelSize: 13
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                ActionButton {
+                    label: qsTr("Cancel")
+                    onClicked: deleteDeckDialog.close()
+                }
+                ActionButton {
+                    danger: true
+                    label: qsTr("Delete")
+                    onClicked: {
+                        backend.deleteDeck(win.pendingDeck)
+                        deleteDeckDialog.close()
+                    }
+                }
+            }
         }
     }
 
     Dialog {
         id: importDialog
-        title: qsTr("Import cards")
-        standardButtons: Dialog.Ok | Dialog.Cancel
         modal: true
         anchors.centerIn: parent
-        width: Math.min(520, win.width - 40)
-        onAccepted: {
-            backend.importFile(importPathField.text.trim(), backend.currentDeck);
-            importPathField.clear();
-            keyHandler.forceActiveFocus();
-        }
-        TextField {
-            id: importPathField
-            anchors.fill: parent
-            placeholderText: qsTr("Path to .apkg, .csv or .tsv")
-        }
-    }
-
-    Drawer {
-        id: browserDrawer
-        edge: Qt.RightEdge
-        width: Math.min(400, win.width - 40)
-        height: win.height
-        modal: true
-        interactive: true
+        width: Math.min(540, win.width - 40)
+        padding: 24
+        closePolicy: Popup.CloseOnEscape
         background: Rectangle {
-            color: "#17171b"
-            border.color: "#2a2a32"
+            color: win.panel
+            radius: Math.min(12, theme.radius)
+            border.width: 1
+            border.color: win.border
         }
+        onOpened: importPathField.forceActiveFocus()
+        onClosed: keyHandler.forceActiveFocus()
+
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 16
-            spacing: 10
+            spacing: 12
 
-            RowLayout {
-                Layout.fillWidth: true
-                Label {
-                    text: qsTr("Cards")
-                    font.pixelSize: 20
-                    font.bold: true
-                    Layout.fillWidth: true
-                }
-                Label {
-                    text: backend.cardList.length
-                    color: theme.accent
-                }
-                ToolButton {
-                    text: "×"
-                    onClicked: {
-                        browserDrawer.close()
-                        keyHandler.forceActiveFocus()
-                    }
-                }
-            }
-
-            TextField {
-                id: browserSearch
-                Layout.fillWidth: true
-                placeholderText: qsTr("Search questions, answers and tags")
-                text: backend.cardFilter
-                onTextChanged: backend.cardFilter = text
-                onAccepted: keyHandler.forceActiveFocus()
+            Label {
+                text: qsTr("Import cards")
+                color: win.text
+                font.pixelSize: 20
+                font.weight: Font.DemiBold
             }
 
             Label {
                 Layout.fillWidth: true
-                visible: backend.cardList.length === 0
-                text: backend.cardFilter.length > 0
-                      ? qsTr("No cards match “%1”.").arg(backend.cardFilter)
-                      : qsTr("No cards yet. Press N to add one.")
-                color: "#8e8e98"
-                wrapMode: Text.WordWrap
+                wrapMode: Text.Wrap
+                text: qsTr("Anki .apkg, CSV or TSV into %1.").arg(backend.currentDeck)
+                color: win.muted
+                font.pixelSize: 12
             }
 
-            ListView {
-                id: browserList
+            InputField {
+                id: importPathField
                 Layout.fillWidth: true
-                Layout.fillHeight: true
-                clip: true
-                spacing: 6
-                model: backend.cardList
-
-                delegate: Rectangle {
-                    required property var modelData
-                    width: ListView.view.width
-                    height: cardRow.implicitHeight + 16
-                    color: hover.containsMouse ? "#24242c" : "#1d1d23"
-                    radius: Math.min(6, theme.radius)
-
-                    RowLayout {
-                        id: cardRow
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        spacing: 4
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 2
-                            Label {
-                                Layout.fillWidth: true
-                                text: modelData.question
-                                color: "#e8e8ec"
-                                wrapMode: Text.Wrap
-                                maximumLineCount: 2
-                                elide: Text.ElideRight
-                            }
-                            Label {
-                                Layout.fillWidth: true
-                                text: (modelData.tags.length > 0 ? modelData.tags + " · " : "") + modelData.dueText
-                                color: modelData.isDue ? theme.accent : "#8e8e98"
-                                font.pixelSize: 11
-                                elide: Text.ElideRight
-                            }
-                        }
-
-                        ToolButton {
-                            text: qsTr("Edit")
-                            ToolTip.visible: hovered
-                            ToolTip.text: qsTr("Edit card")
-                            onClicked: win.openEditor(modelData)
-                        }
-                        ToolButton {
-                            text: qsTr("Del")
-                            ToolTip.visible: hovered
-                            ToolTip.text: qsTr("Delete card")
-                            onClicked: backend.removeCard(modelData.id)
-                        }
-                    }
-
-                    HoverHandler {
-                        id: hover
-                    }
+                placeholderText: qsTr("Path to .apkg, .csv or .tsv")
+                onAccepted: {
+                    if (text.trim().length > 0)
+                        backend.importFrom(text.trim(), backend.currentDeck)
+                    text = ""
+                    importDialog.close()
                 }
             }
 
             RowLayout {
                 Layout.fillWidth: true
-                Button {
-                    text: qsTr("Delete deck")
-                    onClicked: deleteDeckDialog.open()
-                }
                 Item { Layout.fillWidth: true }
-                Label {
-                    text: qsTr("Ctrl+Z undo")
-                    color: "#8e8e98"
+                ActionButton {
+                    label: qsTr("Cancel")
+                    onClicked: importDialog.close()
+                }
+                ActionButton {
+                    primary: true
+                    label: qsTr("Import")
+                    onClicked: {
+                        if (importPathField.text.trim().length > 0)
+                            backend.importFrom(importPathField.text.trim(), backend.currentDeck)
+                        importPathField.text = ""
+                        importDialog.close()
+                    }
                 }
             }
         }
@@ -835,12 +1780,15 @@ ApplicationWindow {
         visible: noticeTimer.running
         padding: 12
         background: Rectangle {
-            color: "#2a2a32"
-            radius: Math.min(6, theme.radius)
+            color: win.panel
+            radius: Math.min(8, theme.radius)
+            border.width: 1
+            border.color: win.withAlpha(theme.red, 0.6)
         }
         Label {
             text: backend.status
-            color: "#f2f2f4"
+            color: win.text
+            font.pixelSize: 12
         }
     }
 
@@ -853,4 +1801,6 @@ ApplicationWindow {
         target: backend
         function onErrorOccurred(message) { noticeTimer.restart() }
     }
+
+    Component.onCompleted: keyHandler.forceActiveFocus()
 }

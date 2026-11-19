@@ -1,4 +1,4 @@
-// Theme watching follows Omacut (MIT, David Heinemeier Hansson).
+// Palette watching follows keymemo and Omacut (MIT, David Heinemeier Hansson).
 #include "theme.h"
 
 #include <QColor>
@@ -11,9 +11,23 @@
 #include <QStandardPaths>
 #include <cmath>
 
+namespace {
+QString readKey(const QString &text, const QString &key) {
+    const QRegularExpression expression(
+        "^\\s*" + QRegularExpression::escape(key) + "\\s*=\\s*[\"']([^\"']+)[\"']",
+        QRegularExpression::MultilineOption);
+    const auto match = expression.match(text);
+    return match.hasMatch() ? match.captured(1) : QString();
+}
+} // namespace
+
 Theme::Theme(const QString &directory, QObject *parent, const QString &hyprctl)
     : QObject(parent),
-      m_directory(directory.isEmpty() ? QDir::homePath() + "/.local/state/omarchy/current" : directory) {
+      m_directory(directory.isEmpty()
+                      ? (qEnvironmentVariableIsEmpty("OMACARDS_THEME_DIR")
+                             ? QDir::homePath() + "/.local/state/omarchy/current"
+                             : qEnvironmentVariable("OMACARDS_THEME_DIR"))
+                      : directory) {
     m_debounce.setSingleShot(true);
     m_debounce.setInterval(80);
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, [this] { m_debounce.start(); });
@@ -31,7 +45,8 @@ Theme::Theme(const QString &directory, QObject *parent, const QString &hyprctl)
     connect(&m_roundingProcess, &QProcess::errorOccurred, this, [this] { m_roundingTimeout.stop(); });
     connect(&m_roundingProcess, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
         m_roundingTimeout.stop();
-        const auto value = QJsonDocument::fromJson(m_roundingProcess.readAllStandardOutput()).object().value("int");
+        const auto value = QJsonDocument::fromJson(m_roundingProcess.readAllStandardOutput())
+                               .object().value("int");
         if (code != 0 || status != QProcess::NormalExit || !value.isDouble() || value.toInt(-1) < 0)
             return;
         if (value.toInt() != m_radius) {
@@ -72,11 +87,40 @@ QString Theme::readAccent(const QString &path) {
     return "#FFD60A";
 }
 
+QString Theme::readColor(const QString &path, const QString &key, const QString &fallback) {
+    QFile file(path);
+    if (file.open(QIODevice::ReadOnly)) {
+        const auto value = readKey(QString::fromUtf8(file.readAll()), key);
+        if (!value.isEmpty())
+            return value;
+    }
+    return fallback;
+}
+
+QHash<QString, QString> Theme::readColors(const QString &path) {
+    QHash<QString, QString> result;
+    QFile file(path);
+    if (file.open(QIODevice::ReadOnly)) {
+        const auto text = QString::fromUtf8(file.readAll());
+        for (const auto &key : QStringList{"mode", "accent", "selection", "muted",
+                                           "background", "dark_background", "darker_background",
+                                           "lighter_background", "foreground", "dark_foreground",
+                                           "light_foreground", "bright_foreground", "red",
+                                           "yellow", "green", "orange", "blue", "cyan", "magenta"}) {
+            const auto value = readKey(text, key);
+            if (!value.isEmpty())
+                result.insert(key, value);
+        }
+    }
+    return result;
+}
+
 // Black or white, whichever reads on the accent (WCAG relative luminance).
 QString Theme::accentForeground() const {
     const QColor c(m_accent);
     auto linear = [](double v) { return v <= .04045 ? v / 12.92 : std::pow((v + .055) / 1.055, 2.4); };
-    const double luminance = .2126 * linear(c.redF()) + .7152 * linear(c.greenF()) + .0722 * linear(c.blueF());
+    const double luminance = .2126 * linear(c.redF()) + .7152 * linear(c.greenF())
+                           + .0722 * linear(c.blueF());
     return luminance > .179 ? "black" : "white";
 }
 
@@ -98,9 +142,52 @@ void Theme::reload() {
         if (QFileInfo::exists(path))
             m_watcher.addPath(path);
 
-    const auto accent = readAccent(m_directory + "/theme/colors.toml");
-    if (accent != m_accent) {
-        m_accent = accent;
-        emit changed();
-    }
+    const auto colors = readColors(m_directory + "/theme/colors.toml");
+    const bool dark = colors.value("mode", "dark") == "dark";
+
+    const QString fallbackBackground = dark ? "#0e0e10" : "#ffffff";
+    const QString fallbackForeground = dark ? "#c0caf5" : "#100F0F";
+    const QString fallbackSoft = dark ? "#a9b1d6" : "#403E3C";
+    const QString fallbackMuted = dark ? "#565f89" : "#878580";
+    const QString fallbackPanel = dark ? "#13141c" : "#f5f5f5";
+    const QString fallbackRaised = dark ? "#1b1d28" : "#e8e8e8";
+    const QString fallbackBorder = dark ? "#232636" : "#c0c0c0";
+    const QString fallbackRed = dark ? "#f7768e" : "#d20f39";
+    const QString fallbackYellow = dark ? "#e0af68" : "#df8e1d";
+    const QString fallbackGreen = dark ? "#9ece6a" : "#40a02b";
+
+    const QString accent = colors.value("accent", readAccent(m_directory + "/theme/colors.toml"));
+    const QString background = colors.value("background", fallbackBackground);
+    const QString foreground = colors.value("foreground", fallbackForeground);
+    const QString soft = colors.value("light_foreground", fallbackSoft);
+    const QString muted = colors.value("muted", fallbackMuted);
+    const QString panel = colors.value("dark_background", fallbackPanel);
+    const QString raised = colors.value("lighter_background", fallbackRaised);
+    const QString border = colors.value("selection", fallbackBorder);
+    const QString red = colors.value("red", fallbackRed);
+    const QString yellow = colors.value("yellow", fallbackYellow);
+    const QString green = colors.value("green", fallbackGreen);
+
+    const bool paletteChanged = m_dark != dark
+        || m_accent != (accent.isEmpty() ? QString("#FFD60A") : accent)
+        || m_background != background || m_foreground != foreground
+        || m_soft != soft || m_muted != muted || m_panel != panel
+        || m_raised != raised || m_border != border || m_red != red
+        || m_yellow != yellow || m_green != green;
+    if (!paletteChanged)
+        return;
+
+    m_dark = dark;
+    m_accent = accent.isEmpty() ? QString("#FFD60A") : accent;
+    m_background = background;
+    m_foreground = foreground;
+    m_soft = soft;
+    m_muted = muted;
+    m_panel = panel;
+    m_raised = raised;
+    m_border = border;
+    m_red = red;
+    m_yellow = yellow;
+    m_green = green;
+    emit changed();
 }

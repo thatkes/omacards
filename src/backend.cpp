@@ -157,6 +157,84 @@ void Backend::refresh() {
     rebuildQueue();
 }
 
+int Backend::newCount() const {
+    const auto states = m_store.states();
+    const auto hashes = m_store.hashes();
+    int remaining = qMax(0, m_newPerDay - m_store.newCardsToday());
+    int count = 0;
+    for (const Deck &deck : m_decks) {
+        for (const Card &card : deck.cards) {
+            if (remaining <= 0)
+                return count;
+            FsrsState state = states.value(card.id);
+            if (hashes.value(card.id) != DeckIO::contentHash(card))
+                state = FsrsState{};
+            if (state.reps == 0) {
+                ++count;
+                --remaining;
+            }
+        }
+    }
+    return count;
+}
+
+int Backend::deckDue() const {
+    return availableCount(m_currentDeck);
+}
+
+int Backend::deckNew() const {
+    const Deck *deck = deckByName(m_currentDeck);
+    if (!deck)
+        return 0;
+    const auto states = m_store.states();
+    const auto hashes = m_store.hashes();
+    int remaining = qMax(0, m_newPerDay - m_store.newCardsToday());
+    int count = 0;
+    for (const Card &card : deck->cards) {
+        FsrsState state = states.value(card.id);
+        if (hashes.value(card.id) != DeckIO::contentHash(card))
+            state = FsrsState{};
+        if (state.reps == 0 && count < remaining)
+            ++count;
+    }
+    return count;
+}
+
+QVariantList Backend::deckSummaries() const {
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const auto states = m_store.states();
+    const auto hashes = m_store.hashes();
+    int remainingNew = qMax(0, m_newPerDay - m_store.newCardsToday());
+
+    QVariantList result;
+    for (const Deck &deck : m_decks) {
+        int due = 0;
+        int fresh = 0;
+        for (const Card &card : deck.cards) {
+            FsrsState state = states.value(card.id);
+            if (hashes.value(card.id) != DeckIO::contentHash(card))
+                state = FsrsState{};
+            if (state.reps == 0) {
+                if (remainingNew > 0) {
+                    ++fresh;
+                    --remainingNew;
+                }
+            } else if (state.due <= now) {
+                ++due;
+            }
+        }
+        QVariantMap entry;
+        entry.insert("name", deck.name);
+        entry.insert("description", deck.description);
+        entry.insert("cards", deck.cards.size());
+        entry.insert("due", due);
+        entry.insert("new", fresh);
+        entry.insert("active", deck.name == m_currentDeck);
+        result << entry;
+    }
+    return result;
+}
+
 void Backend::rebuildQueue() {
     m_reviewQueue.clear();
     m_cramQueue.clear();
@@ -509,6 +587,8 @@ void Backend::selectDeck(const QString &name) {
         return;
     m_currentDeck = name;
     emit currentDeckChanged();
+    emit cardsChanged();
+    emit decksChanged();
     rebuildQueue();
 }
 
@@ -545,6 +625,8 @@ void Backend::answer(int rating) {
         answerReview(rating);
     emit statsChanged();
     presentCard();
+    emit cardsChanged();
+    emit decksChanged();
 }
 
 void Backend::answerReview(int rating) {
@@ -793,6 +875,14 @@ void Backend::deleteCurrentDeck() {
     deleteDeck(m_currentDeck);
 }
 
+void Backend::importFrom(const QString &path, const QString &deckName) {
+    QString error;
+    if (!importFile(path, deckName.isEmpty() ? m_currentDeck : deckName, &error))
+        reportError(error);
+    else
+        setStatus(tr("Imported %1").arg(QFileInfo(path).fileName()));
+}
+
 QStringList Backend::splitDelimited(const QString &line, QChar delimiter) {
     QStringList cells;
     QString cell;
@@ -982,6 +1072,7 @@ QVariantMap Backend::statsSummary() const {
     result.insert("cards", totalCards());
     result.insert("decks", m_deckNames.size());
     result.insert("newToday", summary.newToday);
+    result.insert("newAvailable", newCount());
     result.insert("newPerDay", m_newPerDay);
     result.insert("retention", qRound(m_desiredRetention * 100));
     result.insert("sessionReviewed", m_reviewed);

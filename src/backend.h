@@ -29,6 +29,11 @@ class Backend : public QObject {
     Q_PROPERTY(bool showingAnswer READ showingAnswer NOTIFY cardChanged)
     Q_PROPERTY(bool hasCard READ hasCard NOTIFY cardChanged)
     Q_PROPERTY(int dueCount READ dueCount NOTIFY dueCountChanged)
+    Q_PROPERTY(int newCount READ newCount NOTIFY dueCountChanged)
+    Q_PROPERTY(int deckDue READ deckDue NOTIFY dueCountChanged)
+    Q_PROPERTY(int deckNew READ deckNew NOTIFY dueCountChanged)
+    Q_PROPERTY(int streak READ streak NOTIFY dueCountChanged)
+    Q_PROPERTY(QVariantList deckList READ deckSummaries NOTIFY decksChanged)
     Q_PROPERTY(int reviewed READ reviewed NOTIFY statsChanged)
     Q_PROPERTY(int correct READ correct NOTIFY statsChanged)
     Q_PROPERTY(int box READ box NOTIFY statsChanged)
@@ -57,6 +62,10 @@ public:
     bool showingAnswer() const { return m_showingAnswer; }
     bool hasCard() const { return !m_currentId.isEmpty(); }
     int dueCount() const { return m_dueCount; }
+    int newCount() const;
+    int deckDue() const;
+    int deckNew() const;
+    int streak() const { return m_store.summary().streakDays; }
     int reviewed() const { return m_reviewed; }
     int correct() const { return m_correct; }
     int box() const { return m_box; }
@@ -72,6 +81,7 @@ public:
     int newPerDay() const { return m_newPerDay; }
     double desiredRetention() const { return m_desiredRetention; }
     int availableCount(const QString &deckName = {}) const;
+    QVariantList deckSummaries() const;
     QVariantList cardList() const;
     ReviewSummary reviewSummary() const { return m_store.summary(); }
 
@@ -110,6 +120,7 @@ public slots:
     Q_INVOKABLE void deleteCurrentDeck();
     Q_INVOKABLE void updateCard(const QString &cardId, const QString &question, const QString &answer,
                                 const QString &type, const QString &tags);
+    Q_INVOKABLE void importFrom(const QString &path, const QString &deckName = {});
     Q_INVOKABLE void setCardFilter(const QString &filter);
     Q_INVOKABLE void setNewPerDay(int count);
     Q_INVOKABLE void setDesiredRetention(double retention);
