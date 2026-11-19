@@ -11,7 +11,7 @@
 
 Store::Store(const QString &path)
     : m_path(path.isEmpty()
-                 ? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/state.db"
+                 ? QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/omacards/state.db"
                  : path),
       m_connection("omacards-" + QUuid::createUuid().toString(QUuid::WithoutBraces)) {
 }

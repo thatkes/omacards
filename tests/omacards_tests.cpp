@@ -211,6 +211,27 @@ oops: not a key
         QCOMPARE(code, 1);
     }
 
+    void defaultPathsIgnoreOrganizationName() {
+        const QByteArray oldDecks = qgetenv("OMACARDS_DECKS_DIR");
+        const QByteArray oldState = qgetenv("OMACARDS_STATE_DB");
+        qunsetenv("OMACARDS_DECKS_DIR");
+        qunsetenv("OMACARDS_STATE_DB");
+
+        const QString oldOrg = QCoreApplication::organizationName();
+        Backend withoutOrg;
+        const QString first = withoutOrg.decksDirectory();
+        QCoreApplication::setOrganizationName("omarchy");
+        Backend withOrg;
+        const QString second = withOrg.decksDirectory();
+        QCoreApplication::setOrganizationName(oldOrg);
+
+        QCOMPARE(first, second);
+        QVERIFY(!first.contains(QStringLiteral("omarchy")));
+
+        if (!oldDecks.isNull()) qputenv("OMACARDS_DECKS_DIR", oldDecks);
+        if (!oldState.isNull()) qputenv("OMACARDS_STATE_DB", oldState);
+    }
+
     void fsrsInitialState() {
         QCOMPARE(Fsrs::initial().reps, 0);
         QVERIFY(Fsrs::initialStability(3) > Fsrs::initialStability(1));

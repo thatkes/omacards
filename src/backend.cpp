@@ -37,14 +37,22 @@ QString replaceRegex(const QString &text, const QRegularExpression &expression, 
     return out + text.mid(last);
 }
 
+QString defaultDataDirectory() {
+    // Use a deterministic base directory that does not depend on whether
+    // QCoreApplication::setOrganizationName() has been called yet: the GUI
+    // sets it to "omarchy", while the headless CLI path returns before that,
+    // which previously made the two resolve different decks directories.
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/omacards";
+}
+
 QString defaultDecksDirectory() {
     const QString fromEnv = qEnvironmentVariable("OMACARDS_DECKS_DIR");
-    return fromEnv.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/decks" : fromEnv;
+    return fromEnv.isEmpty() ? defaultDataDirectory() + "/decks" : fromEnv;
 }
 
 QString defaultDatabasePath() {
     const QString fromEnv = qEnvironmentVariable("OMACARDS_STATE_DB");
-    return fromEnv.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/state.db" : fromEnv;
+    return fromEnv.isEmpty() ? defaultDataDirectory() + "/state.db" : fromEnv;
 }
 
 }
