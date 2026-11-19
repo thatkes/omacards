@@ -8,7 +8,6 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
 #include <QUrl>
@@ -390,83 +389,42 @@ void Backend::reportError(const QString &message) {
     emit errorOccurred(message);
 }
 
-QByteArray Backend::readFileBytes(const QString &path) {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly))
-        return {};
-    return file.readAll();
-}
-
 void Backend::recordHistory(const QString &path, const QByteArray &before, bool existedBefore,
                             const QString &description) {
-    const bool existsAfter = QFileInfo::exists(path);
-    const QByteArray after = existsAfter ? readFileBytes(path) : QByteArray();
-    if (existedBefore == existsAfter && before == after)
-        return;
-    m_undoStack.append(FileSnapshot{path, before, after, existedBefore, existsAfter, description});
-    if (m_undoStack.size() > 50)
-        m_undoStack.removeFirst();
-    m_redoStack.clear();
-    emit historyChanged();
-}
-
-bool Backend::applySnapshot(const FileSnapshot &snapshot, bool restoreBefore, QString *error) {
-    const bool exists = restoreBefore ? snapshot.existedBefore : snapshot.existsAfter;
-    if (!exists) {
-        if (QFileInfo::exists(snapshot.path) && !QFile::remove(snapshot.path)) {
-            if (error) *error = tr("Cannot remove %1").arg(snapshot.path);
-            return false;
-        }
-        return true;
-    }
-
-    QSaveFile file(snapshot.path);
-    if (!file.open(QIODevice::WriteOnly)) {
-        if (error) *error = tr("Cannot write %1").arg(snapshot.path);
-        return false;
-    }
-    file.write(restoreBefore ? snapshot.before : snapshot.after);
-    if (!file.commit()) {
-        if (error) *error = tr("Cannot write %1").arg(snapshot.path);
-        return false;
-    }
-    return true;
+    if (m_history.record(path, before, existedBefore, description))
+        emit historyChanged();
 }
 
 void Backend::undo() {
-    if (m_undoStack.isEmpty()) {
+    if (!m_history.canUndo()) {
         setStatus(tr("Nothing to undo"));
         return;
     }
-    const FileSnapshot snapshot = m_undoStack.takeLast();
     QString error;
-    if (!applySnapshot(snapshot, true, &error)) {
-        m_undoStack.append(snapshot);
+    QString description;
+    if (!m_history.undo(&error, &description)) {
         reportError(error);
         return;
     }
-    m_redoStack.append(snapshot);
     emit historyChanged();
     refresh();
-    setStatus(tr("Undid %1").arg(snapshot.description));
+    setStatus(tr("Undid %1").arg(description));
 }
 
 void Backend::redo() {
-    if (m_redoStack.isEmpty()) {
+    if (!m_history.canRedo()) {
         setStatus(tr("Nothing to redo"));
         return;
     }
-    const FileSnapshot snapshot = m_redoStack.takeLast();
     QString error;
-    if (!applySnapshot(snapshot, false, &error)) {
-        m_redoStack.append(snapshot);
+    QString description;
+    if (!m_history.redo(&error, &description)) {
         reportError(error);
         return;
     }
-    m_undoStack.append(snapshot);
     emit historyChanged();
     refresh();
-    setStatus(tr("Redid %1").arg(snapshot.description));
+    setStatus(tr("Redid %1").arg(description));
 }
 
 QVariantList Backend::cardList() const {
@@ -540,9 +498,7 @@ void Backend::setNewPerDay(int count) {
     if (m_newPerDay == clean)
         return;
     m_newPerDay = clean;
-    m_store.setSetting("new_per_day", QString::number(clean));
-    if (!m_store.lastError().isEmpty())
-        reportError(tr("Cannot save settings: %1").arg(m_store.lastError()));
+    saveSetting(QStringLiteral("new_per_day"), QString::number(clean));
     if (m_snapshotValid) {
         m_store.clearError();
         m_snapshot.newBudget = qMax(0, clean - m_store.newCardsToday());
@@ -558,8 +514,14 @@ void Backend::setDesiredRetention(double retention) {
     if (qFuzzyCompare(m_desiredRetention, clean))
         return;
     m_desiredRetention = clean;
-    m_store.setSetting("desired_retention", QString::number(clean, 'f', 2));
+    saveSetting(QStringLiteral("desired_retention"), QString::number(clean, 'f', 2));
     emit settingsChanged();
+}
+
+void Backend::saveSetting(const QString &key, const QString &value) {
+    m_store.setSetting(key, value);
+    if (!m_store.lastError().isEmpty())
+        reportError(tr("Cannot save settings: %1").arg(m_store.lastError()));
 }
 
 QString Backend::mathEngine() const {
@@ -722,7 +684,7 @@ bool Backend::createDeck(const QString &name, QString *error, const QString &des
         return false;
     }
     const bool existed = false;
-    const QByteArray before = existed ? readFileBytes(deck.path) : QByteArray();
+    const QByteArray before = existed ? FileHistory::readBytes(deck.path) : QByteArray();
     if (!DeckIO::save(deck, error))
         return false;
     recordHistory(deck.path, before, existed, tr("creating deck %1").arg(clean));
@@ -741,7 +703,7 @@ bool Backend::setDeckDescription(const QString &deckName, const QString &descrip
     if (deck->description == clean)
         return true;
     const Deck original = *deck;
-    const QByteArray before = readFileBytes(deck->path);
+    const QByteArray before = FileHistory::readBytes(deck->path);
     deck->description = clean;
     if (!DeckIO::save(*deck, error)) {
         *deck = original;
@@ -784,7 +746,7 @@ bool Backend::createCards(const QString &deckName, const QVector<CardDraft> &dra
     }
 
     const Deck original = *deck;
-    const QByteArray before = readFileBytes(deck->path);
+    const QByteArray before = FileHistory::readBytes(deck->path);
     if (description)
         deck->description = description->trimmed();
 
@@ -841,7 +803,7 @@ bool Backend::createCard(const QString &deckName, const QString &question, const
     }
     card.id = DeckIO::cardId(card);
     const Deck original = *deck;
-    const QByteArray before = readFileBytes(deck->path);
+    const QByteArray before = FileHistory::readBytes(deck->path);
     deck->cards << card;
     if (!DeckIO::save(*deck, error)) {
         *deck = original;
@@ -888,7 +850,7 @@ bool Backend::modifyCard(const QString &deckName, const QString &cardId, const Q
     if (!card->explicitId)
         card->id = DeckIO::cardId(*card);
 
-    const QByteArray before = readFileBytes(deck->path);
+    const QByteArray before = FileHistory::readBytes(deck->path);
     if (!DeckIO::save(*deck, error)) {
         *deck = original;
         return false;
@@ -913,7 +875,7 @@ bool Backend::deleteCard(const QString &deckName, const QString &cardId, QString
         if (error) *error = tr("No such card: %1").arg(cardId);
         return false;
     }
-    const QByteArray contents = readFileBytes(deck->path);
+    const QByteArray contents = FileHistory::readBytes(deck->path);
     if (!DeckIO::save(*deck, error)) {
         *deck = original;
         return false;
@@ -930,7 +892,7 @@ bool Backend::removeDeck(const QString &name, QString *error) {
         return false;
     }
     const QString path = deck->path;
-    const QByteArray before = readFileBytes(path);
+    const QByteArray before = FileHistory::readBytes(path);
     if (!QFile::remove(path)) {
         if (error) *error = tr("Cannot remove deck file: %1").arg(path);
         return false;

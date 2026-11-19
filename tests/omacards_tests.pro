@@ -6,10 +6,10 @@ TEMPLATE = app
 INCLUDEPATH += ../src
 DEFINES += OMACARDS_SOURCE_DIR=\\\"$$PWD/../src\\\"
 
-HEADERS += ../src/backend.h ../src/cli.h ../src/deck.h ../src/domain.h ../src/fsrs.h \
+HEADERS += ../src/backend.h ../src/cli.h ../src/deck.h ../src/domain.h ../src/filehistory.h ../src/fsrs.h \
            ../src/importer.h ../src/mathrender.h ../src/store.h ../src/studyqueue.h \
            ../src/theme.h \
            ../src/translator.h
-SOURCES += omacards_tests.cpp ../src/backend.cpp ../src/cli.cpp ../src/deck.cpp ../src/domain.cpp \
+SOURCES += omacards_tests.cpp ../src/backend.cpp ../src/cli.cpp ../src/deck.cpp ../src/domain.cpp ../src/filehistory.cpp \
            ../src/fsrs.cpp ../src/importer.cpp ../src/mathrender.cpp ../src/store.cpp \
            ../src/studyqueue.cpp ../src/theme.cpp ../src/translator.cpp

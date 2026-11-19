@@ -2,6 +2,7 @@
 
 #include "deck.h"
 #include "domain.h"
+#include "filehistory.h"
 #include "fsrs.h"
 #include "mathrender.h"
 #include "store.h"
@@ -83,8 +84,8 @@ public:
     QString databasePath() const { return m_store.path(); }
     QString cardFilter() const { return m_cardFilter; }
     QString currentCardId() const { return m_currentId; }
-    bool canUndo() const { return !m_undoStack.isEmpty(); }
-    bool canRedo() const { return !m_redoStack.isEmpty(); }
+    bool canUndo() const { return m_history.canUndo(); }
+    bool canRedo() const { return m_history.canRedo(); }
     int newPerDay() const { return m_newPerDay; }
     double desiredRetention() const { return m_desiredRetention; }
     int availableCount(const QString &deckName = {}) const;
@@ -159,15 +160,6 @@ signals:
     void errorOccurred(const QString &message);
 
 private:
-    struct FileSnapshot {
-        QString path;
-        QByteArray before;
-        QByteArray after;
-        bool existedBefore = false;
-        bool existsAfter = true;
-        QString description;
-    };
-
     // A single consistent read of the scheduling sidecar. Every availability
     // query and every card view uses this snapshot instead of re-reading the
     // database, so counts cannot disagree mid-action.
@@ -197,6 +189,7 @@ private:
     void presentCard();
     void setStatus(const QString &status);
     void reportError(const QString &message);
+    void saveSetting(const QString &key, const QString &value);
     Deck *deckByName(const QString &name);
     const Deck *deckByName(const QString &name) const;
     int deckIndex(const QString &name) const;
@@ -205,8 +198,6 @@ private:
     void answerReview(Rating rating);
     void recordHistory(const QString &path, const QByteArray &before, bool existedBefore,
                        const QString &description);
-    bool applySnapshot(const FileSnapshot &snapshot, bool restoreBefore, QString *error);
-    static QByteArray readFileBytes(const QString &path);
 
     QString m_decksDir;
     QString m_currentDeck;
@@ -222,8 +213,7 @@ private:
     QVector<Deck> m_decks;
     StudyQueue m_queue;
     QTimer m_reviewAgainTimer;
-    QVector<FileSnapshot> m_undoStack;
-    QVector<FileSnapshot> m_redoStack;
+    FileHistory m_history;
     Store m_store;
     MathRenderer m_math;
     QFileSystemWatcher m_watcher;
