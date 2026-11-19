@@ -15,6 +15,7 @@ card's content changes.
 - Prefer the CLI over editing the SQLite database.
 - Every command accepts `--json`; errors go to stderr and exit 1.
 - Deck names and card text are the source of truth. Keep questions short.
+- `.apkg` imports keep Anki cloze types and tags; media lands in `media/<deck>/` beside the deck files.
 
 ## Common commands
 

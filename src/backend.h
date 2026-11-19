@@ -7,6 +7,7 @@
 
 #include <QByteArray>
 #include <QFileSystemWatcher>
+#include <QHash>
 #include <QObject>
 #include <QStringList>
 #include <QTimer>
@@ -176,6 +177,10 @@ private:
     static QString safeFileName(const QString &name);
     static QStringList splitDelimited(const QString &line, QChar delimiter);
     static QString stripHtml(const QString &html);
+    static QString decodeEntities(const QString &text);
+    static QString rewriteAnkiMedia(const QString &html, const QHash<QString, QString> &media);
+    static QHash<QString, QString> apkgMedia(const QString &path, const QString &directory,
+                                              const QString &unzip, QString *error);
 
     QString m_decksDir;
     QString m_currentDeck;

@@ -1,9 +1,12 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QProcess>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -272,6 +275,63 @@ private slots:
         QVERIFY(reopened.open(&error));
         QCOMPARE(reopened.setting("new_per_day", "20"), QString("12"));
         QCOMPARE(reopened.setting("desired_retention", "0.90"), QString("0.85"));
+    }
+
+    void backendImportsAnkiClozeAndMedia() {
+        QTemporaryDir dir;
+        const QString package = dir.filePath("sample.apkg");
+        const QString database = dir.filePath("collection.anki2");
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "apkg-fixture");
+            db.setDatabaseName(database);
+            QVERIFY(db.open());
+            QSqlQuery query(db);
+            QVERIFY(query.exec("CREATE TABLE models (id INTEGER, type INTEGER)"));
+            QVERIFY(query.exec("INSERT INTO models VALUES (1, 0), (2, 1)"));
+            QVERIFY(query.exec("CREATE TABLE notes (flds TEXT, mid INTEGER, tags TEXT)"));
+            const QString sep(1, QChar(0x1f));
+            QVERIFY(query.exec(QString("INSERT INTO notes VALUES ('Basic &amp; <b>bold</b>%1back with <img src=\"0\">', 1, ' tag1 tag2 ')").arg(sep)));
+            QVERIFY(query.exec("INSERT INTO notes VALUES ('The {{c1::cat::animal}} sleeps', 2, 'cloze')"));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase("apkg-fixture");
+        QFile mediaMap(dir.filePath("media"));
+        QVERIFY(mediaMap.open(QIODevice::WriteOnly));
+        mediaMap.write(R"({"0":"image.png"})");
+        mediaMap.close();
+        QFile image(dir.filePath("0"));
+        QVERIFY(image.open(QIODevice::WriteOnly));
+        image.write("png-bytes");
+        image.close();
+
+        QProcess zip;
+        zip.setWorkingDirectory(dir.path());
+        zip.start("zip", {"-q", package, "collection.anki2", "media", "0"});
+        QVERIFY(zip.waitForFinished(10000));
+        QCOMPARE(zip.exitCode(), 0);
+
+        const QString decks = dir.filePath("decks");
+        Backend backend(decks, dir.filePath("state.db"));
+        QString error;
+        QVERIFY(backend.initialize(&error));
+        QVERIFY2(backend.importApkg(package, "Anki", &error), qPrintable(error));
+        QVERIFY(backend.decks().contains("Anki"));
+        QVector<Card> cards;
+        for (const Deck &deck : backend.allDecks())
+            if (deck.name == "Anki") cards = deck.cards;
+        QCOMPARE(cards.size(), 2);
+        const Card *basic = nullptr;
+        const Card *cloze = nullptr;
+        for (const Card &card : cards) {
+            if (card.type == "cloze") cloze = &card;
+            else basic = &card;
+        }
+        QVERIFY(basic && cloze);
+        QCOMPARE(basic->question, QString("Basic & bold"));
+        QVERIFY(basic->answer.contains("<img src=\"file://"));
+        QCOMPARE(basic->tags, QStringList({"tag1", "tag2"}));
+        QCOMPARE(cloze->question, QString("The {{c1::cat}} sleeps"));
+        QVERIFY(QFile::exists(decks + "/media/Anki/image.png"));
     }
 
     void storeCountsNewCardsToday() {
