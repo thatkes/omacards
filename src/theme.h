@@ -28,8 +28,7 @@ class Theme : public QObject {
     Q_PROPERTY(int radius READ radius NOTIFY changed)
 
 public:
-    explicit Theme(const QString &currentDirectory = {}, QObject *parent = nullptr,
-                   const QString &hyprctl = {});
+    explicit Theme(const QString &currentDirectory = {}, QObject *parent = nullptr, const QString &hyprctl = {});
     ~Theme() override;
 
     QString accent() const { return m_accent; }
@@ -48,8 +47,7 @@ public:
     int radius() const { return m_radius; }
 
     static QString readAccent(const QString &path);
-    static QString readColor(const QString &path, const QString &key,
-                             const QString &fallback = {});
+    static QString readColor(const QString &path, const QString &key, const QString &fallback = {});
     static QHash<QString, QString> readColors(const QString &path);
 
 signals:

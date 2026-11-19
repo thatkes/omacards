@@ -1,0 +1,26 @@
+# Matches the existing omacards C++/Qt style: 4-space indent, attached braces,
+# pointer/ref aligned with the name, access specifiers at class scope.
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: c++17
+
+IndentWidth: 4
+ContinuationIndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 120
+
+BreakBeforeBraces: Attach
+AccessModifierOffset: -4
+IndentCaseLabels: false
+AlignAfterOpenBracket: Align
+PointerAlignment: Right
+ReferenceAlignment: Right
+
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+
+SortIncludes: false
+IncludeBlocks: Preserve
+SpaceBeforeParens: ControlStatements

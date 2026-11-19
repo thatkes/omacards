@@ -26,8 +26,8 @@ public:
     QHash<QString, FsrsState> states() const;
     QHash<QString, QString> hashes() const;
     void save(const QString &cardId, const QString &hash, const FsrsState &state);
-    void logReview(const QString &cardId, int rating, qint64 at,
-                   const FsrsState &state, int intervalDays, bool wasNew = false);
+    void logReview(const QString &cardId, int rating, qint64 at, const FsrsState &state, int intervalDays,
+                   bool wasNew = false);
     void removeExcept(const QSet<QString> &ids);
     ReviewSummary summary() const;
     int newCardsToday() const;

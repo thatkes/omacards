@@ -4,7 +4,7 @@
 
 const double Fsrs::weights[19] = {
     0.4197, 1.1869, 3.0412, 15.2441, 7.1434, 0.6477, 1.0007, 0.0674, 1.6597, 0.1712,
-    1.1178, 2.0225, 0.0904, 0.3025, 2.1214, 0.2498, 2.9466, 0.4891, 0.6468,
+    1.1178, 2.0225, 0.0904, 0.3025,  2.1214, 0.2498, 2.9466, 0.4891, 0.6468,
 };
 
 double Fsrs::clamp(double value, double low, double high) {
@@ -26,7 +26,7 @@ double Fsrs::initialDifficulty(int rating) {
 }
 
 int Fsrs::interval(double stability, double retention) {
-    const double desired = qBound(0.70, retention, 0.99);
+    const double desired = qBound(Config::kMinRetention, retention, Config::kMaxRetention);
     const double modifier = (qPow(desired, 1.0 / decay) - 1.0) / factor;
     const auto days = static_cast<int>(qRound(stability * modifier));
     return clamp(days, 1, maximumInterval);
@@ -41,9 +41,7 @@ double Fsrs::retrievability(const FsrsState &state, qint64 nowMs) {
 
 ReviewResult Fsrs::review(const FsrsState &state, int rating, qint64 nowMs, double retention) {
     const int grade = static_cast<int>(clamp(rating, 1, 4));
-    const double elapsedDays = state.lastReview > 0
-        ? qMax(0.0, (nowMs - state.lastReview) / 86400000.0)
-        : 0.0;
+    const double elapsedDays = state.lastReview > 0 ? qMax(0.0, (nowMs - state.lastReview) / 86400000.0) : 0.0;
 
     FsrsState next = state;
     double stability = state.stability;
@@ -60,26 +58,24 @@ ReviewResult Fsrs::review(const FsrsState &state, int rating, qint64 nowMs, doub
         // the whole memory state and keep intervals sane for rapid cramming.
         const double increase = qExp(weights[17] * (grade - 3 + weights[18]));
         stability = qMax(0.1, stability * (grade == 1 ? increase : qMax(1.0, increase)));
-        difficulty = clamp(weights[7] * initialDifficulty(4)
-                           + (1.0 - weights[7]) * (difficulty - weights[6] * (grade - 3)),
-                           1.0, 10.0);
+        difficulty =
+            clamp(weights[7] * initialDifficulty(4) + (1.0 - weights[7]) * (difficulty - weights[6] * (grade - 3)), 1.0,
+                  10.0);
     } else {
         if (grade == 1) {
             // Forget: post-lapse stability is capped at the short-term branch.
-            const double longTerm = weights[11] * qPow(difficulty, -weights[12])
-                * (qPow(stability + 1.0, weights[13]) - 1.0)
-                * qExp((1.0 - recall) * weights[14]);
+            const double longTerm = weights[11] * qPow(difficulty, -weights[12]) *
+                                    (qPow(stability + 1.0, weights[13]) - 1.0) * qExp((1.0 - recall) * weights[14]);
             const double cap = stability / qExp(weights[17] * weights[18]);
             stability = qMin(longTerm, cap);
         } else {
-            const double growth = qExp(weights[8]) * (11.0 - difficulty)
-                * qPow(stability, -weights[9])
-                * (qExp((1.0 - recall) * weights[10]) - 1.0);
+            const double growth = qExp(weights[8]) * (11.0 - difficulty) * qPow(stability, -weights[9]) *
+                                  (qExp((1.0 - recall) * weights[10]) - 1.0);
             stability = stability * (1.0 + growth);
         }
-        difficulty = clamp(weights[7] * initialDifficulty(4)
-                           + (1.0 - weights[7]) * (difficulty - weights[6] * (grade - 3)),
-                           1.0, 10.0);
+        difficulty =
+            clamp(weights[7] * initialDifficulty(4) + (1.0 - weights[7]) * (difficulty - weights[6] * (grade - 3)), 1.0,
+                  10.0);
     }
 
     next.stability = qMax(0.1, stability);

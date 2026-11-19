@@ -71,9 +71,8 @@ QString decodeEntities(const QString &text) {
     static const QRegularExpression numeric(R"re(&#(?:x([0-9a-fA-F]+)|([0-9]+));)re");
     out = replaceRegex(out, numeric, [](const QRegularExpressionMatch &match) {
         bool ok = false;
-        const int code = match.captured(1).isEmpty()
-                             ? match.captured(2).toInt(&ok, 10)
-                             : match.captured(1).toInt(&ok, 16);
+        const int code =
+            match.captured(1).isEmpty() ? match.captured(2).toInt(&ok, 10) : match.captured(1).toInt(&ok, 16);
         return ok && code > 0 && code <= 0x10ffff ? QString(QChar(code)) : match.captured();
     });
     // Anki cloze hints are written as {{c1::answer::hint}}; our deck format
@@ -91,8 +90,7 @@ QString stripHtml(const QString &html) {
     // Keep image tags so imported media can still be shown in the RichText
     // study view; replace them with markers while the other tags are removed.
     QVector<QString> images;
-    static const QRegularExpression imageTag(R"re(<img\b[^>]*>)re",
-                                             QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression imageTag(R"re(<img\b[^>]*>)re", QRegularExpression::CaseInsensitiveOption);
     QString marked;
     int last = 0;
     auto matches = imageTag.globalMatch(text);
@@ -123,8 +121,7 @@ QString rewriteAnkiMedia(const QString &html, const QHash<QString, QString> &med
     return text;
 }
 
-QHash<QString, QString> apkgMedia(const QString &path, const QString &directory,
-                                  const QString &unzip, QString *error) {
+QHash<QString, QString> apkgMedia(const QString &path, const QString &directory, const QString &unzip, QString *error) {
     QHash<QString, QString> media;
     QProcess mapping;
     mapping.start(unzip, {"-p", path, "media"});
@@ -166,19 +163,20 @@ bool csv(const QString &path, const QString &deckName, Result *result, QString *
         return false;
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        if (error) *error = tr("Cannot read: %1").arg(path);
+        if (error)
+            *error = tr("Cannot read: %1").arg(path);
         return false;
     }
     const QChar delimiter = path.endsWith(".tsv", Qt::CaseInsensitive) ? '\t' : ',';
     QStringList rows = QString::fromUtf8(file.readAll()).split('\n', Qt::SkipEmptyParts);
     if (rows.isEmpty()) {
-        if (error) *error = tr("No rows in %1").arg(path);
+        if (error)
+            *error = tr("No rows in %1").arg(path);
         return false;
     }
     const auto first = splitDelimited(rows.first(), delimiter);
-    const bool hasHeader = !first.isEmpty()
-        && (first.first().contains("question", Qt::CaseInsensitive)
-            || first.first().contains("front", Qt::CaseInsensitive));
+    const bool hasHeader = !first.isEmpty() && (first.first().contains("question", Qt::CaseInsensitive) ||
+                                                first.first().contains("front", Qt::CaseInsensitive));
     if (hasHeader)
         rows.removeFirst();
 
@@ -200,19 +198,20 @@ bool csv(const QString &path, const QString &deckName, Result *result, QString *
     return true;
 }
 
-bool apkg(const QString &path, const QString &deckName, const QString &decksDir,
-          Result *result, QString *error) {
+bool apkg(const QString &path, const QString &deckName, const QString &decksDir, Result *result, QString *error) {
     if (!result)
         return false;
     QTemporaryDir temp;
     if (!temp.isValid()) {
-        if (error) *error = tr("Cannot create a temporary directory");
+        if (error)
+            *error = tr("Cannot create a temporary directory");
         return false;
     }
     const QString database = temp.filePath("collection.db");
     const auto unzip = QStandardPaths::findExecutable("unzip");
     if (unzip.isEmpty()) {
-        if (error) *error = tr("Importing .apkg needs the unzip command");
+        if (error)
+            *error = tr("Importing .apkg needs the unzip command");
         return false;
     }
     auto extract = [&](const QString &entry) {
@@ -237,7 +236,8 @@ bool apkg(const QString &path, const QString &deckName, const QString &decksDir,
         }
     }
     if (!ok) {
-        if (error) *error = tr("Not a readable Anki package: %1").arg(path);
+        if (error)
+            *error = tr("Not a readable Anki package: %1").arg(path);
         return false;
     }
 
@@ -255,7 +255,8 @@ bool apkg(const QString &path, const QString &deckName, const QString &decksDir,
         QSqlDatabase::removeDatabase(connection);
     };
     if (!db.open()) {
-        if (error) *error = tr("Cannot read the Anki collection");
+        if (error)
+            *error = tr("Cannot read the Anki collection");
         closeCollection();
         return false;
     }
@@ -267,14 +268,15 @@ bool apkg(const QString &path, const QString &deckName, const QString &decksDir,
         clozeColumn = query.exec("SELECT n.flds, n.tags, COALESCE(m.type, 0) "
                                  "FROM notes n LEFT JOIN models m ON n.mid = m.id");
     if (!clozeColumn && !query.exec("SELECT flds, tags FROM notes")) {
-        if (error) *error = tr("The Anki collection has no notes table");
+        if (error)
+            *error = tr("The Anki collection has no notes table");
         closeCollection();
         return false;
     }
 
     result->deckName = deckName.isEmpty() ? QFileInfo(path).completeBaseName() : deckName;
-    const QHash<QString, QString> media = apkgMedia(
-        path, decksDir + "/media/" + DeckIO::safeFileName(result->deckName), unzip, error);
+    const QHash<QString, QString> media =
+        apkgMedia(path, decksDir + "/media/" + DeckIO::safeFileName(result->deckName), unzip, error);
     while (query.next()) {
         const QStringList fields = query.value(0).toString().split(QChar(0x1f));
         if (fields.isEmpty())
@@ -308,14 +310,14 @@ bool apkg(const QString &path, const QString &deckName, const QString &decksDir,
     return true;
 }
 
-bool file(const QString &path, const QString &deckName, const QString &decksDir,
-          Result *result, QString *error) {
+bool file(const QString &path, const QString &deckName, const QString &decksDir, Result *result, QString *error) {
     const QString lower = path.toLower();
     if (lower.endsWith(".apkg"))
         return apkg(path, deckName, decksDir, result, error);
     if (lower.endsWith(".csv") || lower.endsWith(".tsv") || lower.endsWith(".txt"))
         return csv(path, deckName, result, error);
-    if (error) *error = QCoreApplication::translate("DeckImport", "Unsupported import format: %1").arg(path);
+    if (error)
+        *error = QCoreApplication::translate("DeckImport", "Unsupported import format: %1").arg(path);
     return false;
 }
 

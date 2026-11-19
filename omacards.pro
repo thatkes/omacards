@@ -7,6 +7,7 @@ TEMPLATE = app
 HEADERS += \
     src/backend.h \
     src/cli.h \
+    src/config.h \
     src/deck.h \
     src/domain.h \
     src/filehistory.h \

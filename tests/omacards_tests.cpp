@@ -15,6 +15,8 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <memory>
+
 #include "backend.h"
 #include "cli.h"
 #include "deck.h"
@@ -40,13 +42,17 @@ struct EnvGuard {
     }
 
     ~EnvGuard() {
-        if (!decks.isNull()) qputenv("OMACARDS_DECKS_DIR", decks);
-        else qunsetenv("OMACARDS_DECKS_DIR");
-        if (!state.isNull()) qputenv("OMACARDS_STATE_DB", state);
-        else qunsetenv("OMACARDS_STATE_DB");
+        if (!decks.isNull())
+            qputenv("OMACARDS_DECKS_DIR", decks);
+        else
+            qunsetenv("OMACARDS_DECKS_DIR");
+        if (!state.isNull())
+            qputenv("OMACARDS_STATE_DB", state);
+        else
+            qunsetenv("OMACARDS_STATE_DB");
     }
 };
-}
+} // namespace
 
 class OmacardsTests : public QObject {
     Q_OBJECT
@@ -154,7 +160,8 @@ private slots:
         EnvGuard env(dir.filePath("decks"), dir.filePath("state.db"));
         QString cardId;
         {
-            Backend backend;
+            auto ownedBackend = Backend::fromEnvironment();
+            Backend &backend = *ownedBackend;
             QString error;
             QVERIFY(backend.initialize(&error));
             QVERIFY(backend.createDeck("First", &error));
@@ -174,7 +181,8 @@ private slots:
 
         // A generated id follows the content, so the edit gave the card a new
         // id; look it up again before deleting.
-        Backend edited;
+        auto ownedEdited = Backend::fromEnvironment();
+        Backend &edited = *ownedEdited;
         QString error;
         QVERIFY(edited.initialize(&error));
         QString updatedId;
@@ -185,7 +193,8 @@ private slots:
         QVERIFY(!updatedId.isEmpty());
         QCOMPARE(Cli::run({"delete-card", "-c", updatedId, "--json"}), 0);
 
-        Backend check;
+        auto ownedCheck = Backend::fromEnvironment();
+        Backend &check = *ownedCheck;
         QVERIFY(check.initialize(&error));
         bool found = false;
         for (const Deck &deck : check.allDecks())
@@ -201,12 +210,12 @@ private slots:
         QVERIFY(writeFile(input, R"json({"cards":[{"question":"Expand \\(x^2\\)",
                                                   "answer":"\\(\\frac{1}{2}\\)"}]})json"));
         int code = -1;
-        runCli({"add-cards", "-d", "Math", "-i", input, "--json"}, dir.filePath("decks"),
-               dir.filePath("state.db"), &code);
+        runCli({"add-cards", "-d", "Math", "-i", input, "--json"}, dir.filePath("decks"), dir.filePath("state.db"),
+               &code);
         QCOMPARE(code, 0);
 
-        const QJsonObject result = runCli({"preview", "--deck", "Math", "--json"},
-                                          dir.filePath("decks"), dir.filePath("state.db"), &code);
+        const QJsonObject result =
+            runCli({"preview", "--deck", "Math", "--json"}, dir.filePath("decks"), dir.filePath("state.db"), &code);
         QCOMPARE(code, 0);
         const QJsonArray items = result.value(QStringLiteral("items")).toArray();
         QCOMPARE(items.size(), 1);
@@ -222,12 +231,12 @@ private slots:
         QVERIFY(writeFile(input, R"json({"cards":[{"question":"Bad \\(\\foobar{x}\\)",
                                                   "answer":"ok"}]})json"));
         int code = -1;
-        runCli({"add-cards", "-d", "Warn", "-i", input, "--json"}, dir.filePath("decks"),
-               dir.filePath("state.db"), &code);
+        runCli({"add-cards", "-d", "Warn", "-i", input, "--json"}, dir.filePath("decks"), dir.filePath("state.db"),
+               &code);
         QCOMPARE(code, 0);
 
-        const QJsonObject result = runCli({"check", "--math", "--json"}, dir.filePath("decks"),
-                                          dir.filePath("state.db"), &code);
+        const QJsonObject result =
+            runCli({"check", "--math", "--json"}, dir.filePath("decks"), dir.filePath("state.db"), &code);
         QCOMPARE(code, 0);
         const QJsonArray warnings = result.value(QStringLiteral("mathWarnings")).toArray();
         QCOMPARE(warnings.size(), 1);
@@ -255,8 +264,7 @@ oops: not a key
 )deck"));
 
         int code = -1;
-        const QJsonObject result = runCli({"check", "--json"}, dir.filePath("decks"),
-                                          dir.filePath("state.db"), &code);
+        const QJsonObject result = runCli({"check", "--json"}, dir.filePath("decks"), dir.filePath("state.db"), &code);
         QCOMPARE(code, 0);
         QVERIFY(result.value(QStringLiteral("ok")).toBool());
 
@@ -299,18 +307,22 @@ oops: not a key
         qunsetenv("OMACARDS_STATE_DB");
 
         const QString oldOrg = QCoreApplication::organizationName();
-        Backend withoutOrg;
+        auto ownedWithoutOrg = Backend::fromEnvironment();
+        Backend &withoutOrg = *ownedWithoutOrg;
         const QString first = withoutOrg.decksDirectory();
         QCoreApplication::setOrganizationName("omarchy");
-        Backend withOrg;
+        auto ownedWithOrg = Backend::fromEnvironment();
+        Backend &withOrg = *ownedWithOrg;
         const QString second = withOrg.decksDirectory();
         QCoreApplication::setOrganizationName(oldOrg);
 
         QCOMPARE(first, second);
         QVERIFY(!first.contains(QStringLiteral("omarchy")));
 
-        if (!oldDecks.isNull()) qputenv("OMACARDS_DECKS_DIR", oldDecks);
-        if (!oldState.isNull()) qputenv("OMACARDS_STATE_DB", oldState);
+        if (!oldDecks.isNull())
+            qputenv("OMACARDS_DECKS_DIR", oldDecks);
+        if (!oldState.isNull())
+            qputenv("OMACARDS_STATE_DB", oldState);
     }
 
     void domainParsesSharedValues() {
@@ -364,8 +376,7 @@ oops: not a key
 
     void studyQueueReviewOrder() {
         StudyQueue queue;
-        queue.buildReview({QStringLiteral("due1"), QStringLiteral("due2")},
-                          {QStringLiteral("fresh1")});
+        queue.buildReview({QStringLiteral("due1"), QStringLiteral("due2")}, {QStringLiteral("fresh1")});
         QString id;
         QCOMPARE(queue.next(1000, &id, nullptr, nullptr), StudyQueue::Next::Ready);
         QCOMPARE(id, QString("due1"));
@@ -487,17 +498,16 @@ oops: not a key
     void deckParsesAndSerializes() {
         QTemporaryDir dir;
         const QString path = dir.filePath("Spanish.txt");
-        const QString text = QStringLiteral(
-            "# Deck: Spanish\n"
-            "# Description: Words and phrases\n"
-            "---\n"
-            "Q: What is \"gato\"?\n"
-            "A: cat\n"
-            "tags: vocab, animals\n"
-            "---\n"
-            "Q: Solve \\(x^2+1=0\\)\n"
-            "A: \\(x=\\pm i\\)\n"
-            "id: fixed-id\n");
+        const QString text = QStringLiteral("# Deck: Spanish\n"
+                                            "# Description: Words and phrases\n"
+                                            "---\n"
+                                            "Q: What is \"gato\"?\n"
+                                            "A: cat\n"
+                                            "tags: vocab, animals\n"
+                                            "---\n"
+                                            "Q: Solve \\(x^2+1=0\\)\n"
+                                            "A: \\(x=\\pm i\\)\n"
+                                            "id: fixed-id\n");
         QVERIFY(writeFile(path, text.toUtf8()));
 
         QString error;
@@ -532,6 +542,10 @@ oops: not a key
 
     void mathFallsBackToUnicode() {
         MathRenderer renderer(QDir::tempPath() + "/omacards-math-test");
+        const MathRenderer::Engine engine = renderer.detect();
+        QVERIFY(engine == MathRenderer::Engine::Unicode || engine == MathRenderer::Engine::LatexSvg);
+        QCOMPARE(renderer.hasRenderer(), engine == MathRenderer::Engine::LatexSvg);
+        QCOMPARE(renderer.detect(), engine); // detection is cached
         if (renderer.hasRenderer())
             QVERIFY(!renderer.renderExpression("x^2").isEmpty());
         QCOMPARE(unicodeMath("\\alpha + \\beta"), QString("α + β"));
@@ -559,42 +573,40 @@ oops: not a key
         const auto makeTool = [&](const QString &name, const QByteArray &script) {
             const QString path = bin + "/" + name;
             QVERIFY(writeFile(path, script));
-            QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner
-                                           | QFile::ReadGroup | QFile::ExeGroup
-                                           | QFile::ReadOther | QFile::ExeOther);
+            QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner | QFile::ReadGroup |
+                                            QFile::ExeGroup | QFile::ReadOther | QFile::ExeOther);
         };
-        const auto script = [](const QStringList &lines) {
-            return (lines.join('\n') + '\n').toUtf8();
-        };
-        makeTool("tectonic", script({
-            "#!/bin/sh",
-            "printf 'tectonic' >> \"$OMACARDS_TEST_ARGS\"",
-            "for arg do printf ' %s' \"$arg\" >> \"$OMACARDS_TEST_ARGS\"; done",
-            "printf '\\n' >> \"$OMACARDS_TEST_ARGS\"",
-            "cached=0",
-            "for arg do if [ \"$arg\" = \"--only-cached\" ]; then cached=1; fi; done",
-            "if [ \"$cached\" = \"1\" ] && [ \"$OMACARDS_TEST_MISSING_BUNDLE\" = \"1\" ]; then exit 1; fi",
-            "out=",
-            "tex=",
-            "for arg do",
-            "    case \"$arg\" in --outdir=*) out=${arg#--outdir=} ;; esac",
-            "    tex=\"$arg\"",
-            "done",
-            "base=$(basename \"$tex\" .tex)",
-            "printf '%%PDF-1.4\\n' > \"$out/$base.pdf\"",
-        }));
+        const auto script = [](const QStringList &lines) { return (lines.join('\n') + '\n').toUtf8(); };
+        makeTool("tectonic",
+                 script({
+                     "#!/bin/sh",
+                     "printf 'tectonic' >> \"$OMACARDS_TEST_ARGS\"",
+                     "for arg do printf ' %s' \"$arg\" >> \"$OMACARDS_TEST_ARGS\"; done",
+                     "printf '\\n' >> \"$OMACARDS_TEST_ARGS\"",
+                     "cached=0",
+                     "for arg do if [ \"$arg\" = \"--only-cached\" ]; then cached=1; fi; done",
+                     "if [ \"$cached\" = \"1\" ] && [ \"$OMACARDS_TEST_MISSING_BUNDLE\" = \"1\" ]; then exit 1; fi",
+                     "out=",
+                     "tex=",
+                     "for arg do",
+                     "    case \"$arg\" in --outdir=*) out=${arg#--outdir=} ;; esac",
+                     "    tex=\"$arg\"",
+                     "done",
+                     "base=$(basename \"$tex\" .tex)",
+                     "printf '%%PDF-1.4\\n' > \"$out/$base.pdf\"",
+                 }));
         makeTool("pdftocairo", script({
-            "#!/bin/sh",
-            "printf 'pdftocairo' >> \"$OMACARDS_TEST_ARGS\"",
-            "for arg do printf ' %s' \"$arg\" >> \"$OMACARDS_TEST_ARGS\"; done",
-            "printf '\\n' >> \"$OMACARDS_TEST_ARGS\"",
-            "printf '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10pt\" height=\"5pt\" viewBox=\"0 0 10 5\"><g fill=\"rgb(0%%, 0%%, 0%%)\"/></svg>\\n' > \"$3\"",
-        }));
+                                   "#!/bin/sh",
+                                   "printf 'pdftocairo' >> \"$OMACARDS_TEST_ARGS\"",
+                                   "for arg do printf ' %s' \"$arg\" >> \"$OMACARDS_TEST_ARGS\"; done",
+                                   "printf '\\n' >> \"$OMACARDS_TEST_ARGS\"",
+                                   "printf '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10pt\" height=\"5pt\" "
+                                   "viewBox=\"0 0 10 5\"><g fill=\"rgb(0%%, 0%%, 0%%)\"/></svg>\\n' > \"$3\"",
+                               }));
 
         struct PathGuard {
             QByteArray original;
-            explicit PathGuard(const QString &binDir)
-                : original(qgetenv("PATH")) {
+            explicit PathGuard(const QString &binDir) : original(qgetenv("PATH")) {
                 qputenv("PATH", (binDir + ":" + QString::fromLocal8Bit(original)).toLocal8Bit());
             }
             ~PathGuard() { qputenv("PATH", original); }
@@ -734,7 +746,8 @@ oops: not a key
             QtObject {
                 Component.onCompleted: backend.rate(3)
             }
-        )QML", QUrl("qrc:/rate-test.qml"));
+        )QML",
+                          QUrl("qrc:/rate-test.qml"));
         QVERIFY2(component.isReady(), qPrintable(component.errorString()));
         QObject *object = component.create();
         QVERIFY2(object, qPrintable(component.errorString()));
@@ -856,7 +869,10 @@ oops: not a key
             QVERIFY(query.exec("INSERT INTO models VALUES (1, 0), (2, 1)"));
             QVERIFY(query.exec("CREATE TABLE notes (flds TEXT, mid INTEGER, tags TEXT)"));
             const QString sep(1, QChar(0x1f));
-            QVERIFY(query.exec(QString("INSERT INTO notes VALUES ('Basic &amp; <b>bold</b>%1back with <img src=\"0\">', 1, ' tag1 tag2 ')").arg(sep)));
+            QVERIFY(query.exec(
+                QString(
+                    "INSERT INTO notes VALUES ('Basic &amp; <b>bold</b>%1back with <img src=\"0\">', 1, ' tag1 tag2 ')")
+                    .arg(sep)));
             QVERIFY(query.exec("INSERT INTO notes VALUES ('The {{c1::cat::animal}} sleeps', 2, 'cloze')"));
             db.close();
         }
@@ -884,13 +900,16 @@ oops: not a key
         QVERIFY(backend.decks().contains("Anki"));
         QVector<Card> cards;
         for (const Deck &deck : backend.allDecks())
-            if (deck.name == "Anki") cards = deck.cards;
+            if (deck.name == "Anki")
+                cards = deck.cards;
         QCOMPARE(cards.size(), 2);
         const Card *basic = nullptr;
         const Card *cloze = nullptr;
         for (const Card &card : cards) {
-            if (card.type == "cloze") cloze = &card;
-            else basic = &card;
+            if (card.type == "cloze")
+                cloze = &card;
+            else
+                basic = &card;
         }
         QVERIFY(basic && cloze);
         QCOMPARE(basic->question, QString("Basic & bold"));
@@ -968,8 +987,7 @@ oops: not a key
         Theme theme;
         engine.rootContext()->setContextProperty("backend", &backend);
         engine.rootContext()->setContextProperty("theme", &theme);
-        QQmlComponent component(&engine,
-                                QUrl::fromLocalFile(QStringLiteral(OMACARDS_SOURCE_DIR) + "/Main.qml"));
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(OMACARDS_SOURCE_DIR) + "/Main.qml"));
         QVERIFY2(component.isReady(), qPrintable(component.errorString()));
         QObject *window = component.create();
         QVERIFY2(window, qPrintable(component.errorString()));
@@ -1249,12 +1267,10 @@ oops: not a key
     }
 
 private:
-    static QString appBinary() {
-        return QDir(QString(OMACARDS_SOURCE_DIR)).filePath("../build/omacards");
-    }
+    static QString appBinary() { return QDir(QString(OMACARDS_SOURCE_DIR)).filePath("../build/omacards"); }
 
-    static QJsonObject runCli(const QStringList &arguments, const QString &decksDir,
-                              const QString &stateDb, int *exitCode = nullptr) {
+    static QJsonObject runCli(const QStringList &arguments, const QString &decksDir, const QString &stateDb,
+                              int *exitCode = nullptr) {
         QProcess process;
         QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
         environment.insert(QStringLiteral("OMACARDS_DECKS_DIR"), decksDir);
@@ -1262,10 +1278,12 @@ private:
         process.setProcessEnvironment(environment);
         process.start(appBinary(), arguments);
         if (!process.waitForFinished(10000)) {
-            if (exitCode) *exitCode = -1;
+            if (exitCode)
+                *exitCode = -1;
             return {};
         }
-        if (exitCode) *exitCode = process.exitCode();
+        if (exitCode)
+            *exitCode = process.exitCode();
         return QJsonDocument::fromJson(process.readAllStandardOutput()).object();
     }
 

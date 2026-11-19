@@ -17,6 +17,8 @@
 #include <QSystemTrayIcon>
 #include <QUrl>
 
+#include <memory>
+
 namespace {
 QStringList argumentsFrom(int argc, char *argv[]) {
     QStringList arguments;
@@ -41,7 +43,7 @@ QIcon trayIcon(const QString &accent) {
     painter.drawText(pixmap.rect(), Qt::AlignCenter, "C");
     return QIcon(pixmap);
 }
-}
+} // namespace
 
 int main(int argc, char *argv[]) {
     const QStringList allArguments = argumentsFrom(argc, argv);
@@ -67,10 +69,9 @@ int main(int argc, char *argv[]) {
     app.installTranslator(&translator);
 
     Theme theme;
-    Backend backend;
-    const auto syncMathColors = [&theme, &backend] {
-        backend.setMathColors(theme.foreground(), theme.accent());
-    };
+    auto ownedBackend = Backend::fromEnvironment();
+    Backend &backend = *ownedBackend;
+    const auto syncMathColors = [&theme, &backend] { backend.setMathColors(theme.foreground(), theme.accent()); };
     QObject::connect(&theme, &Theme::changed, &backend, syncMathColors);
     // Set the ink before the first render so startup does not cache black SVGs
     // that are immediately replaced with themed ones.
@@ -98,9 +99,11 @@ int main(int argc, char *argv[]) {
     QObject::connect(&backend, &Backend::showWindowRequested, window, activate);
 
     if (QSystemTrayIcon::isSystemTrayAvailable()) {
+        // QSystemTrayIcon does not own its context menu; keep it alive for the
+        // tray's lifetime with an owner declared before the tray itself.
+        auto menu = std::make_unique<QMenu>();
         QSystemTrayIcon tray(trayIcon(theme.accent()));
         tray.setToolTip(QObject::tr("omacards — %1 due").arg(backend.dueCount()));
-        auto menu = new QMenu;
         menu->addAction(QObject::tr("Open"), activate);
         menu->addAction(QObject::tr("Review"), [&backend, activate] {
             backend.setMode("review");
@@ -112,19 +115,18 @@ int main(int argc, char *argv[]) {
         });
         menu->addSeparator();
         menu->addAction(QObject::tr("Quit"), &QApplication::quit);
-        tray.setContextMenu(menu);
+        tray.setContextMenu(menu.get());
         QObject::connect(&backend, &Backend::dueCountChanged, &tray, [&tray, &backend] {
             tray.setToolTip(QObject::tr("omacards — %1 due").arg(backend.dueCount()));
         });
-        QObject::connect(&theme, &Theme::changed, &tray, [&tray, &theme] {
-            tray.setIcon(trayIcon(theme.accent()));
-        });
-        QObject::connect(&tray, &QSystemTrayIcon::activated, &tray, [activate, &backend](QSystemTrayIcon::ActivationReason reason) {
-            if (reason == QSystemTrayIcon::Context)
-                return;
-            backend.setMode("review");
-            activate();
-        });
+        QObject::connect(&theme, &Theme::changed, &tray, [&tray, &theme] { tray.setIcon(trayIcon(theme.accent())); });
+        QObject::connect(&tray, &QSystemTrayIcon::activated, &tray,
+                         [activate, &backend](QSystemTrayIcon::ActivationReason reason) {
+                             if (reason == QSystemTrayIcon::Context)
+                                 return;
+                             backend.setMode("review");
+                             activate();
+                         });
         tray.show();
         return app.exec();
     }

@@ -14,11 +14,10 @@ struct Result {
     QVector<CardDraft> cards;
 };
 
-bool file(const QString &path, const QString &deckName, const QString &decksDir,
-          Result *result, QString *error = nullptr);
-bool csv(const QString &path, const QString &deckName,
-         Result *result, QString *error = nullptr);
-bool apkg(const QString &path, const QString &deckName, const QString &decksDir,
-          Result *result, QString *error = nullptr);
+bool file(const QString &path, const QString &deckName, const QString &decksDir, Result *result,
+          QString *error = nullptr);
+bool csv(const QString &path, const QString &deckName, Result *result, QString *error = nullptr);
+bool apkg(const QString &path, const QString &deckName, const QString &decksDir, Result *result,
+          QString *error = nullptr);
 
 } // namespace DeckImport

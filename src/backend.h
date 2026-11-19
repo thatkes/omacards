@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config.h"
 #include "deck.h"
 #include "domain.h"
 #include "filehistory.h"
@@ -16,6 +17,8 @@
 #include <QTimer>
 #include <QVariantList>
 #include <QVector>
+
+#include <memory>
 
 namespace DeckImport {
 struct Result;
@@ -53,8 +56,10 @@ class Backend : public QObject {
     Q_PROPERTY(QString decksDirectory READ decksDirectory CONSTANT)
 
 public:
-    explicit Backend(const QString &decksDirectory = {}, const QString &databasePath = {},
-                     QObject *parent = nullptr);
+    // Paths are required so callers cannot accidentally fall back to implicit
+    // environment-driven locations. Use fromEnvironment() for that case.
+    explicit Backend(const QString &decksDirectory, const QString &databasePath, QObject *parent = nullptr);
+    static std::unique_ptr<Backend> fromEnvironment(QObject *parent = nullptr);
 
     bool initialize(QString *error = nullptr);
 
@@ -101,13 +106,12 @@ public:
     // Headless helpers used by the agent CLI.
     bool createDeck(const QString &name, QString *error = nullptr, const QString &description = {});
     bool setDeckDescription(const QString &deckName, const QString &description, QString *error = nullptr);
-    bool createCards(const QString &deckName, const QVector<CardDraft> &drafts,
-                     const QString *description, QStringList *createdIds, QString *error = nullptr);
+    bool createCards(const QString &deckName, const QVector<CardDraft> &drafts, const QString *description,
+                     QStringList *createdIds, QString *error = nullptr);
     bool createCard(const QString &deckName, const QString &question, const QString &answer,
                     const QString &type = "basic", const QString &tags = {}, QString *error = nullptr);
-    bool modifyCard(const QString &deckName, const QString &cardId, const QString &question,
-                    const QString &answer, const QString &type, const QString &tags,
-                    QString *error = nullptr, QString *finalId = nullptr);
+    bool modifyCard(const QString &deckName, const QString &cardId, const QString &question, const QString &answer,
+                    const QString &type, const QString &tags, QString *error = nullptr, QString *finalId = nullptr);
     bool deleteCard(const QString &deckName, const QString &cardId, QString *error = nullptr);
     bool removeDeck(const QString &name, QString *error = nullptr);
     bool importFile(const QString &path, const QString &deckName, QString *error = nullptr);
@@ -125,8 +129,8 @@ public slots:
     Q_INVOKABLE void showNext();
     Q_INVOKABLE void newDeck(const QString &name);
     Q_INVOKABLE void addCard(const QString &question, const QString &answer);
-    Q_INVOKABLE void addCardDetails(const QString &question, const QString &answer,
-                                    const QString &type, const QString &tags);
+    Q_INVOKABLE void addCardDetails(const QString &question, const QString &answer, const QString &type,
+                                    const QString &tags);
     Q_INVOKABLE void removeCurrentCard();
     Q_INVOKABLE void removeCard(const QString &cardId);
     Q_INVOKABLE void deleteDeck(const QString &name);
@@ -171,8 +175,8 @@ private:
     };
 
     struct Availability {
-        QVector<Card> due;           // ordered by due date, then id
-        QVector<Card> fresh;         // deck-file order, up to the daily cap
+        QVector<Card> due;   // ordered by due date, then id
+        QVector<Card> fresh; // deck-file order, up to the daily cap
         QVector<int> duePerDeck;
         QVector<int> freshPerDeck;
         QVector<int> dueIncludingNewPerDeck; // totalDue in CLI stats includes new cards
@@ -196,10 +200,9 @@ private:
     Card *cardById(const QString &id);
     void answerCram(Rating rating);
     void answerReview(Rating rating);
-    void recordHistory(const QString &path, const QByteArray &before, bool existedBefore,
-                       const QString &description);
-    bool commitDeckEdit(Deck *deck, const Deck &original, const QByteArray &before,
-                        const QString &description, QString *error);
+    void recordHistory(const QString &path, const QByteArray &before, bool existedBefore, const QString &description);
+    bool commitDeckEdit(Deck *deck, const Deck &original, const QByteArray &before, const QString &description,
+                        QString *error);
 
     QString m_decksDir;
     QString m_currentDeck;
@@ -222,13 +225,13 @@ private:
     QTimer m_reloadTimer;
     StudySnapshot m_snapshot;
     bool m_snapshotValid = false;
-    qint64 m_reviewAgainDelayMs = 60000;
+    qint64 m_reviewAgainDelayMs = Config::kAgainDelayMs;
     int m_dueCount = 0;
     int m_reviewed = 0;
     int m_correct = 0;
     int m_box = 0;
-    int m_newPerDay = 20;
-    double m_desiredRetention = 0.9;
+    int m_newPerDay = Config::kDefaultNewPerDay;
+    double m_desiredRetention = Config::kDefaultRetention;
     bool m_showingAnswer = false;
     bool m_waitingForRepeat = false;
 };

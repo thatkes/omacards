@@ -56,9 +56,9 @@ Deck load(const QString &path, QString *error) {
     deck.name = QFileInfo(path).completeBaseName();
 
     static const QRegularExpression header(R"re(^#\s*(Deck|Description)\s*:\s*(.*)$)re",
-                                            QRegularExpression::CaseInsensitiveOption);
+                                           QRegularExpression::CaseInsensitiveOption);
     static const QRegularExpression keyLine(R"re(^(Q|A|Answer|tags|type|id)\s*:\s*(.*)$)re",
-                                             QRegularExpression::CaseInsensitiveOption);
+                                            QRegularExpression::CaseInsensitiveOption);
 
     QStringList block;
     int startLine = 0;
@@ -101,8 +101,7 @@ Deck load(const QString &path, QString *error) {
                 }
             } else if (!raw.trimmed().startsWith('#')) {
                 if (error)
-                    *error = QObject::tr("Unexpected line %1 in %2: %3")
-                                 .arg(lineNumber + i).arg(path, raw);
+                    *error = QObject::tr("Unexpected line %1 in %2: %3").arg(lineNumber + i).arg(path, raw);
             }
         }
         card.question = card.question.trimmed();
@@ -273,7 +272,7 @@ QVector<DeckIssue> lint(const QString &directory) {
                 issue.line = line;
                 issue.message = QStringLiteral("Duplicate question in deck");
                 issue.hint = QStringLiteral("Question already used on line %1; make it distinct.")
-                    .arg(questionLine(lines, card.question, 1));
+                                 .arg(questionLine(lines, card.question, 1));
                 issues << issue;
             }
             const auto addMathWarnings = [&](const QString &field, const QString &text) {

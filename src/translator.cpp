@@ -36,37 +36,60 @@ QString Translator::pluralCategory(const QString &language, long long count) {
     const bool teens = n100 >= 12 && n100 <= 14;
     const QString code = language;
     auto in = [&](std::initializer_list<const char *> codes) {
-        for (const char *c : codes) if (code == QLatin1String(c)) return true;
+        for (const char *c : codes)
+            if (code == QLatin1String(c))
+                return true;
         return false;
     };
-    if (in({"ja", "ko", "zh-CN", "zh-TW", "th", "vi", "id", "ms"})) return "other";
-    if (in({"hi", "bn", "fa", "si"})) return n <= 1 ? "one" : "other";
-    if (in({"fr", "pt-BR"})) return n <= 1 ? "one" : millions ? "many" : "other";
-    if (in({"ca", "es-MX", "it", "pt"})) return n == 1 ? "one" : millions ? "many" : "other";
-    if (code == "fil") return (n10 == 4 || n10 == 6 || n10 == 9) ? "other" : "one";
-    if (code == "is") return n10 == 1 && n100 != 11 ? "one" : "other";
-    if (in({"cs", "sk"})) return n == 1 ? "one" : n >= 2 && n <= 4 ? "few" : "other";
-    if (code == "pl") return n == 1 ? "one" : n10 >= 2 && n10 <= 4 && !teens ? "few" : "many";
-    if (in({"ru", "uk"})) return n10 == 1 && n100 != 11 ? "one" : n10 >= 2 && n10 <= 4 && !teens ? "few" : "many";
-    if (in({"hr", "sr"})) return n10 == 1 && n100 != 11 ? "one" : n10 >= 2 && n10 <= 4 && !teens ? "few" : "other";
-    if (code == "sl") return n100 == 1 ? "one" : n100 == 2 ? "two" : n100 >= 3 && n100 <= 4 ? "few" : "other";
-    if (code == "lt") return n100 >= 11 && n100 <= 19 ? "other" : n10 == 1 ? "one" : n10 >= 2 ? "few" : "other";
-    if (code == "lv") return n10 == 0 || (n100 >= 11 && n100 <= 19) ? "zero" : n10 == 1 ? "one" : "other";
-    if (code == "ro") return n == 1 ? "one" : n == 0 || (n100 >= 1 && n100 <= 19) ? "few" : "other";
+    if (in({"ja", "ko", "zh-CN", "zh-TW", "th", "vi", "id", "ms"}))
+        return "other";
+    if (in({"hi", "bn", "fa", "si"}))
+        return n <= 1 ? "one" : "other";
+    if (in({"fr", "pt-BR"}))
+        return n <= 1 ? "one" : millions ? "many" : "other";
+    if (in({"ca", "es-MX", "it", "pt"}))
+        return n == 1 ? "one" : millions ? "many" : "other";
+    if (code == "fil")
+        return (n10 == 4 || n10 == 6 || n10 == 9) ? "other" : "one";
+    if (code == "is")
+        return n10 == 1 && n100 != 11 ? "one" : "other";
+    if (in({"cs", "sk"}))
+        return n == 1 ? "one" : n >= 2 && n <= 4 ? "few" : "other";
+    if (code == "pl")
+        return n == 1 ? "one" : n10 >= 2 && n10 <= 4 && !teens ? "few" : "many";
+    if (in({"ru", "uk"}))
+        return n10 == 1 && n100 != 11 ? "one" : n10 >= 2 && n10 <= 4 && !teens ? "few" : "many";
+    if (in({"hr", "sr"}))
+        return n10 == 1 && n100 != 11 ? "one" : n10 >= 2 && n10 <= 4 && !teens ? "few" : "other";
+    if (code == "sl")
+        return n100 == 1 ? "one" : n100 == 2 ? "two" : n100 >= 3 && n100 <= 4 ? "few" : "other";
+    if (code == "lt")
+        return n100 >= 11 && n100 <= 19 ? "other" : n10 == 1 ? "one" : n10 >= 2 ? "few" : "other";
+    if (code == "lv")
+        return n10 == 0 || (n100 >= 11 && n100 <= 19) ? "zero" : n10 == 1 ? "one" : "other";
+    if (code == "ro")
+        return n == 1 ? "one" : n == 0 || (n100 >= 1 && n100 <= 19) ? "few" : "other";
     if (code == "ar") {
-        if (n <= 2) return n == 0 ? "zero" : n == 1 ? "one" : "two";
+        if (n <= 2)
+            return n == 0 ? "zero" : n == 1 ? "one" : "two";
         return n100 >= 3 && n100 <= 10 ? "few" : n100 >= 11 ? "many" : "other";
     }
-    if (code == "he") return n == 1 ? "one" : n == 2 ? "two" : "other";
-    if (code == "ga") return n == 1 ? "one" : n == 2 ? "two" : n >= 3 && n <= 6 ? "few" : n >= 7 && n <= 10 ? "many" : "other";
+    if (code == "he")
+        return n == 1 ? "one" : n == 2 ? "two" : "other";
+    if (code == "ga")
+        return n == 1 ? "one" : n == 2 ? "two" : n >= 3 && n <= 6 ? "few" : n >= 7 && n <= 10 ? "many" : "other";
     return n == 1 ? "one" : "other";
 }
 
 QLocale Translator::formatLocale(const QString &language) {
     QFile registry(qEnvironmentVariable("OMARCHY_PATH") + "/default/i18n/locales.json");
     if (registry.open(QIODevice::ReadOnly)) {
-        const QString name = QJsonDocument::fromJson(registry.readAll()).object()
-                                 .value(language).toObject().value("formatLocale").toString();
+        const QString name = QJsonDocument::fromJson(registry.readAll())
+                                 .object()
+                                 .value(language)
+                                 .toObject()
+                                 .value("formatLocale")
+                                 .toString();
         if (!name.isEmpty())
             return QLocale(name);
     }

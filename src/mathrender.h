@@ -11,6 +11,10 @@ class MathRenderer : public QObject {
     Q_OBJECT
 
 public:
+    // Result of the one-time toolchain probe. `None` means "not probed yet";
+    // after detect() the renderer is either the Unicode fallback or LaTeX/SVG.
+    enum class Engine { None, Unicode, LatexSvg };
+
     explicit MathRenderer(const QString &cacheDirectory = {}, QObject *parent = nullptr);
 
     // `ink` colors the rendered SVG; an empty value keeps the renderer's
@@ -20,15 +24,18 @@ public:
     QString renderPlain(const QString &text) const;
     QStringList warnings(const QString &text) const;
     QString renderExpression(const QString &expression, const QString &ink = {}, double scale = 1.0) const;
+
+    // Single detection point; the result is cached after the first call.
+    Engine detect() const;
     bool hasRenderer() const;
 
 private:
-    QString m_cache;
-    mutable bool m_checked = false;
-    mutable bool m_available = false;
-    mutable QString m_converter; // "pdf" or "dvi"
+    enum class Toolchain { None, Pdf, Dvi };
 
-    void detect() const;
+    QString m_cache;
+    mutable Engine m_engine = Engine::None;
+    mutable Toolchain m_toolchain = Toolchain::None;
+
     QString renderLatex(const QString &expression, const QString &ink, double scale) const;
 };
 

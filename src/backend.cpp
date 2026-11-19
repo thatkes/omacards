@@ -15,13 +15,6 @@
 #include <algorithm>
 
 namespace {
-qint64 reviewAgainDelayMs() {
-    const QByteArray override = qgetenv("OMACARDS_AGAIN_DELAY_MS");
-    bool ok = false;
-    const qint64 value = override.toLongLong(&ok);
-    return ok ? qBound<qint64>(qint64(0), value, qint64(600000)) : qint64(60000);
-}
-
 QString defaultDataDirectory() {
     // Use a deterministic base directory that does not depend on whether
     // QCoreApplication::setOrganizationName() has been called yet: the GUI
@@ -45,29 +38,32 @@ QString defaultDatabasePath() {
 constexpr double kQuestionMathScale = 2.0;
 constexpr double kAnswerMathScale = 1.6;
 
-}
+} // namespace
 
 Backend::Backend(const QString &decksDirectory, const QString &databasePath, QObject *parent)
-    : QObject(parent),
-      m_decksDir(decksDirectory.isEmpty() ? defaultDecksDirectory() : decksDirectory),
-      m_store(databasePath.isEmpty() ? defaultDatabasePath() : databasePath),
-      m_math() {
+    : QObject(parent), m_decksDir(decksDirectory.isEmpty() ? defaultDecksDirectory() : decksDirectory),
+      m_store(databasePath.isEmpty() ? defaultDatabasePath() : databasePath), m_math() {
     m_reloadTimer.setSingleShot(true);
     m_reloadTimer.setInterval(120);
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, [this] { m_reloadTimer.start(); });
     connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, [this] { m_reloadTimer.start(); });
     connect(&m_reloadTimer, &QTimer::timeout, this, &Backend::refresh);
 
-    m_reviewAgainDelayMs = reviewAgainDelayMs();
+    m_reviewAgainDelayMs = Config::againDelayMs();
     m_reviewAgainTimer.setSingleShot(true);
     connect(&m_reviewAgainTimer, &QTimer::timeout, this, &Backend::presentCard);
+}
+
+std::unique_ptr<Backend> Backend::fromEnvironment(QObject *parent) {
+    return std::make_unique<Backend>(defaultDecksDirectory(), defaultDatabasePath(), parent);
 }
 
 bool Backend::initialize(QString *error) {
     const bool fresh = !QFileInfo::exists(m_decksDir);
     if (!QDir().mkpath(m_decksDir)) {
         reportError(tr("Cannot create deck directory: %1").arg(m_decksDir));
-        if (error) *error = tr("Cannot create deck directory: %1").arg(m_decksDir);
+        if (error)
+            *error = tr("Cannot create deck directory: %1").arg(m_decksDir);
         return false;
     }
     if (fresh) {
@@ -93,8 +89,12 @@ bool Backend::initialize(QString *error) {
         reportError(tr("Cannot open state database: %1").arg(m_store.path()));
         return false;
     }
-    m_newPerDay = qBound(0, m_store.setting("new_per_day", "20").toInt(), 9999);
-    m_desiredRetention = qBound(0.70, m_store.setting("desired_retention", "0.9").toDouble(), 0.99);
+    m_newPerDay = qBound(0, m_store.setting("new_per_day", QString::number(Config::kDefaultNewPerDay)).toInt(),
+                         Config::kMaxNewPerDay);
+    m_desiredRetention =
+        qBound(Config::kMinRetention,
+               m_store.setting("desired_retention", QString::number(Config::kDefaultRetention)).toDouble(),
+               Config::kMaxRetention);
     m_watcher.addPath(m_decksDir);
     refresh();
     return true;
@@ -321,8 +321,7 @@ void Backend::presentCard() {
     const bool cram = Domain::modeFromString(m_mode) == StudyMode::Cram;
     QString nextId;
     int nextBox = 0;
-    const StudyQueue::Next next = m_queue.next(
-        QDateTime::currentMSecsSinceEpoch(), &nextId, nullptr, &nextBox);
+    const StudyQueue::Next next = m_queue.next(QDateTime::currentMSecsSinceEpoch(), &nextId, nullptr, &nextBox);
 
     if (next == StudyQueue::Next::Finished) {
         m_currentId.clear();
@@ -362,16 +361,14 @@ void Backend::presentCard() {
 
     if (Domain::modeFromString(m_mode) == StudyMode::Review) {
         const FsrsState state = effectiveState(*card);
-        const double recall = state.reps > 0
-            ? Fsrs::retrievability(state, QDateTime::currentMSecsSinceEpoch())
-            : 1.0;
-        setStatus(tr("Review · predicted recall %1% · FSRS box %2")
-                      .arg(qRound(recall * 100))
-                      .arg(qMax(1, m_reviewed + 1)));
+        const double recall = state.reps > 0 ? Fsrs::retrievability(state, QDateTime::currentMSecsSinceEpoch()) : 1.0;
+        setStatus(
+            tr("Review · predicted recall %1% · FSRS box %2").arg(qRound(recall * 100)).arg(qMax(1, m_reviewed + 1)));
     } else {
-        static const int intervals[] = {1, 2, 4, 8, 16};
-        setStatus(tr("Cram · box %1 of 5 · next in %2 cards")
-                      .arg(m_box).arg(intervals[m_box - 1]));
+        setStatus(tr("Cram · box %1 of %2 · next in %3 cards")
+                      .arg(m_box)
+                      .arg(Config::kLeitnerBoxes)
+                      .arg(Config::kLeitnerIntervals[m_box - 1]));
     }
     emit statsChanged();
     emit cardChanged();
@@ -395,8 +392,8 @@ void Backend::recordHistory(const QString &path, const QByteArray &before, bool 
         emit historyChanged();
 }
 
-bool Backend::commitDeckEdit(Deck *deck, const Deck &original, const QByteArray &before,
-                             const QString &description, QString *error) {
+bool Backend::commitDeckEdit(Deck *deck, const Deck &original, const QByteArray &before, const QString &description,
+                             QString *error) {
     if (!DeckIO::save(*deck, error)) {
         *deck = original;
         return false;
@@ -463,11 +460,10 @@ QVariantList Backend::cardList() const {
             entry.insert("isDue", state.due <= now);
             entry.insert("new", state.reps == 0);
             entry.insert("reps", state.reps);
-            entry.insert("dueText", state.reps == 0
-                             ? tr("new")
-                             : state.due <= now
-                                 ? tr("due now")
-                                 : QDateTime::fromMSecsSinceEpoch(state.due).toString("yyyy-MM-dd"));
+            entry.insert("dueText", state.reps == 0 ? tr("new")
+                                    : state.due <= now
+                                        ? tr("due now")
+                                        : QDateTime::fromMSecsSinceEpoch(state.due).toString("yyyy-MM-dd"));
             list << entry;
         }
     }
@@ -505,7 +501,7 @@ void Backend::setCardFilter(const QString &filter) {
 }
 
 void Backend::setNewPerDay(int count) {
-    const int clean = qBound(0, count, 9999);
+    const int clean = qBound(0, count, Config::kMaxNewPerDay);
     if (m_newPerDay == clean)
         return;
     m_newPerDay = clean;
@@ -521,7 +517,7 @@ void Backend::setNewPerDay(int count) {
 }
 
 void Backend::setDesiredRetention(double retention) {
-    const double clean = qBound(0.70, retention, 0.99);
+    const double clean = qBound(Config::kMinRetention, retention, Config::kMaxRetention);
     if (qFuzzyCompare(m_desiredRetention, clean))
         return;
     m_desiredRetention = clean;
@@ -536,7 +532,14 @@ void Backend::saveSetting(const QString &key, const QString &value) {
 }
 
 QString Backend::mathEngine() const {
-    return m_math.hasRenderer() ? tr("LaTeX (SVG)") : tr("Unicode fallback");
+    switch (m_math.detect()) {
+    case MathRenderer::Engine::LatexSvg:
+        return tr("LaTeX (SVG)");
+    case MathRenderer::Engine::Unicode:
+    case MathRenderer::Engine::None:
+        return tr("Unicode fallback");
+    }
+    return tr("Unicode fallback");
 }
 
 int Backend::totalCards() const {
@@ -672,11 +675,13 @@ void Backend::newDeck(const QString &name) {
 bool Backend::createDeck(const QString &name, QString *error, const QString &description) {
     const QString clean = name.trimmed();
     if (clean.isEmpty()) {
-        if (error) *error = tr("Deck name cannot be empty");
+        if (error)
+            *error = tr("Deck name cannot be empty");
         return false;
     }
     if (m_deckNames.contains(clean)) {
-        if (error) *error = tr("Deck already exists: %1").arg(clean);
+        if (error)
+            *error = tr("Deck already exists: %1").arg(clean);
         return false;
     }
     Deck deck;
@@ -685,13 +690,15 @@ bool Backend::createDeck(const QString &name, QString *error, const QString &des
     deck.path = QDir(m_decksDir).filePath(DeckIO::safeFileName(clean) + ".txt");
     for (const Deck &existing : m_decks) {
         if (QFileInfo(existing.path).absoluteFilePath() == QFileInfo(deck.path).absoluteFilePath()) {
-            if (error) *error = tr("Deck file already used by %1").arg(existing.name);
+            if (error)
+                *error = tr("Deck file already used by %1").arg(existing.name);
             return false;
         }
     }
     // An unreadable file is not in m_decks; never silently overwrite it.
     if (QFileInfo::exists(deck.path)) {
-        if (error) *error = tr("A deck file already exists at %1").arg(deck.path);
+        if (error)
+            *error = tr("A deck file already exists at %1").arg(deck.path);
         return false;
     }
     const bool existed = false;
@@ -707,7 +714,8 @@ bool Backend::createDeck(const QString &name, QString *error, const QString &des
 bool Backend::setDeckDescription(const QString &deckName, const QString &description, QString *error) {
     Deck *deck = deckByName(deckName.isEmpty() ? m_currentDeck : deckName);
     if (!deck) {
-        if (error) *error = tr("No such deck: %1").arg(deckName);
+        if (error)
+            *error = tr("No such deck: %1").arg(deckName);
         return false;
     }
     const QString clean = description.trimmed();
@@ -719,25 +727,29 @@ bool Backend::setDeckDescription(const QString &deckName, const QString &descrip
     return commitDeckEdit(deck, original, before, tr("editing deck description"), error);
 }
 
-bool Backend::createCards(const QString &deckName, const QVector<CardDraft> &drafts,
-                          const QString *description, QStringList *createdIds, QString *error) {
+bool Backend::createCards(const QString &deckName, const QVector<CardDraft> &drafts, const QString *description,
+                          QStringList *createdIds, QString *error) {
     const QString target = deckName.isEmpty() ? m_currentDeck : deckName.trimmed();
     if (target.isEmpty()) {
-        if (error) *error = tr("Give a deck name");
+        if (error)
+            *error = tr("Give a deck name");
         return false;
     }
     if (drafts.isEmpty()) {
-        if (error) *error = tr("No cards to add");
+        if (error)
+            *error = tr("No cards to add");
         return false;
     }
     for (int i = 0; i < drafts.size(); ++i) {
         const CardDraft &draft = drafts.at(i);
         if (draft.question.trimmed().isEmpty()) {
-            if (error) *error = tr("cards[%1] needs a question").arg(i);
+            if (error)
+                *error = tr("cards[%1] needs a question").arg(i);
             return false;
         }
         if (Domain::cardTypeFromString(draft.type) == CardType::Invalid) {
-            if (error) *error = tr("cards[%1] has an invalid type: %2").arg(i).arg(draft.type);
+            if (error)
+                *error = tr("cards[%1] has an invalid type: %2").arg(i).arg(draft.type);
             return false;
         }
     }
@@ -746,7 +758,8 @@ bool Backend::createCards(const QString &deckName, const QVector<CardDraft> &dra
         return false;
     Deck *deck = deckByName(target);
     if (!deck) {
-        if (error) *error = tr("No such deck: %1").arg(target);
+        if (error)
+            *error = tr("No such deck: %1").arg(target);
         return false;
     }
 
@@ -774,8 +787,7 @@ bool Backend::createCards(const QString &deckName, const QVector<CardDraft> &dra
     }
 
     deck->cards << cards;
-    const QString action = cards.size() == 1 ? tr("adding a card")
-                                             : tr("adding %1 cards").arg(cards.size());
+    const QString action = cards.size() == 1 ? tr("adding a card") : tr("adding %1 cards").arg(cards.size());
     if (!commitDeckEdit(deck, original, before, action, error))
         return false;
     if (createdIds)
@@ -784,13 +796,14 @@ bool Backend::createCards(const QString &deckName, const QVector<CardDraft> &dra
     return true;
 }
 
-bool Backend::createCard(const QString &deckName, const QString &question, const QString &answer,
-                         const QString &type, const QString &tags, QString *error) {
+bool Backend::createCard(const QString &deckName, const QString &question, const QString &answer, const QString &type,
+                         const QString &tags, QString *error) {
     const QString target = deckName.isEmpty() ? m_currentDeck : deckName;
     // Adding a single card from the UI still requires an existing deck; only
     // the bulk/import path is allowed to create one implicitly.
     if (!deckByName(target)) {
-        if (error) *error = tr("No such deck: %1").arg(deckName);
+        if (error)
+            *error = tr("No such deck: %1").arg(deckName);
         return false;
     }
     CardDraft draft;
@@ -801,24 +814,25 @@ bool Backend::createCard(const QString &deckName, const QString &question, const
     return createCards(target, {draft}, nullptr, nullptr, error);
 }
 
-bool Backend::modifyCard(const QString &deckName, const QString &cardId, const QString &question,
-                         const QString &answer, const QString &type, const QString &tags,
-                         QString *error, QString *finalId) {
+bool Backend::modifyCard(const QString &deckName, const QString &cardId, const QString &question, const QString &answer,
+                         const QString &type, const QString &tags, QString *error, QString *finalId) {
     Deck *deck = deckByName(deckName.isEmpty() ? m_currentDeck : deckName);
     if (!deck) {
-        if (error) *error = tr("No such deck: %1").arg(deckName);
+        if (error)
+            *error = tr("No such deck: %1").arg(deckName);
         return false;
     }
-    const auto found = std::find_if(deck->cards.begin(), deck->cards.end(), [&](const Card &card) {
-        return card.id == cardId;
-    });
+    const auto found =
+        std::find_if(deck->cards.begin(), deck->cards.end(), [&](const Card &card) { return card.id == cardId; });
     if (found == deck->cards.end()) {
-        if (error) *error = tr("No such card: %1").arg(cardId);
+        if (error)
+            *error = tr("No such card: %1").arg(cardId);
         return false;
     }
     Card *card = &*found;
     if (question.trimmed().isEmpty()) {
-        if (error) *error = tr("A card needs a question");
+        if (error)
+            *error = tr("A card needs a question");
         return false;
     }
 
@@ -846,14 +860,15 @@ bool Backend::modifyCard(const QString &deckName, const QString &cardId, const Q
 bool Backend::deleteCard(const QString &deckName, const QString &cardId, QString *error) {
     Deck *deck = deckByName(deckName.isEmpty() ? m_currentDeck : deckName);
     if (!deck) {
-        if (error) *error = tr("No such deck: %1").arg(deckName);
+        if (error)
+            *error = tr("No such deck: %1").arg(deckName);
         return false;
     }
-    const auto found = std::find_if(deck->cards.begin(), deck->cards.end(), [&](const Card &card) {
-        return card.id == cardId;
-    });
+    const auto found =
+        std::find_if(deck->cards.begin(), deck->cards.end(), [&](const Card &card) { return card.id == cardId; });
     if (found == deck->cards.end()) {
-        if (error) *error = tr("No such card: %1").arg(cardId);
+        if (error)
+            *error = tr("No such card: %1").arg(cardId);
         return false;
     }
     const Deck original = *deck;
@@ -865,13 +880,15 @@ bool Backend::deleteCard(const QString &deckName, const QString &cardId, QString
 bool Backend::removeDeck(const QString &name, QString *error) {
     const Deck *deck = deckByName(name);
     if (!deck) {
-        if (error) *error = tr("No such deck: %1").arg(name);
+        if (error)
+            *error = tr("No such deck: %1").arg(name);
         return false;
     }
     const QString path = deck->path;
     const QByteArray before = FileHistory::readBytes(path);
     if (!QFile::remove(path)) {
-        if (error) *error = tr("Cannot remove deck file: %1").arg(path);
+        if (error)
+            *error = tr("Cannot remove deck file: %1").arg(path);
         return false;
     }
     recordHistory(path, before, true, tr("deleting deck %1").arg(name));
@@ -898,8 +915,7 @@ void Backend::addCard(const QString &question, const QString &answer) {
         setStatus(tr("Card added"));
 }
 
-void Backend::addCardDetails(const QString &question, const QString &answer, const QString &type,
-                             const QString &tags) {
+void Backend::addCardDetails(const QString &question, const QString &answer, const QString &type, const QString &tags) {
     QString error;
     if (!createCard(m_currentDeck, question, answer, type, tags, &error))
         reportError(error);
@@ -907,8 +923,8 @@ void Backend::addCardDetails(const QString &question, const QString &answer, con
         setStatus(tr("Card added"));
 }
 
-void Backend::updateCard(const QString &cardId, const QString &question, const QString &answer,
-                         const QString &type, const QString &tags) {
+void Backend::updateCard(const QString &cardId, const QString &question, const QString &answer, const QString &type,
+                         const QString &tags) {
     QString error;
     if (!modifyCard(m_currentDeck, cardId, question, answer, type, tags, &error))
         reportError(error);
@@ -998,8 +1014,7 @@ void Backend::requestShow() {
 
 QString Backend::statsText() const {
     const double accuracy = m_reviewed > 0 ? 100.0 * m_correct / m_reviewed : 0.0;
-    return tr("%1 reviewed · %2% correct · box %3")
-        .arg(m_reviewed).arg(qRound(accuracy)).arg(m_box);
+    return tr("%1 reviewed · %2% correct · box %3").arg(m_reviewed).arg(qRound(accuracy)).arg(m_box);
 }
 
 QVariantMap Backend::statsSummary() const {
@@ -1009,9 +1024,7 @@ QVariantMap Backend::statsSummary() const {
     result.insert("today", summary.today);
     result.insert("todayCorrect", summary.todayCorrect);
     result.insert("streakDays", summary.streakDays);
-    result.insert("accuracy", summary.today > 0
-                      ? qRound(100.0 * summary.todayCorrect / summary.today)
-                      : 0);
+    result.insert("accuracy", summary.today > 0 ? qRound(100.0 * summary.todayCorrect / summary.today) : 0);
     result.insert("due", m_dueCount);
     result.insert("cards", totalCards());
     result.insert("decks", m_deckNames.size());

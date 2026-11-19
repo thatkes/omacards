@@ -21,7 +21,7 @@ QString escapePlain(const QString &text) {
 
 const QRegularExpression &mathPattern() {
     static const QRegularExpression pattern(R"re(\\\((.*?)\\\)|\$\$(.*?)\$\$)re",
-                                           QRegularExpression::DotMatchesEverythingOption);
+                                            QRegularExpression::DotMatchesEverythingOption);
     return pattern;
 }
 
@@ -29,8 +29,7 @@ QString expressionAt(const QRegularExpressionMatch &match) {
     return match.captured(1).isEmpty() ? match.captured(2) : match.captured(1);
 }
 
-template <typename Replacement>
-QString mapMath(const QString &text, Replacement replacement, bool escape) {
+template <typename Replacement> QString mapMath(const QString &text, Replacement replacement, bool escape) {
     QString out;
     int last = 0;
     auto it = mathPattern().globalMatch(text);
@@ -48,29 +47,36 @@ QString mapMath(const QString &text, Replacement replacement, bool escape) {
 
 const QHash<QString, QString> &mathSymbols() {
     static const QHash<QString, QString> symbols{
-        {"alpha", "α"}, {"beta", "β"}, {"gamma", "γ"}, {"delta", "δ"}, {"epsilon", "ε"},
-        {"theta", "θ"}, {"lambda", "λ"}, {"mu", "μ"}, {"pi", "π"}, {"sigma", "σ"},
-        {"tau", "τ"}, {"phi", "φ"}, {"omega", "ω"}, {"Gamma", "Γ"}, {"Delta", "Δ"},
-        {"Theta", "Θ"}, {"Lambda", "Λ"}, {"Pi", "Π"}, {"Sigma", "Σ"}, {"Omega", "Ω"},
-        {"times", "×"}, {"cdot", "·"}, {"pm", "±"}, {"mp", "∓"}, {"leq", "≤"},
-        {"geq", "≥"}, {"le", "≤"}, {"ge", "≥"}, {"neq", "≠"}, {"ne", "≠"},
-        {"approx", "≈"}, {"infty", "∞"}, {"sum", "∑"}, {"prod", "∏"}, {"int", "∫"},
-        {"partial", "∂"}, {"nabla", "∇"}, {"to", "→"}, {"rightarrow", "→"},
+        {"alpha", "α"},     {"beta", "β"},       {"gamma", "γ"},
+        {"delta", "δ"},     {"epsilon", "ε"},    {"theta", "θ"},
+        {"lambda", "λ"},    {"mu", "μ"},         {"pi", "π"},
+        {"sigma", "σ"},     {"tau", "τ"},        {"phi", "φ"},
+        {"omega", "ω"},     {"Gamma", "Γ"},      {"Delta", "Δ"},
+        {"Theta", "Θ"},     {"Lambda", "Λ"},     {"Pi", "Π"},
+        {"Sigma", "Σ"},     {"Omega", "Ω"},      {"times", "×"},
+        {"cdot", "·"},      {"pm", "±"},         {"mp", "∓"},
+        {"leq", "≤"},       {"geq", "≥"},        {"le", "≤"},
+        {"ge", "≥"},        {"neq", "≠"},        {"ne", "≠"},
+        {"approx", "≈"},    {"infty", "∞"},      {"sum", "∑"},
+        {"prod", "∏"},      {"int", "∫"},        {"partial", "∂"},
+        {"nabla", "∇"},     {"to", "→"},         {"rightarrow", "→"},
         {"leftarrow", "←"}, {"Rightarrow", "⇒"}, {"Leftrightarrow", "⇔"},
-        {"in", "∈"}, {"notin", "∉"}, {"subset", "⊂"}, {"supset", "⊃"}, {"cup", "∪"},
-        {"cap", "∩"}, {"emptyset", "∅"}, {"forall", "∀"}, {"exists", "∃"}, {"neg", "¬"},
-        {"land", "∧"}, {"lor", "∨"}, {"ldots", "…"}, {"dots", "…"}, {"cdots", "⋯"},
-        {"quad", " "}, {"qquad", "  "}, {"sin", "sin"}, {"cos", "cos"}, {"tan", "tan"},
-        {"log", "log"}, {"ln", "ln"}, {"lim", "lim"}, {"min", "min"}, {"max", "max"},
-        {"sqrt", "√"},
+        {"in", "∈"},        {"notin", "∉"},      {"subset", "⊂"},
+        {"supset", "⊃"},    {"cup", "∪"},        {"cap", "∩"},
+        {"emptyset", "∅"},  {"forall", "∀"},     {"exists", "∃"},
+        {"neg", "¬"},       {"land", "∧"},       {"lor", "∨"},
+        {"ldots", "…"},     {"dots", "…"},       {"cdots", "⋯"},
+        {"quad", " "},      {"qquad", "  "},     {"sin", "sin"},
+        {"cos", "cos"},     {"tan", "tan"},      {"log", "log"},
+        {"ln", "ln"},       {"lim", "lim"},      {"min", "min"},
+        {"max", "max"},     {"sqrt", "√"},
     };
     return symbols;
 }
 
 const QStringList &structuredCommands() {
     static const QStringList commands{
-        "frac", "dfrac", "tfrac", "binom", "sqrt", "text", "mathrm", "mathbf",
-        "displaystyle", "left", "right",
+        "frac", "dfrac", "tfrac", "binom", "sqrt", "text", "mathrm", "mathbf", "displaystyle", "left", "right",
     };
     return commands;
 }
@@ -106,39 +112,39 @@ MathRenderer::MathRenderer(const QString &cacheDirectory, QObject *parent)
     : QObject(parent),
       m_cache(cacheDirectory.isEmpty()
                   ? QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/omacards/math"
-                  : cacheDirectory) {
-}
+                  : cacheDirectory) {}
 
-void MathRenderer::detect() const {
-    if (m_checked)
-        return;
-    m_checked = true;
+MathRenderer::Engine MathRenderer::detect() const {
+    if (m_engine != Engine::None)
+        return m_engine;
     QDir().mkpath(m_cache);
     const auto find = [](const char *name) { return QStandardPaths::findExecutable(QString::fromLatin1(name)); };
     const QString latex = find("tectonic");
     const QString pdflatex = find("pdflatex");
     const QString dvilatex = find("latex");
-    if ((!latex.isEmpty() && !find("pdftocairo").isEmpty())) {
-        m_converter = "pdf";
-        m_available = true;
+    if (!latex.isEmpty() && !find("pdftocairo").isEmpty()) {
+        m_toolchain = Toolchain::Pdf;
+        m_engine = Engine::LatexSvg;
     } else if (!dvilatex.isEmpty() && !find("dvisvgm").isEmpty()) {
-        m_converter = "dvi";
-        m_available = true;
+        m_toolchain = Toolchain::Dvi;
+        m_engine = Engine::LatexSvg;
     } else if (!pdflatex.isEmpty() && !find("pdftocairo").isEmpty()) {
-        m_converter = "pdf";
-        m_available = true;
+        m_toolchain = Toolchain::Pdf;
+        m_engine = Engine::LatexSvg;
+    } else {
+        m_toolchain = Toolchain::None;
+        m_engine = Engine::Unicode;
     }
+    return m_engine;
 }
 
 bool MathRenderer::hasRenderer() const {
-    detect();
-    return m_available;
+    return detect() == Engine::LatexSvg;
 }
 
 QString MathRenderer::render(const QString &text, const QString &ink, double scale) const {
-    return mapMath(text, [this, ink, scale](const QString &expression) {
-        return renderExpression(expression, ink, scale);
-    }, true);
+    return mapMath(
+        text, [this, ink, scale](const QString &expression) { return renderExpression(expression, ink, scale); }, true);
 }
 
 QString MathRenderer::renderPlain(const QString &text) const {
@@ -231,9 +237,8 @@ void colorizeSvg(const QString &path, const QString &ink, double scale) {
         return;
     QString svg = QString::fromUtf8(file.readAll());
     file.close();
-    static const QRegularExpression black(
-        R"re(rgb\(\s*0%\s*,\s*0%\s*,\s*0%\s*\)|#(?:000|000000)\b|\bblack\b)re",
-        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression black(R"re(rgb\(\s*0%\s*,\s*0%\s*,\s*0%\s*\)|#(?:000|000000)\b|\bblack\b)re",
+                                          QRegularExpression::CaseInsensitiveOption);
     svg.replace(black, ink);
     scaleSvgRoot(svg, scale);
     if (file.open(QIODevice::WriteOnly | QIODevice::Truncate))
@@ -260,16 +265,16 @@ QSize svgPixelSize(const QString &path) {
 } // namespace
 
 QString MathRenderer::renderLatex(const QString &expression, const QString &ink, double scale) const {
-    detect();
-    if (!m_available)
+    if (detect() != Engine::LatexSvg)
         return {};
 
     // Ink and scale are part of the key so question/answer colors and label
     // sizes never share a cached file. The prefix invalidates SVGs from the
     // old unscaled/full-page renderers.
     const QString key = expression + "\n" + normalizeInk(ink) + "\n" + QString::number(scale, 'f', 3);
-    const QString base = "eq4-" + QString::fromLatin1(
-        QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha256).toHex().left(20));
+    const QString base =
+        "eq4-" +
+        QString::fromLatin1(QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha256).toHex().left(20));
     const QString svgPath = m_cache + "/" + base + ".svg";
     if (QFileInfo::exists(svgPath))
         return svgPath;
@@ -281,17 +286,18 @@ QString MathRenderer::renderLatex(const QString &expression, const QString &ink,
     // Typeset directly into a page sized to the expression. Shipout bypasses
     // the article output routine, so pdftocairo gets a tight page instead of a
     // letter-sized one with the formula lost in the top-left corner.
-    const QString tex = QString(
-        "\\documentclass[12pt]{article}\n"
-        "\\usepackage{amsmath,amssymb}\n"
-        "\\pagestyle{empty}\n"
-        "\\begin{document}\n"
-        "\\hoffset=-1in \\voffset=-1in\n"
-        "\\setbox0=\\hbox{$\\displaystyle %1$}\n"
-        "\\pdfpagewidth=\\wd0 \\advance\\pdfpagewidth by 8pt\n"
-        "\\pdfpageheight=\\ht0 \\advance\\pdfpageheight by \\dp0 \\advance\\pdfpageheight by 8pt\n"
-        "\\shipout\\vbox{\\kern4pt\\hbox{\\kern4pt\\box0\\kern4pt}}\n"
-        "\\end{document}\n").arg(expression);
+    const QString tex =
+        QString("\\documentclass[12pt]{article}\n"
+                "\\usepackage{amsmath,amssymb}\n"
+                "\\pagestyle{empty}\n"
+                "\\begin{document}\n"
+                "\\hoffset=-1in \\voffset=-1in\n"
+                "\\setbox0=\\hbox{$\\displaystyle %1$}\n"
+                "\\pdfpagewidth=\\wd0 \\advance\\pdfpagewidth by 8pt\n"
+                "\\pdfpageheight=\\ht0 \\advance\\pdfpageheight by \\dp0 \\advance\\pdfpageheight by 8pt\n"
+                "\\shipout\\vbox{\\kern4pt\\hbox{\\kern4pt\\box0\\kern4pt}}\n"
+                "\\end{document}\n")
+            .arg(expression);
     QFile file(stem + ".tex");
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
         return {};
@@ -308,7 +314,7 @@ QString MathRenderer::renderLatex(const QString &expression, const QString &ink,
     };
 
     bool ok = false;
-    if (m_converter == "pdf") {
+    if (m_toolchain == Toolchain::Pdf) {
         const QString tectonic = QStandardPaths::findExecutable("tectonic");
         const QString pdf = stem + ".pdf";
         const QString outputDirectory = QFileInfo(stem).absolutePath();
@@ -318,17 +324,17 @@ QString MathRenderer::renderLatex(const QString &expression, const QString &ink,
             // shell escape. Prefer its cached-only mode so normal renders stay fast;
             // fall back to one download-enabled pass when the bundle is missing.
             ok = run(tectonic, {"--untrusted", "--only-cached", "--outdir=" + outputDirectory, stem + ".tex"},
-                     localTimeoutMs)
-                 && QFileInfo::exists(pdf);
+                     localTimeoutMs) &&
+                 QFileInfo::exists(pdf);
             if (!ok) {
                 QFile::remove(pdf);
-                ok = run(tectonic, {"--untrusted", "--outdir=" + outputDirectory, stem + ".tex"}, downloadTimeoutMs)
-                     && QFileInfo::exists(pdf);
+                ok = run(tectonic, {"--untrusted", "--outdir=" + outputDirectory, stem + ".tex"}, downloadTimeoutMs) &&
+                     QFileInfo::exists(pdf);
             }
         } else {
             ok = run(QStandardPaths::findExecutable("pdflatex"),
-                     {"-interaction=nonstopmode", "-no-shell-escape", stem + ".tex"}, localTimeoutMs)
-                 && QFileInfo::exists(pdf);
+                     {"-interaction=nonstopmode", "-no-shell-escape", stem + ".tex"}, localTimeoutMs) &&
+                 QFileInfo::exists(pdf);
         }
         ok = ok && run(QStandardPaths::findExecutable("pdftocairo"), {"-svg", pdf, svgPath}, localTimeoutMs);
     } else {
@@ -336,9 +342,10 @@ QString MathRenderer::renderLatex(const QString &expression, const QString &ink,
         QFile::remove(dvi);
         ok = run(QStandardPaths::findExecutable("latex"),
                  {"-interaction=nonstopmode", "-no-shell-escape", "-output-directory=" + QFileInfo(stem).absolutePath(),
-                  stem + ".tex"}, localTimeoutMs)
-             && QFileInfo::exists(dvi)
-             && run(QStandardPaths::findExecutable("dvisvgm"), {"--no-fonts", "-o", svgPath, dvi}, localTimeoutMs);
+                  stem + ".tex"},
+                 localTimeoutMs) &&
+             QFileInfo::exists(dvi) &&
+             run(QStandardPaths::findExecutable("dvisvgm"), {"--no-fonts", "-o", svgPath, dvi}, localTimeoutMs);
     }
     if (ok && QFileInfo::exists(svgPath)) {
         colorizeSvg(svgPath, normalizeInk(ink), scale);
@@ -361,8 +368,7 @@ QString unicodeMath(const QString &expression) {
                 i = qMin(i + 2, text.size());
                 continue;
             }
-            if (name == QLatin1String("frac") || name == QLatin1String("dfrac")
-                || name == QLatin1String("tfrac")) {
+            if (name == QLatin1String("frac") || name == QLatin1String("dfrac") || name == QLatin1String("tfrac")) {
                 const BraceGroup numerator = readGroup(text, after);
                 if (numerator.end > 0) {
                     const BraceGroup denominator = readGroup(text, numerator.end);
@@ -389,8 +395,8 @@ QString unicodeMath(const QString &expression) {
                     i = radicand.end;
                     continue;
                 }
-            } else if (name == QLatin1String("text") || name == QLatin1String("mathrm")
-                       || name == QLatin1String("mathbf") || name == QLatin1String("displaystyle")) {
+            } else if (name == QLatin1String("text") || name == QLatin1String("mathrm") ||
+                       name == QLatin1String("mathbf") || name == QLatin1String("displaystyle")) {
                 const BraceGroup literal = readGroup(text, after);
                 if (literal.end > 0) {
                     out += literal.content;
@@ -411,8 +417,7 @@ QString unicodeMath(const QString &expression) {
             if (i + 1 < text.size() && text.at(i + 1) == '{') {
                 const BraceGroup group = readGroup(text, i + 1);
                 const QString content = unicodeMath(group.content);
-                const bool compact = content.size() == 1
-                    || (content.startsWith('(') && content.endsWith(')'));
+                const bool compact = content.size() == 1 || (content.startsWith('(') && content.endsWith(')'));
                 out += ch;
                 out += compact ? content : QStringLiteral("(%1)").arg(content);
                 i = group.end > 0 ? group.end : i + 2;

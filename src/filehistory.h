@@ -20,8 +20,7 @@ public:
     static QByteArray readBytes(const QString &path);
 
     // Returns false when the file did not actually change.
-    bool record(const QString &path, const QByteArray &before, bool existedBefore,
-                const QString &description);
+    bool record(const QString &path, const QByteArray &before, bool existedBefore, const QString &description);
     bool undo(QString *error, QString *description);
     bool redo(QString *error, QString *description);
 

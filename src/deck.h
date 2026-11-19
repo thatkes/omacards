@@ -6,7 +6,7 @@
 #include <QVector>
 
 struct Card {
-    QString id;      // stable hash of deck + question + answer, or an explicit id
+    QString id; // stable hash of deck + question + answer, or an explicit id
     QString question;
     QString answer;
     QString deck;
@@ -30,9 +30,9 @@ struct CardDraft {
 };
 
 struct DeckIssue {
-    QString path;     // deck file the issue belongs to
-    QString card;     // card id, when the issue is about a card
-    int line = 0;     // 1-based line in the deck file, when known
+    QString path;                                 // deck file the issue belongs to
+    QString card;                                 // card id, when the issue is about a card
+    int line = 0;                                 // 1-based line in the deck file, when known
     QString severity = QStringLiteral("warning"); // error | warning
     QString message;
     QString hint;
@@ -42,14 +42,14 @@ Q_DECLARE_METATYPE(Card)
 Q_DECLARE_METATYPE(Deck)
 
 namespace DeckIO {
-    QVector<Deck> loadAll(const QString &directory, QString *error = nullptr);
-    QVector<DeckIssue> lint(const QString &directory);
-    Deck load(const QString &path, QString *error = nullptr);
-    QString serialize(const Deck &deck);
-    bool save(const Deck &deck, QString *error = nullptr);
-    QString cardId(const Card &card);
-    QString contentHash(const Card &card);
-    QString safeFileName(const QString &name);
-    QString displayQuestion(const Card &card);
-    QString displayAnswer(const Card &card);
-}
+QVector<Deck> loadAll(const QString &directory, QString *error = nullptr);
+QVector<DeckIssue> lint(const QString &directory);
+Deck load(const QString &path, QString *error = nullptr);
+QString serialize(const Deck &deck);
+bool save(const Deck &deck, QString *error = nullptr);
+QString cardId(const Card &card);
+QString contentHash(const Card &card);
+QString safeFileName(const QString &name);
+QString displayQuestion(const Card &card);
+QString displayAnswer(const Card &card);
+} // namespace DeckIO

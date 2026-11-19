@@ -10,7 +10,7 @@
 
 struct CramEntry {
     QString cardId;
-    int box = 0; // 0..4, intervals of 1,2,4,8,16 cards
+    int box = 0; // 0..Config::kLeitnerBoxes-1, delays in Config::kLeitnerIntervals
     int next = 0;
 };
 

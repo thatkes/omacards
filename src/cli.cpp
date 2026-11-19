@@ -4,6 +4,7 @@
 #include "cli.h"
 
 #include "backend.h"
+#include "config.h"
 #include "deck.h"
 #include "domain.h"
 #include "fsrs.h"
@@ -51,9 +52,9 @@ struct Options {
 
 bool isHeadlessCommand(const QString &command) {
     static const QStringList commands{
-        "check", "decks", "cards", "search", "add-deck", "add-cards", "add-card", "edit-card",
-        "delete-card", "delete-deck", "import", "due", "review", "cram", "preview", "skill",
-        "stats", "config", "help", "--help", "-h",
+        "check",     "decks",       "cards",       "search", "add-deck", "add-cards", "add-card",
+        "edit-card", "delete-card", "delete-deck", "import", "due",      "review",    "cram",
+        "preview",   "skill",       "stats",       "config", "help",     "--help",    "-h",
     };
     return commands.contains(command);
 }
@@ -69,26 +70,52 @@ Options parse(const QStringList &arguments) {
     for (int i = 0; i < rest.size(); ++i) {
         const QString arg = rest.at(i);
         auto value = [&]() { return i + 1 < rest.size() ? rest.at(++i) : QString(); };
-        if (arg == "--deck" || arg == "-d") options.deck = value();
-        else if (arg == "--question" || arg == "-q") { options.question = value(); options.questionSet = true; }
-        else if (arg == "--answer" || arg == "-a") { options.answer = value(); options.answerSet = true; }
-        else if (arg == "--type") { options.type = value(); options.typeSet = true; }
-        else if (arg == "--tags") { options.tags = value(); options.tagsSet = true; }
-        else if (arg == "--card" || arg == "-c") options.card = value();
-        else if (arg == "--input" || arg == "-i") options.input = value();
-        else if (arg == "--description") options.description = value();
-        else if (arg == "--format") options.format = value();
-        else if (arg == "--rating" || arg == "-r") options.rating = value().toInt();
-        else if (arg == "--steps") options.steps = value().toInt();
-        else if (arg == "--new-per-day") options.newPerDay = value().toInt();
-        else if (arg == "--retention") options.retention = value().toDouble();
-        else if (arg.startsWith("--deck=")) options.deck = arg.section('=', 1);
-        else if (arg.startsWith("--question=")) { options.question = arg.section('=', 1); options.questionSet = true; }
-        else if (arg.startsWith("--answer=")) { options.answer = arg.section('=', 1); options.answerSet = true; }
-        else if (arg.startsWith("--input=")) options.input = arg.section('=', 1);
-        else if (arg.startsWith("--description=")) options.description = arg.section('=', 1);
-        else if (arg.startsWith("--format=")) options.format = arg.section('=', 1);
-        else if (options.path.isEmpty()) options.path = arg;
+        if (arg == "--deck" || arg == "-d")
+            options.deck = value();
+        else if (arg == "--question" || arg == "-q") {
+            options.question = value();
+            options.questionSet = true;
+        } else if (arg == "--answer" || arg == "-a") {
+            options.answer = value();
+            options.answerSet = true;
+        } else if (arg == "--type") {
+            options.type = value();
+            options.typeSet = true;
+        } else if (arg == "--tags") {
+            options.tags = value();
+            options.tagsSet = true;
+        } else if (arg == "--card" || arg == "-c")
+            options.card = value();
+        else if (arg == "--input" || arg == "-i")
+            options.input = value();
+        else if (arg == "--description")
+            options.description = value();
+        else if (arg == "--format")
+            options.format = value();
+        else if (arg == "--rating" || arg == "-r")
+            options.rating = value().toInt();
+        else if (arg == "--steps")
+            options.steps = value().toInt();
+        else if (arg == "--new-per-day")
+            options.newPerDay = value().toInt();
+        else if (arg == "--retention")
+            options.retention = value().toDouble();
+        else if (arg.startsWith("--deck="))
+            options.deck = arg.section('=', 1);
+        else if (arg.startsWith("--question=")) {
+            options.question = arg.section('=', 1);
+            options.questionSet = true;
+        } else if (arg.startsWith("--answer=")) {
+            options.answer = arg.section('=', 1);
+            options.answerSet = true;
+        } else if (arg.startsWith("--input="))
+            options.input = arg.section('=', 1);
+        else if (arg.startsWith("--description="))
+            options.description = arg.section('=', 1);
+        else if (arg.startsWith("--format="))
+            options.format = arg.section('=', 1);
+        else if (options.path.isEmpty())
+            options.path = arg;
     }
     options.json = arguments.contains(QString("--json"));
     options.math = arguments.contains(QString("--math"));
@@ -146,7 +173,8 @@ bool readCardInput(const Options &options, QByteArray *bytes, QString *error) {
     const QString source = options.input.isEmpty() ? options.path : options.input;
     if (source.isEmpty() || source == QLatin1String("-")) {
         if (::isatty(fileno(stdin))) {
-            if (error) *error = QObject::tr("Use --input FILE or pipe JSON to stdin");
+            if (error)
+                *error = QObject::tr("Use --input FILE or pipe JSON to stdin");
             return false;
         }
         char buffer[4096];
@@ -157,19 +185,21 @@ bool readCardInput(const Options &options, QByteArray *bytes, QString *error) {
     }
     QFile file(source);
     if (!file.open(QIODevice::ReadOnly)) {
-        if (error) *error = QObject::tr("Cannot read: %1").arg(source);
+        if (error)
+            *error = QObject::tr("Cannot read: %1").arg(source);
         return false;
     }
     *bytes = file.readAll();
     return true;
 }
 
-bool parseCardDrafts(const QByteArray &data, const QString &descriptionFlag,
-                     QVector<CardDraft> *drafts, QString *description, QString *error) {
+bool parseCardDrafts(const QByteArray &data, const QString &descriptionFlag, QVector<CardDraft> *drafts,
+                     QString *description, QString *error) {
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(data, &parseError);
     if (parseError.error != QJsonParseError::NoError) {
-        if (error) *error = QObject::tr("Invalid JSON: %1").arg(parseError.errorString());
+        if (error)
+            *error = QObject::tr("Invalid JSON: %1").arg(parseError.errorString());
         return false;
     }
 
@@ -183,17 +213,20 @@ bool parseCardDrafts(const QByteArray &data, const QString &descriptionFlag,
         if (descriptionFlag.isEmpty())
             *description = root.value(QStringLiteral("description")).toString();
     } else {
-        if (error) *error = QObject::tr("Expected a JSON array or an object with a cards array");
+        if (error)
+            *error = QObject::tr("Expected a JSON array or an object with a cards array");
         return false;
     }
     if (cards.isEmpty()) {
-        if (error) *error = QObject::tr("No cards in JSON input");
+        if (error)
+            *error = QObject::tr("No cards in JSON input");
         return false;
     }
 
     for (int i = 0; i < cards.size(); ++i) {
         if (!cards.at(i).isObject()) {
-            if (error) *error = QObject::tr("cards[%1] must be an object").arg(i);
+            if (error)
+                *error = QObject::tr("cards[%1] must be an object").arg(i);
             return false;
         }
         const QJsonObject entry = cards.at(i).toObject();
@@ -209,11 +242,13 @@ bool parseCardDrafts(const QByteArray &data, const QString &descriptionFlag,
             draft.tags = tags.toString().split(',', Qt::SkipEmptyParts);
         }
         if (draft.question.trimmed().isEmpty()) {
-            if (error) *error = QObject::tr("cards[%1] needs a question").arg(i);
+            if (error)
+                *error = QObject::tr("cards[%1] needs a question").arg(i);
             return false;
         }
         if (Domain::cardTypeFromString(draft.type) == CardType::Invalid) {
-            if (error) *error = QObject::tr("cards[%1] has an invalid type: %2").arg(i).arg(draft.type);
+            if (error)
+                *error = QObject::tr("cards[%1] has an invalid type: %2").arg(i).arg(draft.type);
             return false;
         }
         drafts->append(draft);
@@ -222,31 +257,30 @@ bool parseCardDrafts(const QByteArray &data, const QString &descriptionFlag,
 }
 
 QString usage() {
-    return QStringLiteral(
-        "omacards — keyboard flashcards for Omarchy\n\n"
-        "Usage:\n"
-        "  omacards [open]                  Start the GUI\n"
-        "  omacards check [--math] [--strict] [--json]\n"
-        "                                   Show decks, cards, due count, math and issues\n"
-        "  omacards decks [--json]          List decks\n"
-        "  omacards cards [--deck D] [--json]\n"
-        "  omacards search TERM [--deck D] [--json]\n"
-        "  omacards preview --deck D [--card ID] [--format text|html] [--json]\n"
-        "  omacards add-deck NAME [--description TEXT] [--json]\n"
-        "  omacards add-cards --deck NAME [--description TEXT] [--input FILE|-] [--json]\n"
-        "  omacards add-card -q Q -a A [-d D] [--type cloze] [--tags a,b] [--json]\n"
-        "  omacards edit-card -c ID [-q Q] [-a A] [--type T] [--tags a,b] [--json]\n"
-        "  omacards delete-card -c ID [-d D] [--json]\n"
-        "  omacards delete-deck NAME [--json]\n"
-        "  omacards import PATH [-d D] [--json]\n"
-        "  omacards due [-d D] [--json]\n"
-        "  omacards review -c ID -r 1|3 [--json]\n"
-        "  omacards cram [-d D] [--steps N] [--json]\n"
-        "  omacards stats [--json]\n"
-        "  omacards config [--new-per-day N] [--retention 0.70-0.99] [--json]\n"
-        "  omacards skill install [--json]\n");
+    return QStringLiteral("omacards — keyboard flashcards for Omarchy\n\n"
+                          "Usage:\n"
+                          "  omacards [open]                  Start the GUI\n"
+                          "  omacards check [--math] [--strict] [--json]\n"
+                          "                                   Show decks, cards, due count, math and issues\n"
+                          "  omacards decks [--json]          List decks\n"
+                          "  omacards cards [--deck D] [--json]\n"
+                          "  omacards search TERM [--deck D] [--json]\n"
+                          "  omacards preview --deck D [--card ID] [--format text|html] [--json]\n"
+                          "  omacards add-deck NAME [--description TEXT] [--json]\n"
+                          "  omacards add-cards --deck NAME [--description TEXT] [--input FILE|-] [--json]\n"
+                          "  omacards add-card -q Q -a A [-d D] [--type cloze] [--tags a,b] [--json]\n"
+                          "  omacards edit-card -c ID [-q Q] [-a A] [--type T] [--tags a,b] [--json]\n"
+                          "  omacards delete-card -c ID [-d D] [--json]\n"
+                          "  omacards delete-deck NAME [--json]\n"
+                          "  omacards import PATH [-d D] [--json]\n"
+                          "  omacards due [-d D] [--json]\n"
+                          "  omacards review -c ID -r 1|3 [--json]\n"
+                          "  omacards cram [-d D] [--steps N] [--json]\n"
+                          "  omacards stats [--json]\n"
+                          "  omacards config [--new-per-day N] [--retention 0.70-0.99] [--json]\n"
+                          "  omacards skill install [--json]\n");
 }
-}
+} // namespace
 
 namespace Cli {
 
@@ -256,14 +290,16 @@ bool needsOffscreen(const QStringList &arguments) {
 
 int run(const QStringList &arguments) {
     const Options options = parse(arguments);
-    if (options.command.isEmpty() || options.command == "help" || options.command == "--help" || options.command == "-h") {
+    if (options.command.isEmpty() || options.command == "help" || options.command == "--help" ||
+        options.command == "-h") {
         fprintf(stdout, "%s", qPrintable(usage()));
         return 0;
     }
     if (!isHeadlessCommand(options.command))
         return fail(QObject::tr("Unknown command: %1").arg(options.command), options.json);
 
-    Backend backend;
+    auto ownedBackend = Backend::fromEnvironment();
+    Backend &backend = *ownedBackend;
     QString error;
     if (!backend.initialize(&error))
         return fail(error, options.json);
@@ -294,8 +330,7 @@ int run(const QStringList &arguments) {
                             warning.insert("field", field);
                             warning.insert("message", message);
                             mathWarnings << warning;
-                            warningLines << QStringLiteral("%1 (%2.%3): %4")
-                                .arg(card.id, deck.name, field, message);
+                            warningLines << QStringLiteral("%1 (%2.%3): %4").arg(card.id, deck.name, field, message);
                         }
                     };
                     checkField(QStringLiteral("question"), card.question);
@@ -325,7 +360,9 @@ int run(const QStringList &arguments) {
             else
                 ++warnings;
             issueLines << QStringLiteral("%1:%2 %3: %4 (%5)")
-                .arg(issue.path).arg(issue.line).arg(issue.severity, issue.message, issue.hint);
+                              .arg(issue.path)
+                              .arg(issue.line)
+                              .arg(issue.severity, issue.message, issue.hint);
         }
 
         QJsonObject object;
@@ -349,9 +386,11 @@ int run(const QStringList &arguments) {
         if (options.math)
             object.insert("mathWarnings", mathWarnings);
         QString human = QObject::tr("%1 decks · %2 cards · %3 due · math: %4")
-            .arg(decks.size()).arg(total).arg(due).arg(backend.mathEngine());
-        human += QStringLiteral("\n%1 issues · %2 errors · %3 warnings")
-            .arg(issues.size()).arg(errors).arg(warnings);
+                            .arg(decks.size())
+                            .arg(total)
+                            .arg(due)
+                            .arg(backend.mathEngine());
+        human += QStringLiteral("\n%1 issues · %2 errors · %3 warnings").arg(issues.size()).arg(errors).arg(warnings);
         if (!issueLines.isEmpty())
             human += QLatin1String("\n") + issueLines.join(QLatin1String("\n"));
         if (options.math) {
@@ -386,10 +425,10 @@ int run(const QStringList &arguments) {
         QStringList lines;
         for (const Card &card : cards) {
             const bool html = options.format == QLatin1String("html");
-            const QString question = html ? renderer.render(card.question, {}, previewMathScale)
-                                          : renderer.renderPlain(card.question);
-            const QString answer = html ? renderer.render(card.answer, {}, previewMathScale)
-                                        : renderer.renderPlain(card.answer);
+            const QString question =
+                html ? renderer.render(card.question, {}, previewMathScale) : renderer.renderPlain(card.question);
+            const QString answer =
+                html ? renderer.render(card.answer, {}, previewMathScale) : renderer.renderPlain(card.answer);
             QJsonObject item;
             item.insert("id", card.id);
             item.insert(html ? QStringLiteral("questionHtml") : QStringLiteral("question"), question);
@@ -407,16 +446,16 @@ int run(const QStringList &arguments) {
     }
 
     if (options.command == "config") {
-        if (options.retention > 0 && (options.retention < 0.70 || options.retention > 0.99))
+        if (options.retention > 0 &&
+            (options.retention < Config::kMinRetention || options.retention > Config::kMaxRetention))
             return fail(QObject::tr("Retention must be between 0.70 and 0.99"), json);
-        if (options.newPerDay > 9999)
+        if (options.newPerDay > Config::kMaxNewPerDay)
             return fail(QObject::tr("New cards per day must be 9999 or less"), json);
         // The QML setters report write failures as signals; the CLI must turn
         // them into a non-zero exit instead of claiming success.
         QString settingError;
-        const QMetaObject::Connection connection = QObject::connect(
-            &backend, &Backend::errorOccurred, &backend,
-            [&](const QString &message) {
+        const QMetaObject::Connection connection =
+            QObject::connect(&backend, &Backend::errorOccurred, &backend, [&](const QString &message) {
                 if (settingError.isEmpty())
                     settingError = message;
             });
@@ -458,8 +497,12 @@ int run(const QStringList &arguments) {
         object.insert("cards", allCards(decks, {}).size());
         object.insert("decks", decks.size());
         const int accuracy = summary.today > 0 ? qRound(100.0 * summary.todayCorrect / summary.today) : 0;
-        write(object, json, QObject::tr("%1 reviews today · %2% correct · %3 day streak · %4 due")
-              .arg(summary.today).arg(accuracy).arg(summary.streakDays).arg(backend.availableCount()));
+        write(object, json,
+              QObject::tr("%1 reviews today · %2% correct · %3 day streak · %4 due")
+                  .arg(summary.today)
+                  .arg(accuracy)
+                  .arg(summary.streakDays)
+                  .arg(backend.availableCount()));
         return 0;
     }
 
@@ -478,7 +521,10 @@ int run(const QStringList &arguments) {
         object.insert("decks", array);
         QStringList lines;
         for (const Deck &deck : decks)
-            lines << QString("%1 — %2 cards, %3 due").arg(deck.name).arg(deck.cards.size()).arg(backend.countDue(deck.name));
+            lines << QString("%1 — %2 cards, %3 due")
+                         .arg(deck.name)
+                         .arg(deck.cards.size())
+                         .arg(backend.countDue(deck.name));
         write(object, json, lines.join('\n'));
         return 0;
     }
@@ -666,8 +712,7 @@ int run(const QStringList &arguments) {
             QString description;
             if (!parseCardDrafts(file.readAll(), options.description, &drafts, &description, &error))
                 return fail(error, json);
-            const QString target = options.deck.isEmpty()
-                ? QFileInfo(options.path).completeBaseName() : options.deck;
+            const QString target = options.deck.isEmpty() ? QFileInfo(options.path).completeBaseName() : options.deck;
             QStringList ids;
             if (!backend.createCards(target, drafts, &description, &ids, &error))
                 return fail(error, json);
@@ -749,7 +794,6 @@ int run(const QStringList &arguments) {
         if (cards.isEmpty())
             return fail(QObject::tr("No cards in this deck"), json);
         int box = 0, correct = 0, reviews = 0, next = 0;
-        static const int intervals[] = {1, 2, 4, 8, 16};
         QVector<QPair<int, int>> queue; // {next show, card index}
         for (int i = 0; i < cards.size(); ++i)
             queue.append({i, i});
@@ -760,9 +804,10 @@ int run(const QStringList &arguments) {
             std::sort(queue.begin(), queue.end());
             const int index = queue.takeFirst().second;
             const Rating rating = (step % 4 == 3) ? Rating::Again : Rating::Good;
-            box = rating == Rating::Again ? 0 : qMin(4, box + 1);
-            if (rating == Rating::Good) ++correct;
-            next = ++reviews + intervals[box];
+            box = rating == Rating::Again ? 0 : qMin(Config::kLeitnerBoxes - 1, box + 1);
+            if (rating == Rating::Good)
+                ++correct;
+            next = ++reviews + Config::kLeitnerIntervals[box];
             queue.append({next, index});
             std::sort(queue.begin(), queue.end());
         }

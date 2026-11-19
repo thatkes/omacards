@@ -1,11 +1,8 @@
 #include "studyqueue.h"
+#include "config.h"
 
 #include <QRandomGenerator>
 #include <algorithm>
-
-namespace {
-constexpr int kCramIntervals[] = {1, 2, 4, 8, 16};
-}
 
 void StudyQueue::clear() {
     m_cramQueue.clear();
@@ -91,9 +88,9 @@ qint64 StudyQueue::nextWait(qint64 now) const {
 void StudyQueue::remove(const QString &id) {
     m_reviewQueue.removeAll(id);
     m_reviewAgainNotBefore.remove(id);
-    m_cramQueue.erase(std::remove_if(m_cramQueue.begin(), m_cramQueue.end(), [&](const CramEntry &entry) {
-        return entry.cardId == id;
-    }), m_cramQueue.end());
+    m_cramQueue.erase(std::remove_if(m_cramQueue.begin(), m_cramQueue.end(),
+                                     [&](const CramEntry &entry) { return entry.cardId == id; }),
+                      m_cramQueue.end());
 }
 
 void StudyQueue::repeatAfter(const QString &id, qint64 notBefore) {
@@ -107,8 +104,8 @@ void StudyQueue::advanceCram(const QString &id, Rating rating, int *box) {
         if (m_cramQueue.at(i).cardId != id)
             continue;
         CramEntry entry = m_cramQueue.takeAt(i);
-        entry.box = rating == Rating::Again ? 0 : qMin(4, entry.box + 1);
-        entry.next = ++m_cramReviews + kCramIntervals[entry.box];
+        entry.box = rating == Rating::Again ? 0 : qMin(Config::kLeitnerBoxes - 1, entry.box + 1);
+        entry.next = ++m_cramReviews + Config::kLeitnerIntervals[entry.box];
         m_cramQueue.append(entry);
         if (box)
             *box = entry.box + 1;

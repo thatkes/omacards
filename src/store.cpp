@@ -13,8 +13,7 @@ Store::Store(const QString &path)
     : m_path(path.isEmpty()
                  ? QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/omacards/state.db"
                  : path),
-      m_connection("omacards-" + QUuid::createUuid().toString(QUuid::WithoutBraces)) {
-}
+      m_connection("omacards-" + QUuid::createUuid().toString(QUuid::WithoutBraces)) {}
 
 Store::~Store() {
     if (m_db.isValid()) {
@@ -137,8 +136,8 @@ void Store::save(const QString &cardId, const QString &hash, const FsrsState &st
         m_lastError = query.lastError().text();
 }
 
-void Store::logReview(const QString &cardId, int rating, qint64 at,
-                      const FsrsState &state, int intervalDays, bool wasNew) {
+void Store::logReview(const QString &cardId, int rating, qint64 at, const FsrsState &state, int intervalDays,
+                      bool wasNew) {
     if (!m_db.isOpen())
         return;
     QSqlQuery query(m_db);

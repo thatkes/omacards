@@ -1,13 +1,15 @@
 #pragma once
 
+#include "config.h"
+
 #include <QtGlobal>
 
 // FSRS-5 memory state for one card. Times are Unix milliseconds so the SQLite
 // sidecar and QML can both use them without conversion.
 struct FsrsState {
-    double stability = 0.0;   // days at which recall is 90%
-    double difficulty = 0.0;  // 1 (easy) .. 10 (hard)
-    qint64 due = 0;           // next review time
+    double stability = 0.0;  // days at which recall is 90%
+    double difficulty = 0.0; // 1 (easy) .. 10 (hard)
+    qint64 due = 0;          // next review time
     qint64 lastReview = 0;
     int reps = 0;
     int lapses = 0;
@@ -26,15 +28,14 @@ class Fsrs {
 public:
     static constexpr double decay = -0.5;
     static constexpr double factor = 19.0 / 81.0;
-    static constexpr int maximumInterval = 36500;
-    static constexpr double desiredRetention = 0.9;
+    static constexpr int maximumInterval = Config::kMaxIntervalDays;
+    static constexpr double desiredRetention = Config::kDefaultRetention;
 
     // Default FSRS-5 weights from ts-fsrs v4 (the FSRS V5 preset).
     static const double weights[19];
 
     static FsrsState initial();
-    static ReviewResult review(const FsrsState &state, int rating, qint64 nowMs,
-                               double retention = desiredRetention);
+    static ReviewResult review(const FsrsState &state, int rating, qint64 nowMs, double retention = desiredRetention);
     static double retrievability(const FsrsState &state, qint64 nowMs);
     static int interval(double stability, double retention = desiredRetention);
     static double initialStability(int rating);

@@ -12,9 +12,12 @@ QString toString(StudyMode mode) {
 
 Rating ratingFromInt(int value) {
     switch (value) {
-    case static_cast<int>(Rating::Again): return Rating::Again;
-    case static_cast<int>(Rating::Good): return Rating::Good;
-    default: return Rating::Invalid;
+    case static_cast<int>(Rating::Again):
+        return Rating::Again;
+    case static_cast<int>(Rating::Good):
+        return Rating::Good;
+    default:
+        return Rating::Invalid;
     }
 }
 

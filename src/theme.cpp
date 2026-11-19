@@ -13,21 +13,18 @@
 
 namespace {
 QString readKey(const QString &text, const QString &key) {
-    const QRegularExpression expression(
-        "^\\s*" + QRegularExpression::escape(key) + "\\s*=\\s*[\"']([^\"']+)[\"']",
-        QRegularExpression::MultilineOption);
+    const QRegularExpression expression("^\\s*" + QRegularExpression::escape(key) + "\\s*=\\s*[\"']([^\"']+)[\"']",
+                                        QRegularExpression::MultilineOption);
     const auto match = expression.match(text);
     return match.hasMatch() ? match.captured(1) : QString();
 }
 } // namespace
 
 Theme::Theme(const QString &directory, QObject *parent, const QString &hyprctl)
-    : QObject(parent),
-      m_directory(directory.isEmpty()
-                      ? (qEnvironmentVariableIsEmpty("OMACARDS_THEME_DIR")
-                             ? QDir::homePath() + "/.local/state/omarchy/current"
-                             : qEnvironmentVariable("OMACARDS_THEME_DIR"))
-                      : directory) {
+    : QObject(parent), m_directory(directory.isEmpty() ? (qEnvironmentVariableIsEmpty("OMACARDS_THEME_DIR")
+                                                              ? QDir::homePath() + "/.local/state/omarchy/current"
+                                                              : qEnvironmentVariable("OMACARDS_THEME_DIR"))
+                                                       : directory) {
     m_debounce.setSingleShot(true);
     m_debounce.setInterval(80);
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, [this] { m_debounce.start(); });
@@ -37,16 +34,16 @@ Theme::Theme(const QString &directory, QObject *parent, const QString &hyprctl)
     // Corners follow Hyprland's effective rounding, which themes and personal
     // overrides can both set, so ask hyprctl rather than reading its config.
     m_hyprctl = !hyprctl.isEmpty() ? hyprctl
-              : directory.isEmpty() && !qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE")
-                  ? QStandardPaths::findExecutable("hyprctl") : QString();
+                : directory.isEmpty() && !qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE")
+                    ? QStandardPaths::findExecutable("hyprctl")
+                    : QString();
     m_roundingTimeout.setSingleShot(true);
     m_roundingTimeout.setInterval(500);
     connect(&m_roundingTimeout, &QTimer::timeout, &m_roundingProcess, &QProcess::kill);
     connect(&m_roundingProcess, &QProcess::errorOccurred, this, [this] { m_roundingTimeout.stop(); });
     connect(&m_roundingProcess, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
         m_roundingTimeout.stop();
-        const auto value = QJsonDocument::fromJson(m_roundingProcess.readAllStandardOutput())
-                               .object().value("int");
+        const auto value = QJsonDocument::fromJson(m_roundingProcess.readAllStandardOutput()).object().value("int");
         if (code != 0 || status != QProcess::NormalExit || !value.isDouble() || value.toInt(-1) < 0)
             return;
         if (value.toInt() != m_radius) {
@@ -79,7 +76,7 @@ QString Theme::readAccent(const QString &path) {
     QFile file(path);
     if (file.open(QIODevice::ReadOnly)) {
         const QRegularExpression expression(R"re(^\s*accent\s*=\s*["'](#[0-9a-fA-F]{6})["'])re",
-                                             QRegularExpression::MultilineOption);
+                                            QRegularExpression::MultilineOption);
         const auto match = expression.match(QString::fromUtf8(file.readAll()));
         if (match.hasMatch())
             return match.captured(1);
@@ -102,11 +99,10 @@ QHash<QString, QString> Theme::readColors(const QString &path) {
     QFile file(path);
     if (file.open(QIODevice::ReadOnly)) {
         const auto text = QString::fromUtf8(file.readAll());
-        for (const auto &key : QStringList{"mode", "accent", "selection", "muted",
-                                           "background", "dark_background", "darker_background",
-                                           "lighter_background", "foreground", "dark_foreground",
-                                           "light_foreground", "bright_foreground", "red",
-                                           "yellow", "green", "orange", "blue", "cyan", "magenta"}) {
+        for (const auto &key :
+             QStringList{"mode", "accent", "selection", "muted", "background", "dark_background", "darker_background",
+                         "lighter_background", "foreground", "dark_foreground", "light_foreground", "bright_foreground",
+                         "red", "yellow", "green", "orange", "blue", "cyan", "magenta"}) {
             const auto value = readKey(text, key);
             if (!value.isEmpty())
                 result.insert(key, value);
@@ -119,8 +115,7 @@ QHash<QString, QString> Theme::readColors(const QString &path) {
 QString Theme::accentForeground() const {
     const QColor c(m_accent);
     auto linear = [](double v) { return v <= .04045 ? v / 12.92 : std::pow((v + .055) / 1.055, 2.4); };
-    const double luminance = .2126 * linear(c.redF()) + .7152 * linear(c.greenF())
-                           + .0722 * linear(c.blueF());
+    const double luminance = .2126 * linear(c.redF()) + .7152 * linear(c.greenF()) + .0722 * linear(c.blueF());
     return luminance > .179 ? "black" : "white";
 }
 
@@ -135,8 +130,8 @@ void Theme::reload() {
     QString ancestor = m_directory;
     while (!QFileInfo::exists(ancestor) && ancestor != "/")
         ancestor = QFileInfo(ancestor).absolutePath();
-    QStringList candidates{ancestor, QFileInfo(ancestor).absolutePath(), m_directory,
-                           m_directory + "/theme", m_directory + "/theme/colors.toml"};
+    QStringList candidates{ancestor, QFileInfo(ancestor).absolutePath(), m_directory, m_directory + "/theme",
+                           m_directory + "/theme/colors.toml"};
     candidates.removeDuplicates();
     for (const auto &path : candidates)
         if (QFileInfo::exists(path))
@@ -168,12 +163,10 @@ void Theme::reload() {
     const QString yellow = colors.value("yellow", fallbackYellow);
     const QString green = colors.value("green", fallbackGreen);
 
-    const bool paletteChanged = m_dark != dark
-        || m_accent != (accent.isEmpty() ? QString("#FFD60A") : accent)
-        || m_background != background || m_foreground != foreground
-        || m_soft != soft || m_muted != muted || m_panel != panel
-        || m_raised != raised || m_border != border || m_red != red
-        || m_yellow != yellow || m_green != green;
+    const bool paletteChanged = m_dark != dark || m_accent != (accent.isEmpty() ? QString("#FFD60A") : accent) ||
+                                m_background != background || m_foreground != foreground || m_soft != soft ||
+                                m_muted != muted || m_panel != panel || m_raised != raised || m_border != border ||
+                                m_red != red || m_yellow != yellow || m_green != green;
     if (!paletteChanged)
         return;
 
