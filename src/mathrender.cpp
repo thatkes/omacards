@@ -12,6 +12,7 @@
 #include <QRegularExpression>
 #include <QSize>
 #include <QStandardPaths>
+#include <QUrl>
 
 namespace {
 QString escapePlain(const QString &text) {
@@ -173,8 +174,8 @@ QString MathRenderer::renderExpression(const QString &expression, const QString 
         // QML's rich-text engine sizes <img> from these attributes; the SVG's
         // intrinsic size is scaled too, so the vector stays sharp either way.
         const QSize pixels = svgPixelSize(image);
-        return QString("<img src='file://%1' alt='%2' width='%3' height='%4' align='middle' style='vertical-align: middle;'>")
-            .arg(image, expression.toHtmlEscaped())
+        return QString("<img src='%1' alt='%2' width='%3' height='%4' align='middle' style='vertical-align: middle;'>")
+            .arg(QUrl::fromLocalFile(image).toString(), expression.toHtmlEscaped())
             .arg(pixels.width())
             .arg(pixels.height());
     }
