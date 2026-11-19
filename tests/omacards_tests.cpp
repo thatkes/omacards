@@ -843,6 +843,150 @@ oops: not a key
             qputenv("OMACARDS_AGAIN_DELAY_MS", previousDelay);
     }
 
+    void unreadableDeckKeepsSchedulingState() {
+        QTemporaryDir dir;
+        const QString database = dir.filePath("state.db");
+        const QString deckPath = QDir(dir.path()).filePath("Keep.txt");
+        {
+            Backend backend(dir.path(), database);
+            QString error;
+            QVERIFY(backend.initialize(&error));
+            QVERIFY(backend.createDeck("Keep", &error));
+            QVERIFY(backend.createCard("Keep", "Q1", "A1", "basic", {}, &error));
+            backend.selectDeck("Keep");
+            backend.flip();
+            backend.rate(3);
+
+            Store store(database);
+            QVERIFY(store.open(&error));
+            const QString cardId = backend.cardList().first().toMap().value("id").toString();
+            QVERIFY(store.states().contains(cardId));
+
+            QVERIFY(QFile::setPermissions(deckPath, QFile::Permissions{}));
+            if (QFileInfo(deckPath).isReadable()) {
+                QFile::setPermissions(deckPath, QFile::ReadOwner | QFile::WriteOwner);
+                QSKIP("file permissions are ignored for this user");
+            }
+            backend.refresh();
+            QVERIFY2(store.states().contains(cardId), "an unreadable deck must not erase its FSRS state");
+            QFile::setPermissions(deckPath, QFile::ReadOwner | QFile::WriteOwner);
+        }
+    }
+
+    void failedCardWriteDoesNotMutateBackend() {
+        QTemporaryDir dir;
+        {
+            Backend backend(dir.path(), dir.filePath("state.db"));
+            QString error;
+            QVERIFY(backend.initialize(&error));
+            QVERIFY(backend.createDeck("Files", &error));
+            QVERIFY(backend.createCard("Files", "Q1", "A1", "basic", {}, &error));
+            QCOMPARE(backend.cardList().size(), 1);
+
+            QVERIFY(QFile::setPermissions(dir.path(), QFile::ReadOwner | QFile::ExeOwner));
+            if (QFileInfo(dir.path()).isWritable()) {
+                QFile::setPermissions(dir.path(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+                QSKIP("directory permissions are ignored for this user");
+            }
+            QVERIFY(!backend.createCard("Files", "Q2", "A2", "basic", {}, &error));
+            QVERIFY(!error.isEmpty());
+            QCOMPARE(backend.cardList().size(), 1);
+            QVERIFY(backend.question().contains("Q1"));
+            QFile::setPermissions(dir.path(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        }
+    }
+
+    void unreadableStateDoesNotTreatEveryCardAsNew() {
+        QTemporaryDir dir;
+        const QString database = dir.filePath("state.db");
+        Backend backend(dir.path(), database);
+        QString error;
+        QVERIFY(backend.initialize(&error));
+        QVERIFY(backend.createDeck("Deck", &error));
+        QVERIFY(backend.createCard("Deck", "Q1", "A1", "basic", {}, &error));
+        QCOMPARE(backend.newCount(), 1);
+
+        // Simulate a failed query after startup (schema drift, damaged DB).
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "omacards-unreadable-test");
+        db.setDatabaseName(database);
+        QVERIFY(db.open());
+        QSqlQuery query(db);
+        QVERIFY(query.exec("DROP TABLE cards"));
+        query.finish();
+        db.close();
+        db = QSqlDatabase();
+        QSqlDatabase::removeDatabase("omacards-unreadable-test");
+
+        backend.refresh();
+        QCOMPARE(backend.totalCards(), 1);
+        QCOMPARE(backend.availableCount(), 0);
+        QCOMPARE(backend.newCount(), 0);
+        QCOMPARE(backend.dueCount(), 0);
+        QVERIFY(!backend.hasCard());
+    }
+
+    void deckCountsMatchLibrarySummaries() {
+        QTemporaryDir dir;
+        Backend backend(dir.path(), dir.filePath("state.db"));
+        QString error;
+        QVERIFY(backend.initialize(&error));
+        QVERIFY(backend.createDeck("First", &error));
+        for (int i = 0; i < 2; ++i)
+            QVERIFY(backend.createCard("First", QString("F%1").arg(i), "a", "basic", {}, &error));
+        QVERIFY(backend.createDeck("Second", &error));
+        for (int i = 0; i < 2; ++i)
+            QVERIFY(backend.createCard("Second", QString("S%1").arg(i), "b", "basic", {}, &error));
+
+        backend.setNewPerDay(3);
+        backend.selectDeck("Second");
+        const QVariantList summaries = backend.deckSummaries();
+        QCOMPARE(summaries.at(0).toMap().value("new").toInt(), 2);
+        QCOMPARE(summaries.at(1).toMap().value("new").toInt(), 1);
+        QCOMPARE(backend.deckNew(), 1);
+        QCOMPARE(backend.deckDue(), 1);
+        QCOMPARE(backend.newCount(), 3);
+        QCOMPARE(backend.availableCount(), 3);
+    }
+
+    void deckCreationRejectsSanitizedPathCollision() {
+        QTemporaryDir dir;
+        Backend backend(dir.path(), dir.filePath("state.db"));
+        QString error;
+        QVERIFY(backend.initialize(&error));
+        QVERIFY(backend.createDeck("A/B", &error));
+        QVERIFY(!backend.createDeck("A-B", &error));
+        QCOMPARE(backend.decks().size(), 1);
+        QCOMPARE(backend.decks().first(), QString("A/B"));
+    }
+
+    void refreshKeepsPendingAgainRepeat() {
+        QTemporaryDir dir;
+        const QByteArray previousDelay = qgetenv("OMACARDS_AGAIN_DELAY_MS");
+        qputenv("OMACARDS_AGAIN_DELAY_MS", "50");
+        {
+            Backend backend(dir.path(), dir.filePath("state.db"));
+            QString error;
+            QVERIFY(backend.initialize(&error));
+            QVERIFY(backend.createDeck("Repeats", &error));
+            QVERIFY(backend.createCard("Repeats", "Q1", "A1", "basic", {}, &error));
+            QVERIFY(backend.createCard("Repeats", "Q2", "A2", "basic", {}, &error));
+            backend.selectDeck("Repeats");
+            backend.flip();
+            backend.rate(1);
+            QVERIFY(backend.question().contains("Q2"));
+
+            backend.refresh(); // same path the file watcher uses
+            QVERIFY(backend.question().contains("Q2"));
+            backend.flip();
+            backend.rate(3);
+            QTRY_VERIFY_WITH_TIMEOUT(backend.question().contains("Q1"), 2000);
+        }
+        if (previousDelay.isNull())
+            qunsetenv("OMACARDS_AGAIN_DELAY_MS");
+        else
+            qputenv("OMACARDS_AGAIN_DELAY_MS", previousDelay);
+    }
+
     void themeFallsBack() {
         QTemporaryDir dir;
         Theme theme(dir.path());

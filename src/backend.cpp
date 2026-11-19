@@ -135,8 +135,78 @@ void Backend::setMathColors(const QString &questionColor, const QString &answerC
     emit cardChanged();
 }
 
+bool Backend::refreshSnapshot() {
+    m_store.clearError();
+    StudySnapshot next;
+    next.states = m_store.states();
+    next.hashes = m_store.hashes();
+    next.newBudget = qMax(0, m_newPerDay - m_store.newCardsToday());
+    if (!m_store.lastError().isEmpty()) {
+        // Never present a card with scheduling data we could not verify.
+        m_snapshot = StudySnapshot{};
+        m_snapshotValid = false;
+        reportError(tr("Cannot read scheduling state: %1").arg(m_store.lastError()));
+        return false;
+    }
+    next.now = QDateTime::currentMSecsSinceEpoch();
+    m_snapshot = next;
+    m_snapshotValid = true;
+    return true;
+}
+
+FsrsState Backend::effectiveState(const Card &card) const {
+    if (!m_snapshotValid || m_snapshot.hashes.value(card.id) != DeckIO::contentHash(card))
+        return FsrsState{};
+    return m_snapshot.states.value(card.id);
+}
+
+Backend::Availability Backend::availability(const QString &deckName) const {
+    Availability result;
+    result.duePerDeck.resize(m_decks.size());
+    result.freshPerDeck.resize(m_decks.size());
+    result.dueIncludingNewPerDeck.resize(m_decks.size());
+    if (!m_snapshotValid)
+        return result;
+
+    struct DueEntry {
+        qint64 due;
+        int deck;
+        Card card;
+    };
+    QVector<DueEntry> dueEntries;
+    int remainingNew = m_snapshot.newBudget;
+    for (int deckIndex = 0; deckIndex < m_decks.size(); ++deckIndex) {
+        const Deck &deck = m_decks.at(deckIndex);
+        if (!deckName.isEmpty() && deck.name != deckName)
+            continue;
+        for (const Card &card : deck.cards) {
+            const FsrsState state = effectiveState(card);
+            if (state.due <= m_snapshot.now)
+                ++result.dueIncludingNewPerDeck[deckIndex];
+            if (state.reps == 0) {
+                if (remainingNew > 0) {
+                    result.fresh << card;
+                    ++result.freshPerDeck[deckIndex];
+                    --remainingNew;
+                }
+            } else if (state.due <= m_snapshot.now) {
+                dueEntries.append({state.due, deckIndex, card});
+            }
+        }
+    }
+    std::sort(dueEntries.begin(), dueEntries.end(), [](const DueEntry &a, const DueEntry &b) {
+        return a.due == b.due ? a.card.id < b.card.id : a.due < b.due;
+    });
+    for (const DueEntry &entry : dueEntries) {
+        result.due << entry.card;
+        ++result.duePerDeck[entry.deck];
+    }
+    return result;
+}
+
 void Backend::load() {
     QString error;
+    const bool hadDecks = !m_deckNames.isEmpty();
     const auto decks = DeckIO::loadAll(m_decksDir, &error);
     if (!error.isEmpty())
         reportError(error);
@@ -147,11 +217,20 @@ void Backend::load() {
     if (!m_deckNames.contains(m_currentDeck))
         m_currentDeck = m_deckNames.isEmpty() ? QString() : m_deckNames.first();
 
-    QSet<QString> ids;
-    for (const Deck &deck : m_decks)
-        for (const Card &card : deck.cards)
-            ids << card.id;
-    m_store.removeExcept(ids);
+    refreshSnapshot();
+
+    // Only prune sidecar rows after a clean, conclusive load. loadAll() skips
+    // deck files it cannot read; pruning then would silently erase their FSRS
+    // progress. An intentional last-deck deletion prunes in removeDeck().
+    if (error.isEmpty() && (!m_decks.isEmpty() || !hadDecks)) {
+        QSet<QString> ids;
+        for (const Deck &deck : m_decks)
+            for (const Card &card : deck.cards)
+                ids << card.id;
+        m_store.removeExcept(ids);
+        if (!m_store.lastError().isEmpty())
+            reportError(tr("Cannot clean scheduling state: %1").arg(m_store.lastError()));
+    }
 
     emit decksChanged();
     emit currentDeckChanged();
@@ -160,48 +239,16 @@ void Backend::load() {
 }
 
 int Backend::countDue(const QString &deckName) const {
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    const auto states = m_store.states();
-    const auto hashes = m_store.hashes();
+    const Availability available = availability(deckName);
     int count = 0;
-    for (const Deck &deck : m_decks) {
-        if (!deckName.isEmpty() && deck.name != deckName)
-            continue;
-        for (const Card &card : deck.cards) {
-            FsrsState state = states.value(card.id);
-            if (hashes.value(card.id) != DeckIO::contentHash(card))
-                state = FsrsState{};
-            if (state.due <= now)
-                ++count;
-        }
-    }
+    for (int due : available.dueIncludingNewPerDeck)
+        count += due;
     return count;
 }
 
 int Backend::availableCount(const QString &deckName) const {
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    const auto states = m_store.states();
-    const auto hashes = m_store.hashes();
-    int remainingNew = qMax(0, m_newPerDay - m_store.newCardsToday());
-    int count = 0;
-    for (const Deck &deck : m_decks) {
-        if (!deckName.isEmpty() && deck.name != deckName)
-            continue;
-        for (const Card &card : deck.cards) {
-            FsrsState state = states.value(card.id);
-            if (hashes.value(card.id) != DeckIO::contentHash(card))
-                state = FsrsState{};
-            if (state.reps == 0) {
-                if (remainingNew > 0) {
-                    ++count;
-                    --remainingNew;
-                }
-            } else if (state.due <= now) {
-                ++count;
-            }
-        }
-    }
-    return count;
+    const Availability available = availability(deckName);
+    return available.due.size() + available.fresh.size();
 }
 
 void Backend::refreshDueCount() {
@@ -217,77 +264,34 @@ void Backend::refresh() {
 }
 
 int Backend::newCount() const {
-    const auto states = m_store.states();
-    const auto hashes = m_store.hashes();
-    int remaining = qMax(0, m_newPerDay - m_store.newCardsToday());
-    int count = 0;
-    for (const Deck &deck : m_decks) {
-        for (const Card &card : deck.cards) {
-            if (remaining <= 0)
-                return count;
-            FsrsState state = states.value(card.id);
-            if (hashes.value(card.id) != DeckIO::contentHash(card))
-                state = FsrsState{};
-            if (state.reps == 0) {
-                ++count;
-                --remaining;
-            }
-        }
-    }
-    return count;
+    return availability().fresh.size();
 }
 
 int Backend::deckDue() const {
-    return availableCount(m_currentDeck);
+    const Availability available = availability();
+    const int index = deckIndex(m_currentDeck);
+    if (index < 0)
+        return 0;
+    return available.duePerDeck.value(index) + available.freshPerDeck.value(index);
 }
 
 int Backend::deckNew() const {
-    const Deck *deck = deckByName(m_currentDeck);
-    if (!deck)
-        return 0;
-    const auto states = m_store.states();
-    const auto hashes = m_store.hashes();
-    int remaining = qMax(0, m_newPerDay - m_store.newCardsToday());
-    int count = 0;
-    for (const Card &card : deck->cards) {
-        FsrsState state = states.value(card.id);
-        if (hashes.value(card.id) != DeckIO::contentHash(card))
-            state = FsrsState{};
-        if (state.reps == 0 && count < remaining)
-            ++count;
-    }
-    return count;
+    const Availability available = availability();
+    const int index = deckIndex(m_currentDeck);
+    return index < 0 ? 0 : available.freshPerDeck.value(index);
 }
 
 QVariantList Backend::deckSummaries() const {
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    const auto states = m_store.states();
-    const auto hashes = m_store.hashes();
-    int remainingNew = qMax(0, m_newPerDay - m_store.newCardsToday());
-
+    const Availability available = availability();
     QVariantList result;
-    for (const Deck &deck : m_decks) {
-        int due = 0;
-        int fresh = 0;
-        for (const Card &card : deck.cards) {
-            FsrsState state = states.value(card.id);
-            if (hashes.value(card.id) != DeckIO::contentHash(card))
-                state = FsrsState{};
-            if (state.reps == 0) {
-                if (remainingNew > 0) {
-                    ++fresh;
-                    --remainingNew;
-                }
-            } else if (state.due <= now) {
-                ++due;
-            }
-        }
+    for (int i = 0; i < m_decks.size(); ++i) {
+        const Deck &deck = m_decks.at(i);
         QVariantMap entry;
         entry.insert("name", deck.name);
         entry.insert("description", deck.description);
         entry.insert("cards", deck.cards.size());
-        entry.insert("due", due);
-        entry.insert("new", fresh);
+        entry.insert("due", available.duePerDeck.value(i));
+        entry.insert("new", available.freshPerDeck.value(i));
         entry.insert("active", deck.name == m_currentDeck);
         result << entry;
     }
@@ -295,6 +299,10 @@ QVariantList Backend::deckSummaries() const {
 }
 
 void Backend::rebuildQueue() {
+    // A watcher refresh can rebuild the queue while a repeat is pending. Keep
+    // those deadlines for cards that are still available; explicit deck and
+    // mode changes clear them instead.
+    const QHash<QString, qint64> pending = m_reviewAgainNotBefore;
     m_reviewQueue.clear();
     m_reviewAgainNotBefore.clear();
     m_reviewAgainTimer.stop();
@@ -302,48 +310,47 @@ void Backend::rebuildQueue() {
     m_currentId.clear();
 
     const Deck *deck = deckByName(m_currentDeck);
-    if (!deck) {
-        presentCard();
-        return;
-    }
-
-    if (m_mode == "cram") {
+    if (deck && m_mode == "cram") {
         for (int i = 0; i < deck->cards.size(); ++i)
             m_cramQueue.append(CramEntry{deck->cards.at(i).id, 0, i});
         std::shuffle(m_cramQueue.begin(), m_cramQueue.end(), *QRandomGenerator::global());
-    } else {
-        const auto states = m_store.states();
-        const auto hashes = m_store.hashes();
-        QVector<QPair<qint64, QString>> due;
-        QStringList fresh;
-        const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        int remainingNew = qMax(0, m_newPerDay - m_store.newCardsToday());
-        for (const Card &card : deck->cards) {
-            FsrsState state = states.value(card.id);
-            if (hashes.value(card.id) != DeckIO::contentHash(card))
-                state = FsrsState{};
-            if (state.reps == 0) {
-                if (remainingNew > 0) {
-                    fresh << card.id;
-                    --remainingNew;
-                }
-            } else if (state.due <= now) {
-                due.append({state.due, card.id});
-            }
-        }
-        std::sort(due.begin(), due.end(), [](const auto &a, const auto &b) {
-            return a.first == b.first ? a.second < b.second : a.first < b.first;
-        });
-        for (const auto &item : due)
-            m_reviewQueue << item.second;
+    } else if (deck) {
+        const Availability available = availability(m_currentDeck);
         // Due reviews come first so lapses are not hidden behind new material;
         // new cards then follow in deck-file order up to the daily limit.
-        for (const QString &id : fresh)
-            m_reviewQueue << id;
+        for (const Card &card : available.due)
+            m_reviewQueue << card.id;
+        for (const Card &card : available.fresh)
+            m_reviewQueue << card.id;
+        for (auto it = pending.constBegin(); it != pending.constEnd(); ++it) {
+            // The repeat's FSRS due date is in the future, so it is not part
+            // of the database-derived queue; keep it as session-only work.
+            if (!m_reviewQueue.contains(it.key()))
+                m_reviewQueue << it.key();
+            m_reviewAgainNotBefore.insert(it.key(), it.value());
+        }
     }
 
     refreshDueCount();
     presentCard();
+}
+
+void Backend::scheduleNextRepeat() {
+    m_reviewAgainTimer.stop();
+    if (m_mode != "review" || m_reviewQueue.isEmpty())
+        return;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    qint64 next = 0;
+    bool haveNext = false;
+    for (const QString &id : m_reviewQueue) {
+        const auto it = m_reviewAgainNotBefore.constFind(id);
+        if (it != m_reviewAgainNotBefore.cend() && (!haveNext || it.value() < next)) {
+            next = it.value();
+            haveNext = true;
+        }
+    }
+    if (haveNext)
+        m_reviewAgainTimer.start(qMax<qint64>(1, next - now));
 }
 
 void Backend::presentCard() {
@@ -387,18 +394,7 @@ void Backend::presentCard() {
             }
         }
         if (ready < 0) {
-            m_reviewAgainTimer.stop();
-            bool haveNext = false;
-            qint64 next = now;
-            for (const QString &id : m_reviewQueue) {
-                const auto it = m_reviewAgainNotBefore.constFind(id);
-                if (it != m_reviewAgainNotBefore.cend() && (!haveNext || it.value() < next)) {
-                    next = it.value();
-                    haveNext = true;
-                }
-            }
-            if (haveNext)
-                m_reviewAgainTimer.start(qMax<qint64>(1, next - now));
+            scheduleNextRepeat();
             m_waitingForRepeat = true;
             m_currentId.clear();
             m_question.clear();
@@ -409,7 +405,7 @@ void Backend::presentCard() {
         }
         m_currentId = m_reviewQueue.takeAt(ready);
         m_reviewAgainNotBefore.remove(m_currentId);
-        m_reviewAgainTimer.stop();
+        scheduleNextRepeat();
     }
 
     const Card *card = cardById(m_currentId);
@@ -430,7 +426,7 @@ void Backend::presentCard() {
     m_answer = m_math.render(DeckIO::displayAnswer(*card), m_answerInk, kAnswerMathScale);
 
     if (m_mode == "review") {
-        const auto state = m_store.states().value(card->id);
+        const FsrsState state = effectiveState(*card);
         const double recall = state.reps > 0
             ? Fsrs::retrievability(state, QDateTime::currentMSecsSinceEpoch())
             : 1.0;
@@ -540,8 +536,6 @@ void Backend::redo() {
 QVariantList Backend::cardList() const {
     QVariantList list;
     const QString needle = m_cardFilter.trimmed().toLower();
-    const auto states = m_store.states();
-    const auto hashes = m_store.hashes();
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
 
     for (const Deck &deck : m_decks) {
@@ -551,9 +545,7 @@ QVariantList Backend::cardList() const {
             const QString haystack = (card.question + " " + card.answer + " " + card.tags.join(' ')).toLower();
             if (!needle.isEmpty() && !haystack.contains(needle))
                 continue;
-            FsrsState state = states.value(card.id);
-            if (hashes.value(card.id) != DeckIO::contentHash(card))
-                state = FsrsState{};
+            const FsrsState state = effectiveState(card);
 
             QVariantMap entry;
             entry.insert("id", card.id);
@@ -578,31 +570,10 @@ QVariantList Backend::cardList() const {
 }
 
 QVector<Card> Backend::dueCards(const QString &deckName) const {
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    const auto states = m_store.states();
-    const auto hashes = m_store.hashes();
-    int remainingNew = qMax(0, m_newPerDay - m_store.newCardsToday());
-    QVector<Card> reviews;
-    QVector<Card> fresh;
-    for (const Deck &deck : m_decks) {
-        if (!deckName.isEmpty() && deck.name != deckName)
-            continue;
-        for (const Card &card : deck.cards) {
-            FsrsState state = states.value(card.id);
-            if (hashes.value(card.id) != DeckIO::contentHash(card))
-                state = FsrsState{};
-            if (state.reps == 0) {
-                if (remainingNew > 0) {
-                    fresh << card;
-                    --remainingNew;
-                }
-            } else if (state.due <= now) {
-                reviews << card;
-            }
-        }
-    }
-    reviews << fresh;
-    return reviews;
+    const Availability available = availability(deckName);
+    QVector<Card> cards = available.due;
+    cards << available.fresh;
+    return cards;
 }
 
 QVector<Card> Backend::searchCards(const QString &text, const QString &deckName) const {
@@ -634,6 +605,14 @@ void Backend::setNewPerDay(int count) {
         return;
     m_newPerDay = clean;
     m_store.setSetting("new_per_day", QString::number(clean));
+    if (!m_store.lastError().isEmpty())
+        reportError(tr("Cannot save settings: %1").arg(m_store.lastError()));
+    if (m_snapshotValid) {
+        m_store.clearError();
+        m_snapshot.newBudget = qMax(0, clean - m_store.newCardsToday());
+        if (!m_store.lastError().isEmpty())
+            reportError(tr("Cannot read scheduling state: %1").arg(m_store.lastError()));
+    }
     emit settingsChanged();
     rebuildQueue();
 }
@@ -670,6 +649,13 @@ const Deck *Backend::deckByName(const QString &name) const {
         if (deck.name == name)
             return &deck;
     return nullptr;
+}
+
+int Backend::deckIndex(const QString &name) const {
+    for (int i = 0; i < m_decks.size(); ++i)
+        if (m_decks.at(i).name == name)
+            return i;
+    return -1;
 }
 
 Card *Backend::cardById(const QString &id) {
@@ -732,15 +718,24 @@ void Backend::answerReview(int rating) {
     if (!card)
         return;
     const QString hash = DeckIO::contentHash(*card);
-    FsrsState state = m_store.states().value(card->id);
-    if (m_store.hashes().value(card->id) != hash)
-        state = FsrsState{};
+    const FsrsState state = effectiveState(*card);
 
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const bool wasNew = state.reps == 0;
     const ReviewResult result = Fsrs::review(state, rating, now, m_desiredRetention);
+    m_store.clearError();
     m_store.save(card->id, hash, result.state);
     m_store.logReview(card->id, rating, now, result.state, result.intervalDays, wasNew);
+    if (!m_store.lastError().isEmpty()) {
+        reportError(tr("Cannot save review: %1").arg(m_store.lastError()));
+    } else if (m_snapshotValid) {
+        // Keep the in-memory snapshot in step with the write so later counts
+        // do not have to re-read the whole database.
+        m_snapshot.states.insert(card->id, result.state);
+        m_snapshot.hashes.insert(card->id, hash);
+        m_snapshot.newBudget = qMax(0, m_snapshot.newBudget - (wasNew ? 1 : 0));
+        m_snapshot.now = now;
+    }
     if (!m_reviewQueue.isEmpty() && m_reviewQueue.first() == card->id)
         m_reviewQueue.removeFirst();
     else
@@ -800,7 +795,18 @@ bool Backend::createDeck(const QString &name, QString *error, const QString &des
     deck.name = clean;
     deck.description = description.trimmed();
     deck.path = QDir(m_decksDir).filePath(safeFileName(clean) + ".txt");
-    const bool existed = QFileInfo::exists(deck.path);
+    for (const Deck &existing : m_decks) {
+        if (QFileInfo(existing.path).absoluteFilePath() == QFileInfo(deck.path).absoluteFilePath()) {
+            if (error) *error = tr("Deck file already used by %1").arg(existing.name);
+            return false;
+        }
+    }
+    // An unreadable file is not in m_decks; never silently overwrite it.
+    if (QFileInfo::exists(deck.path)) {
+        if (error) *error = tr("A deck file already exists at %1").arg(deck.path);
+        return false;
+    }
+    const bool existed = false;
     const QByteArray before = existed ? readFileBytes(deck.path) : QByteArray();
     if (!DeckIO::save(deck, error))
         return false;
@@ -819,11 +825,11 @@ bool Backend::setDeckDescription(const QString &deckName, const QString &descrip
     const QString clean = description.trimmed();
     if (deck->description == clean)
         return true;
-    const QString previous = deck->description;
+    const Deck original = *deck;
     const QByteArray before = readFileBytes(deck->path);
     deck->description = clean;
     if (!DeckIO::save(*deck, error)) {
-        deck->description = previous;
+        *deck = original;
         return false;
     }
     recordHistory(deck->path, before, true, tr("editing deck description"));
@@ -863,8 +869,8 @@ bool Backend::createCards(const QString &deckName, const QVector<CardDraft> &dra
         return false;
     }
 
+    const Deck original = *deck;
     const QByteArray before = readFileBytes(deck->path);
-    const QString previousDescription = deck->description;
     if (description)
         deck->description = description->trimmed();
 
@@ -887,8 +893,7 @@ bool Backend::createCards(const QString &deckName, const QVector<CardDraft> &dra
 
     deck->cards << cards;
     if (!DeckIO::save(*deck, error)) {
-        deck->cards.resize(deck->cards.size() - cards.size());
-        deck->description = previousDescription;
+        *deck = original;
         return false;
     }
     if (createdIds)
@@ -921,10 +926,13 @@ bool Backend::createCard(const QString &deckName, const QString &question, const
             card.tags << clean;
     }
     card.id = DeckIO::cardId(card);
-    deck->cards << card;
+    const Deck original = *deck;
     const QByteArray before = readFileBytes(deck->path);
-    if (!DeckIO::save(*deck, error))
+    deck->cards << card;
+    if (!DeckIO::save(*deck, error)) {
+        *deck = original;
         return false;
+    }
     recordHistory(deck->path, before, true, tr("adding a card"));
     refresh();
     return true;
@@ -951,6 +959,7 @@ bool Backend::modifyCard(const QString &deckName, const QString &cardId, const Q
         return false;
     }
 
+    const Deck original = *deck;
     card->question = question.trimmed();
     card->answer = answer.trimmed();
     card->type = type == "cloze" ? "cloze" : "basic";
@@ -966,8 +975,10 @@ bool Backend::modifyCard(const QString &deckName, const QString &cardId, const Q
         card->id = DeckIO::cardId(*card);
 
     const QByteArray before = readFileBytes(deck->path);
-    if (!DeckIO::save(*deck, error))
+    if (!DeckIO::save(*deck, error)) {
+        *deck = original;
         return false;
+    }
     recordHistory(deck->path, before, true, tr("editing a card"));
     refresh();
     return true;
@@ -979,6 +990,7 @@ bool Backend::deleteCard(const QString &deckName, const QString &cardId, QString
         if (error) *error = tr("No such deck: %1").arg(deckName);
         return false;
     }
+    const Deck original = *deck;
     const int before = deck->cards.size();
     deck->cards.erase(std::remove_if(deck->cards.begin(), deck->cards.end(), [&](const Card &card) {
         return card.id == cardId;
@@ -988,8 +1000,10 @@ bool Backend::deleteCard(const QString &deckName, const QString &cardId, QString
         return false;
     }
     const QByteArray contents = readFileBytes(deck->path);
-    if (!DeckIO::save(*deck, error))
+    if (!DeckIO::save(*deck, error)) {
+        *deck = original;
         return false;
+    }
     recordHistory(deck->path, contents, true, tr("removing a card"));
     refresh();
     return true;
@@ -1011,6 +1025,15 @@ bool Backend::removeDeck(const QString &name, QString *error) {
     if (m_currentDeck == name)
         m_currentDeck.clear();
     refresh();
+    // An intentional deletion may remove the last deck; load() deliberately
+    // skips pruning in that case, so do it here instead.
+    QSet<QString> ids;
+    for (const Deck &remaining : m_decks)
+        for (const Card &card : remaining.cards)
+            ids << card.id;
+    m_store.removeExcept(ids);
+    if (!m_store.lastError().isEmpty())
+        reportError(tr("Cannot clean scheduling state: %1").arg(m_store.lastError()));
     return true;
 }
 
@@ -1279,26 +1302,41 @@ bool Backend::importApkg(const QString &path, const QString &deckName, QString *
         return false;
     }
 
-    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "omacards-apkg-" + QString::number(QRandomGenerator::global()->generate()));
+    const QString connection = "omacards-apkg-" + QString::number(QRandomGenerator::global()->generate());
+    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connection);
     db.setDatabaseName(database);
+    QSqlQuery query;
+    // Every exit path must release the named connection; leaks accumulate
+    // across imports and keep the temporary database file alive.
+    auto closeCollection = [&] {
+        query.finish();
+        query.clear();
+        db.close();
+        db = QSqlDatabase();
+        QSqlDatabase::removeDatabase(connection);
+    };
     if (!db.open()) {
         if (error) *error = tr("Cannot read the Anki collection");
+        closeCollection();
         return false;
     }
     // Cloze notes use model type 1; their text lives in a single field with
     // {{c1::...}} markers. Older collections may lack the type column.
-    QSqlQuery query(db);
+    query = QSqlQuery(db);
     bool clozeColumn = query.exec("SELECT type FROM models LIMIT 1");
     if (clozeColumn)
         clozeColumn = query.exec("SELECT n.flds, n.tags, COALESCE(m.type, 0) "
                                  "FROM notes n LEFT JOIN models m ON n.mid = m.id");
     if (!clozeColumn && !query.exec("SELECT flds, tags FROM notes")) {
         if (error) *error = tr("The Anki collection has no notes table");
+        closeCollection();
         return false;
     }
     QString target = deckName.isEmpty() ? QFileInfo(path).completeBaseName() : deckName;
-    if (!deckByName(target) && !createDeck(target, error))
+    if (!deckByName(target) && !createDeck(target, error)) {
+        closeCollection();
         return false;
+    }
     const QHash<QString, QString> media = apkgMedia(
         path, m_decksDir + "/media/" + safeFileName(target), unzip, error);
     int imported = 0;
@@ -1326,16 +1364,13 @@ bool Backend::importApkg(const QString &path, const QString &deckName, QString *
             continue;
         QString tags = query.value(1).toString().simplified();
         tags.replace(' ', ',');
-        if (!createCard(target, front, back, cloze ? "cloze" : "basic", tags, error))
+        if (!createCard(target, front, back, cloze ? "cloze" : "basic", tags, error)) {
+            closeCollection();
             return false;
+        }
         ++imported;
     }
-    query.finish();
-    query.clear();
-    db.close();
-    const QString connection = db.connectionName();
-    db = QSqlDatabase();
-    QSqlDatabase::removeDatabase(connection);
+    closeCollection();
     setStatus(tr("Imported %1 cards").arg(imported));
     return true;
 }

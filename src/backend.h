@@ -175,7 +175,29 @@ private:
         QString description;
     };
 
+    // A single consistent read of the scheduling sidecar. Every availability
+    // query and every card view uses this snapshot instead of re-reading the
+    // database, so counts cannot disagree mid-action.
+    struct StudySnapshot {
+        QHash<QString, FsrsState> states;
+        QHash<QString, QString> hashes;
+        int newBudget = 0;
+        qint64 now = 0;
+    };
+
+    struct Availability {
+        QVector<Card> due;           // ordered by due date, then id
+        QVector<Card> fresh;         // deck-file order, up to the daily cap
+        QVector<int> duePerDeck;
+        QVector<int> freshPerDeck;
+        QVector<int> dueIncludingNewPerDeck; // totalDue in CLI stats includes new cards
+    };
+
     void load();
+    bool refreshSnapshot();
+    FsrsState effectiveState(const Card &card) const;
+    Availability availability(const QString &deckName = {}) const;
+    void scheduleNextRepeat();
     void rebuildQueue();
     void refreshDueCount();
     void presentCard();
@@ -183,6 +205,7 @@ private:
     void reportError(const QString &message);
     Deck *deckByName(const QString &name);
     const Deck *deckByName(const QString &name) const;
+    int deckIndex(const QString &name) const;
     Card *cardById(const QString &id);
     void answerCram(int rating);
     void answerReview(int rating);
@@ -220,6 +243,8 @@ private:
     MathRenderer m_math;
     QFileSystemWatcher m_watcher;
     QTimer m_reloadTimer;
+    StudySnapshot m_snapshot;
+    bool m_snapshotValid = false;
     qint64 m_reviewAgainDelayMs = 60000;
     int m_dueCount = 0;
     int m_reviewed = 0;

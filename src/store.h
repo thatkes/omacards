@@ -37,8 +37,17 @@ public:
 
     QString path() const { return m_path; }
 
+    // Errors are sticky until clearError() so a caller can check once after a
+    // batch of reads instead of every query. Silent failures used to make all
+    // cards look new.
+    QString lastError() const { return m_lastError; }
+    void clearError() { m_lastError.clear(); }
+
 private:
+    int countNewCardsToday() const;
+
     QString m_path;
     QString m_connection;
     QSqlDatabase m_db;
+    mutable QString m_lastError;
 };

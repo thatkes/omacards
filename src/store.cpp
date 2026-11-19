@@ -31,8 +31,9 @@ bool Store::open(QString *error) {
     m_db = QSqlDatabase::addDatabase("QSQLITE", m_connection);
     m_db.setDatabaseName(m_path);
     if (!m_db.open()) {
+        m_lastError = m_db.lastError().text();
         if (error)
-            *error = m_db.lastError().text();
+            *error = m_lastError;
         return false;
     }
 
@@ -52,8 +53,9 @@ bool Store::open(QString *error) {
     };
     for (const QString &statement : statements) {
         if (!query.exec(statement)) {
+            m_lastError = query.lastError().text();
             if (error)
-                *error = query.lastError().text();
+                *error = m_lastError;
             return false;
         }
     }
@@ -67,8 +69,9 @@ bool Store::open(QString *error) {
                 hasNewCard = true;
     }
     if (!hasNewCard && !query.exec("ALTER TABLE reviews ADD COLUMN new_card INTEGER NOT NULL DEFAULT 0")) {
+        m_lastError = query.lastError().text();
         if (error)
-            *error = query.lastError().text();
+            *error = m_lastError;
         return false;
     }
     return true;
@@ -79,8 +82,10 @@ QHash<QString, FsrsState> Store::states() const {
     if (!m_db.isOpen())
         return result;
     QSqlQuery query(m_db);
-    if (!query.exec("SELECT id, stability, difficulty, due, last_review, reps, lapses FROM cards"))
+    if (!query.exec("SELECT id, stability, difficulty, due, last_review, reps, lapses FROM cards")) {
+        m_lastError = query.lastError().text();
         return result;
+    }
     while (query.next()) {
         FsrsState state;
         state.stability = query.value(1).toDouble();
@@ -99,8 +104,10 @@ QHash<QString, QString> Store::hashes() const {
     if (!m_db.isOpen())
         return result;
     QSqlQuery query(m_db);
-    if (!query.exec("SELECT id, hash FROM cards"))
+    if (!query.exec("SELECT id, hash FROM cards")) {
+        m_lastError = query.lastError().text();
         return result;
+    }
     while (query.next())
         result.insert(query.value(0).toString(), query.value(1).toString());
     return result;
@@ -126,7 +133,8 @@ void Store::save(const QString &cardId, const QString &hash, const FsrsState &st
     query.bindValue(":last_review", state.lastReview);
     query.bindValue(":reps", state.reps);
     query.bindValue(":lapses", state.lapses);
-    query.exec();
+    if (!query.exec())
+        m_lastError = query.lastError().text();
 }
 
 void Store::logReview(const QString &cardId, int rating, qint64 at,
@@ -143,24 +151,32 @@ void Store::logReview(const QString &cardId, int rating, qint64 at,
     query.bindValue(":difficulty", state.difficulty);
     query.bindValue(":interval", intervalDays);
     query.bindValue(":new_card", wasNew ? 1 : 0);
-    query.exec();
+    if (!query.exec())
+        m_lastError = query.lastError().text();
 }
 
 void Store::removeExcept(const QSet<QString> &ids) {
     if (!m_db.isOpen())
         return;
     QSqlQuery query(m_db);
-    query.exec("SELECT id FROM cards");
+    if (!query.exec("SELECT id FROM cards")) {
+        m_lastError = query.lastError().text();
+        return;
+    }
     QStringList stale;
     while (query.next()) {
         const QString id = query.value(0).toString();
         if (!ids.contains(id))
             stale << id;
     }
-    query.prepare("DELETE FROM cards WHERE id = ?");
+    if (!query.prepare("DELETE FROM cards WHERE id = ?")) {
+        m_lastError = query.lastError().text();
+        return;
+    }
     for (const QString &id : stale) {
         query.bindValue(0, id);
-        query.exec();
+        if (!query.exec())
+            m_lastError = query.lastError().text();
     }
 }
 
@@ -169,8 +185,10 @@ ReviewSummary Store::summary() const {
     if (!m_db.isOpen())
         return result;
     QSqlQuery query(m_db);
-    if (!query.exec("SELECT at, rating FROM reviews ORDER BY at"))
+    if (!query.exec("SELECT at, rating FROM reviews ORDER BY at")) {
+        m_lastError = query.lastError().text();
         return result;
+    }
 
     const QDate today = QDate::currentDate();
     QSet<QDate> days;
@@ -185,7 +203,7 @@ ReviewSummary Store::summary() const {
                 ++result.todayCorrect;
         }
     }
-    result.newToday = newCardsToday();
+    result.newToday = countNewCardsToday();
 
     // A streak survives until midnight after a review day, so a user who has
     // not reviewed yet today still sees yesterday's total.
@@ -200,14 +218,26 @@ ReviewSummary Store::summary() const {
 }
 
 int Store::newCardsToday() const {
+    const int count = countNewCardsToday();
+    if (m_lastError.isEmpty() && !m_db.isOpen())
+        m_lastError = QStringLiteral("State database is not open");
+    return count;
+}
+
+int Store::countNewCardsToday() const {
     if (!m_db.isOpen())
         return 0;
     QSqlQuery query(m_db);
-    query.prepare("SELECT COUNT(DISTINCT card_id) FROM reviews "
-                  "WHERE new_card = 1 AND at >= :start");
-    query.bindValue(":start", QDate::currentDate().startOfDay().toMSecsSinceEpoch());
-    if (!query.exec() || !query.next())
+    if (!query.prepare("SELECT COUNT(DISTINCT card_id) FROM reviews "
+                       "WHERE new_card = 1 AND at >= :start")) {
+        m_lastError = query.lastError().text();
         return 0;
+    }
+    query.bindValue(":start", QDate::currentDate().startOfDay().toMSecsSinceEpoch());
+    if (!query.exec() || !query.next()) {
+        m_lastError = query.lastError().text();
+        return 0;
+    }
     return query.value(0).toInt();
 }
 
@@ -215,20 +245,30 @@ QString Store::setting(const QString &key, const QString &fallback) const {
     if (!m_db.isOpen())
         return fallback;
     QSqlQuery query(m_db);
-    query.prepare("SELECT value FROM settings WHERE key = :key");
-    query.bindValue(":key", key);
-    if (!query.exec() || !query.next())
+    if (!query.prepare("SELECT value FROM settings WHERE key = :key")) {
+        m_lastError = query.lastError().text();
         return fallback;
-    return query.value(0).toString();
+    }
+    query.bindValue(":key", key);
+    if (!query.exec())
+        m_lastError = query.lastError().text();
+    return query.next() ? query.value(0).toString() : fallback;
 }
 
 bool Store::setSetting(const QString &key, const QString &value) {
     if (!m_db.isOpen())
         return false;
     QSqlQuery query(m_db);
-    query.prepare("INSERT INTO settings (key, value) VALUES (:key, :value) "
-                  "ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+    if (!query.prepare("INSERT INTO settings (key, value) VALUES (:key, :value) "
+                       "ON CONFLICT(key) DO UPDATE SET value = excluded.value")) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
     query.bindValue(":key", key);
     query.bindValue(":value", value);
-    return query.exec();
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
 }
