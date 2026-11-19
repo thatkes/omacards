@@ -411,10 +411,23 @@ int run(const QStringList &arguments) {
             return fail(QObject::tr("Retention must be between 0.70 and 0.99"), json);
         if (options.newPerDay > 9999)
             return fail(QObject::tr("New cards per day must be 9999 or less"), json);
+        // The QML setters report write failures as signals; the CLI must turn
+        // them into a non-zero exit instead of claiming success.
+        QString settingError;
+        const QMetaObject::Connection connection = QObject::connect(
+            &backend, &Backend::errorOccurred, &backend,
+            [&](const QString &message) {
+                if (settingError.isEmpty())
+                    settingError = message;
+            });
         if (options.newPerDay >= 0)
             backend.setNewPerDay(options.newPerDay);
         if (options.retention > 0)
             backend.setDesiredRetention(options.retention);
+        QObject::disconnect(connection);
+        if (!settingError.isEmpty())
+            return fail(settingError, json);
+
         const ReviewSummary summary = backend.reviewSummary();
         QJsonObject object;
         object.insert("ok", true);
@@ -541,18 +554,27 @@ int run(const QStringList &arguments) {
     if (options.command == "add-card") {
         if (options.question.isEmpty())
             return fail(QObject::tr("Use --question / -q"), json);
-        if (!backend.createCard(options.deck, options.question, options.answer, options.type, options.tags, &error))
+        CardDraft draft;
+        draft.question = options.question;
+        draft.answer = options.answer;
+        draft.type = options.type;
+        draft.tags = options.tags.split(',', Qt::SkipEmptyParts);
+        QStringList ids;
+        if (!backend.createCards(options.deck, {draft}, nullptr, &ids, &error))
             return fail(error, json);
-        const QVector<Deck> updated = backend.allDecks();
         const Card *created = nullptr;
-        for (const Deck &deck : updated)
+        for (const Deck &deck : backend.allDecks())
             for (const Card &card : deck.cards)
-                if (card.question == options.question.trimmed() && card.answer == options.answer.trimmed())
+                if (card.id == ids.value(0)) {
                     created = &card;
+                    break;
+                }
         QJsonObject object;
         object.insert("ok", true);
-        if (created)
+        if (created) {
+            object.insert("id", created->id);
             object.insert("card", cardJson(*created));
+        }
         write(object, json, QObject::tr("Added card"));
         return 0;
     }
@@ -577,17 +599,22 @@ int run(const QStringList &arguments) {
         } else {
             tags = target->tags.join(", ");
         }
-        if (!backend.modifyCard(options.deck, options.card, question, answer, type, tags, &error))
+        const QString deckName = options.deck.isEmpty() ? target->deck : options.deck;
+        QString finalId;
+        if (!backend.modifyCard(deckName, options.card, question, answer, type, tags, &error, &finalId))
             return fail(error, json);
 
         const Card *updated = nullptr;
-        for (const Card &card : backend.searchCards(question, target->deck))
-            if (card.question == question.trimmed() && card.answer == answer.trimmed())
-                updated = &card;
+        for (const Deck &deck : backend.allDecks())
+            for (const Card &card : deck.cards)
+                if (card.id == finalId) {
+                    updated = &card;
+                    break;
+                }
 
         QJsonObject object;
         object.insert("ok", true);
-        object.insert("id", updated ? updated->id : options.card);
+        object.insert("id", finalId.isEmpty() ? options.card : finalId);
         if (updated)
             object.insert("card", cardJson(*updated));
         write(object, json, QObject::tr("Updated card %1").arg(options.card));
@@ -597,7 +624,16 @@ int run(const QStringList &arguments) {
     if (options.command == "delete-card") {
         if (options.card.isEmpty())
             return fail(QObject::tr("Use --card / -c"), json);
-        if (!backend.deleteCard(options.deck, options.card, &error))
+        QString deckName = options.deck;
+        if (deckName.isEmpty()) {
+            for (const Deck &deck : decks)
+                for (const Card &card : deck.cards)
+                    if (card.id == options.card)
+                        deckName = deck.name;
+            if (deckName.isEmpty())
+                return fail(QObject::tr("No such card: %1").arg(options.card), json);
+        }
+        if (!backend.deleteCard(deckName, options.card, &error))
             return fail(error, json);
         QJsonObject object;
         object.insert("ok", true);

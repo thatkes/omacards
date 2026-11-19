@@ -107,7 +107,7 @@ public:
                     const QString &type = "basic", const QString &tags = {}, QString *error = nullptr);
     bool modifyCard(const QString &deckName, const QString &cardId, const QString &question,
                     const QString &answer, const QString &type, const QString &tags,
-                    QString *error = nullptr);
+                    QString *error = nullptr, QString *finalId = nullptr);
     bool deleteCard(const QString &deckName, const QString &cardId, QString *error = nullptr);
     bool removeDeck(const QString &name, QString *error = nullptr);
     bool importFile(const QString &path, const QString &deckName, QString *error = nullptr);
@@ -198,6 +198,8 @@ private:
     void answerReview(Rating rating);
     void recordHistory(const QString &path, const QByteArray &before, bool existedBefore,
                        const QString &description);
+    bool commitDeckEdit(Deck *deck, const Deck &original, const QByteArray &before,
+                        const QString &description, QString *error);
 
     QString m_decksDir;
     QString m_currentDeck;

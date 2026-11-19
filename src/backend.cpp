@@ -395,6 +395,17 @@ void Backend::recordHistory(const QString &path, const QByteArray &before, bool 
         emit historyChanged();
 }
 
+bool Backend::commitDeckEdit(Deck *deck, const Deck &original, const QByteArray &before,
+                             const QString &description, QString *error) {
+    if (!DeckIO::save(*deck, error)) {
+        *deck = original;
+        return false;
+    }
+    recordHistory(deck->path, before, true, description);
+    refresh();
+    return true;
+}
+
 void Backend::undo() {
     if (!m_history.canUndo()) {
         setStatus(tr("Nothing to undo"));
@@ -705,13 +716,7 @@ bool Backend::setDeckDescription(const QString &deckName, const QString &descrip
     const Deck original = *deck;
     const QByteArray before = FileHistory::readBytes(deck->path);
     deck->description = clean;
-    if (!DeckIO::save(*deck, error)) {
-        *deck = original;
-        return false;
-    }
-    recordHistory(deck->path, before, true, tr("editing deck description"));
-    refresh();
-    return true;
+    return commitDeckEdit(deck, original, before, tr("editing deck description"), error);
 }
 
 bool Backend::createCards(const QString &deckName, const QVector<CardDraft> &drafts,
@@ -747,7 +752,8 @@ bool Backend::createCards(const QString &deckName, const QVector<CardDraft> &dra
 
     const Deck original = *deck;
     const QByteArray before = FileHistory::readBytes(deck->path);
-    if (description)
+    // An absent or empty description must not erase one already on the deck.
+    if (description && !description->trimmed().isEmpty())
         deck->description = description->trimmed();
 
     QVector<Card> cards;
@@ -768,15 +774,11 @@ bool Backend::createCards(const QString &deckName, const QVector<CardDraft> &dra
     }
 
     deck->cards << cards;
-    if (!DeckIO::save(*deck, error)) {
-        *deck = original;
+    if (!commitDeckEdit(deck, original, before, tr("adding %1 cards").arg(cards.size()), error))
         return false;
-    }
     if (createdIds)
         for (const Card &card : cards)
             createdIds->append(card.id);
-    recordHistory(deck->path, before, true, tr("adding %1 cards").arg(cards.size()));
-    refresh();
     return true;
 }
 
@@ -805,18 +807,12 @@ bool Backend::createCard(const QString &deckName, const QString &question, const
     const Deck original = *deck;
     const QByteArray before = FileHistory::readBytes(deck->path);
     deck->cards << card;
-    if (!DeckIO::save(*deck, error)) {
-        *deck = original;
-        return false;
-    }
-    recordHistory(deck->path, before, true, tr("adding a card"));
-    refresh();
-    return true;
+    return commitDeckEdit(deck, original, before, tr("adding a card"), error);
 }
 
 bool Backend::modifyCard(const QString &deckName, const QString &cardId, const QString &question,
                          const QString &answer, const QString &type, const QString &tags,
-                         QString *error) {
+                         QString *error, QString *finalId) {
     Deck *deck = deckByName(deckName.isEmpty() ? m_currentDeck : deckName);
     if (!deck) {
         if (error) *error = tr("No such deck: %1").arg(deckName);
@@ -849,15 +845,11 @@ bool Backend::modifyCard(const QString &deckName, const QString &cardId, const Q
     // the content so the card resets its schedule when it changes.
     if (!card->explicitId)
         card->id = DeckIO::cardId(*card);
+    if (finalId)
+        *finalId = card->id;
 
     const QByteArray before = FileHistory::readBytes(deck->path);
-    if (!DeckIO::save(*deck, error)) {
-        *deck = original;
-        return false;
-    }
-    recordHistory(deck->path, before, true, tr("editing a card"));
-    refresh();
-    return true;
+    return commitDeckEdit(deck, original, before, tr("editing a card"), error);
 }
 
 bool Backend::deleteCard(const QString &deckName, const QString &cardId, QString *error) {
@@ -866,23 +858,17 @@ bool Backend::deleteCard(const QString &deckName, const QString &cardId, QString
         if (error) *error = tr("No such deck: %1").arg(deckName);
         return false;
     }
-    const Deck original = *deck;
-    const int before = deck->cards.size();
-    deck->cards.erase(std::remove_if(deck->cards.begin(), deck->cards.end(), [&](const Card &card) {
+    const auto found = std::find_if(deck->cards.begin(), deck->cards.end(), [&](const Card &card) {
         return card.id == cardId;
-    }), deck->cards.end());
-    if (deck->cards.size() == before) {
+    });
+    if (found == deck->cards.end()) {
         if (error) *error = tr("No such card: %1").arg(cardId);
         return false;
     }
-    const QByteArray contents = FileHistory::readBytes(deck->path);
-    if (!DeckIO::save(*deck, error)) {
-        *deck = original;
-        return false;
-    }
-    recordHistory(deck->path, contents, true, tr("removing a card"));
-    refresh();
-    return true;
+    const Deck original = *deck;
+    const QByteArray before = FileHistory::readBytes(deck->path);
+    deck->cards.erase(found);
+    return commitDeckEdit(deck, original, before, tr("removing a card"), error);
 }
 
 bool Backend::removeDeck(const QString &name, QString *error) {

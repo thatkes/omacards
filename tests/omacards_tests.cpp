@@ -87,6 +87,20 @@ private slots:
         QCOMPARE(deck.cards.at(1).tags, QStringList({"z", "w"}));
     }
 
+    void addCardsKeepsExistingDescription() {
+        QTemporaryDir dir;
+        EnvGuard env(dir.filePath("decks"), dir.filePath("state.db"));
+        QCOMPARE(Cli::run({"add-deck", "Keep", "--description", "Original", "--json"}), 0);
+        QVERIFY(writeFile(dir.filePath("cards.json"), R"([{"question":"Q","answer":"A"}])"));
+        QCOMPARE(Cli::run({"add-cards", "-d", "Keep", "-i", dir.filePath("cards.json"), "--json"}), 0);
+
+        QString error;
+        const Deck deck = DeckIO::load(QDir(dir.filePath("decks")).filePath("Keep.txt"), &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(deck.description, QString("Original"));
+        QCOMPARE(deck.cards.size(), 1);
+    }
+
     void addCardsRejectsInvalidInputWithoutWriting() {
         QTemporaryDir dir;
         EnvGuard env(dir.filePath("decks"), dir.filePath("state.db"));
@@ -115,6 +129,69 @@ private slots:
         QVERIFY2(error.isEmpty(), qPrintable(error));
         QCOMPARE(imported.description, QString("from import"));
         QCOMPARE(imported.cards.size(), 1);
+    }
+
+    void cliConfigReportsWriteFailure() {
+        QTemporaryDir dir;
+        const QString database = dir.filePath("state.db");
+        EnvGuard env(dir.filePath("decks"), database);
+        {
+            Backend backend(dir.filePath("decks"), database);
+            QString error;
+            QVERIFY(backend.initialize(&error));
+        }
+        QVERIFY(QFile::setPermissions(database, QFile::ReadOwner));
+        if (QFileInfo(database).isWritable()) {
+            QFile::setPermissions(database, QFile::ReadOwner | QFile::WriteOwner);
+            QSKIP("file permissions are ignored for this user");
+        }
+        QCOMPARE(Cli::run({"config", "--new-per-day", "5", "--json"}), 1);
+        QFile::setPermissions(database, QFile::ReadOwner | QFile::WriteOwner);
+    }
+
+    void cliEditsAndDeletesCardsAcrossDecks() {
+        QTemporaryDir dir;
+        EnvGuard env(dir.filePath("decks"), dir.filePath("state.db"));
+        QString cardId;
+        {
+            Backend backend;
+            QString error;
+            QVERIFY(backend.initialize(&error));
+            QVERIFY(backend.createDeck("First", &error));
+            QVERIFY(backend.createCard("First", "Q1", "A1", "basic", {}, &error));
+            QVERIFY(backend.createDeck("Second", &error));
+            QVERIFY(backend.createCard("Second", "Q2", "A2", "basic", {}, &error));
+            for (const Deck &deck : backend.allDecks())
+                for (const Card &card : deck.cards)
+                    if (card.question == QStringLiteral("Q2"))
+                        cardId = card.id;
+        }
+        QVERIFY(!cardId.isEmpty());
+
+        // With no --deck, both commands must follow the card's own deck
+        // ("Second"), not whichever deck happens to be current ("First").
+        QCOMPARE(Cli::run({"edit-card", "-c", cardId, "-q", "Q2b", "--json"}), 0);
+
+        // A generated id follows the content, so the edit gave the card a new
+        // id; look it up again before deleting.
+        Backend edited;
+        QString error;
+        QVERIFY(edited.initialize(&error));
+        QString updatedId;
+        for (const Deck &deck : edited.allDecks())
+            for (const Card &card : deck.cards)
+                if (card.question == QStringLiteral("Q2b"))
+                    updatedId = card.id;
+        QVERIFY(!updatedId.isEmpty());
+        QCOMPARE(Cli::run({"delete-card", "-c", updatedId, "--json"}), 0);
+
+        Backend check;
+        QVERIFY(check.initialize(&error));
+        bool found = false;
+        for (const Deck &deck : check.allDecks())
+            for (const Card &card : deck.cards)
+                found |= card.id == updatedId;
+        QVERIFY(!found);
     }
 
     void previewRendersMathAsText() {
