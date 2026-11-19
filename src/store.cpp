@@ -45,8 +45,10 @@ bool Store::open(QString *error) {
         "CREATE TABLE IF NOT EXISTS reviews ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT, card_id TEXT NOT NULL, rating INTEGER NOT NULL, "
         "at INTEGER NOT NULL, stability REAL NOT NULL, difficulty REAL NOT NULL, "
-        "interval INTEGER NOT NULL)",
+        "interval INTEGER NOT NULL, new_card INTEGER NOT NULL DEFAULT 0)",
         "CREATE INDEX IF NOT EXISTS reviews_card ON reviews(card_id)",
+        "CREATE TABLE IF NOT EXISTS settings ("
+        "key TEXT PRIMARY KEY, value TEXT NOT NULL)",
     };
     for (const QString &statement : statements) {
         if (!query.exec(statement)) {
@@ -54,6 +56,20 @@ bool Store::open(QString *error) {
                 *error = query.lastError().text();
             return false;
         }
+    }
+
+    // Older databases predate the new_card column. Keep them readable instead
+    // of dropping the review history.
+    bool hasNewCard = false;
+    if (query.exec("PRAGMA table_info(reviews)")) {
+        while (query.next())
+            if (query.value(1).toString() == "new_card")
+                hasNewCard = true;
+    }
+    if (!hasNewCard && !query.exec("ALTER TABLE reviews ADD COLUMN new_card INTEGER NOT NULL DEFAULT 0")) {
+        if (error)
+            *error = query.lastError().text();
+        return false;
     }
     return true;
 }
@@ -114,18 +130,19 @@ void Store::save(const QString &cardId, const QString &hash, const FsrsState &st
 }
 
 void Store::logReview(const QString &cardId, int rating, qint64 at,
-                      const FsrsState &state, int intervalDays) {
+                      const FsrsState &state, int intervalDays, bool wasNew) {
     if (!m_db.isOpen())
         return;
     QSqlQuery query(m_db);
-    query.prepare("INSERT INTO reviews (card_id, rating, at, stability, difficulty, interval) "
-                  "VALUES (:id, :rating, :at, :stability, :difficulty, :interval)");
+    query.prepare("INSERT INTO reviews (card_id, rating, at, stability, difficulty, interval, new_card) "
+                  "VALUES (:id, :rating, :at, :stability, :difficulty, :interval, :new_card)");
     query.bindValue(":id", cardId);
     query.bindValue(":rating", rating);
     query.bindValue(":at", at);
     query.bindValue(":stability", state.stability);
     query.bindValue(":difficulty", state.difficulty);
     query.bindValue(":interval", intervalDays);
+    query.bindValue(":new_card", wasNew ? 1 : 0);
     query.exec();
 }
 
@@ -168,6 +185,7 @@ ReviewSummary Store::summary() const {
                 ++result.todayCorrect;
         }
     }
+    result.newToday = newCardsToday();
 
     // A streak survives until midnight after a review day, so a user who has
     // not reviewed yet today still sees yesterday's total.
@@ -179,4 +197,38 @@ ReviewSummary Store::summary() const {
         cursor = cursor.addDays(-1);
     }
     return result;
+}
+
+int Store::newCardsToday() const {
+    if (!m_db.isOpen())
+        return 0;
+    QSqlQuery query(m_db);
+    query.prepare("SELECT COUNT(DISTINCT card_id) FROM reviews "
+                  "WHERE new_card = 1 AND at >= :start");
+    query.bindValue(":start", QDate::currentDate().startOfDay().toMSecsSinceEpoch());
+    if (!query.exec() || !query.next())
+        return 0;
+    return query.value(0).toInt();
+}
+
+QString Store::setting(const QString &key, const QString &fallback) const {
+    if (!m_db.isOpen())
+        return fallback;
+    QSqlQuery query(m_db);
+    query.prepare("SELECT value FROM settings WHERE key = :key");
+    query.bindValue(":key", key);
+    if (!query.exec() || !query.next())
+        return fallback;
+    return query.value(0).toString();
+}
+
+bool Store::setSetting(const QString &key, const QString &value) {
+    if (!m_db.isOpen())
+        return false;
+    QSqlQuery query(m_db);
+    query.prepare("INSERT INTO settings (key, value) VALUES (:key, :value) "
+                  "ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+    query.bindValue(":key", key);
+    query.bindValue(":value", value);
+    return query.exec();
 }

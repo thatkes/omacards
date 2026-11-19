@@ -40,6 +40,8 @@ class Backend : public QObject {
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyChanged)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyChanged)
     Q_PROPERTY(QString currentCardId READ currentCardId NOTIFY cardChanged)
+    Q_PROPERTY(int newPerDay READ newPerDay WRITE setNewPerDay NOTIFY settingsChanged)
+    Q_PROPERTY(double desiredRetention READ desiredRetention WRITE setDesiredRetention NOTIFY settingsChanged)
 
 public:
     explicit Backend(const QString &decksDirectory = {}, const QString &databasePath = {},
@@ -67,11 +69,15 @@ public:
     QString currentCardId() const { return m_currentId; }
     bool canUndo() const { return !m_undoStack.isEmpty(); }
     bool canRedo() const { return !m_redoStack.isEmpty(); }
+    int newPerDay() const { return m_newPerDay; }
+    double desiredRetention() const { return m_desiredRetention; }
+    int availableCount(const QString &deckName = {}) const;
     QVariantList cardList() const;
     ReviewSummary reviewSummary() const { return m_store.summary(); }
 
     QVector<Deck> allDecks() const { return m_decks; }
     int countDue(const QString &deckName = {}) const;
+    QVector<Card> dueCards(const QString &deckName = {}) const;
     QVector<Card> searchCards(const QString &text, const QString &deckName = {}) const;
 
     // Headless helpers used by the agent CLI.
@@ -105,6 +111,8 @@ public slots:
     Q_INVOKABLE void updateCard(const QString &cardId, const QString &question, const QString &answer,
                                 const QString &type, const QString &tags);
     Q_INVOKABLE void setCardFilter(const QString &filter);
+    Q_INVOKABLE void setNewPerDay(int count);
+    Q_INVOKABLE void setDesiredRetention(double retention);
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
     Q_INVOKABLE void editDeckFile();
@@ -123,6 +131,7 @@ signals:
     void cardsChanged();
     void cardFilterChanged();
     void historyChanged();
+    void settingsChanged();
     void showWindowRequested();
     void errorOccurred(const QString &message);
 
@@ -177,5 +186,7 @@ private:
     int m_correct = 0;
     int m_box = 0;
     int m_cramReviews = 0;
+    int m_newPerDay = 20;
+    double m_desiredRetention = 0.9;
     bool m_showingAnswer = false;
 };

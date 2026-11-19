@@ -224,6 +224,88 @@ private slots:
         QCOMPARE(backend.searchCards("alpha").size(), 1);
     }
 
+    void storeRemembersSettings() {
+        QTemporaryDir dir;
+        const QString path = dir.filePath("state.db");
+        {
+            Store store(path);
+            QString error;
+            QVERIFY(store.open(&error));
+            QCOMPARE(store.setting("new_per_day", "20"), QString("20"));
+            QVERIFY(store.setSetting("new_per_day", "12"));
+            QVERIFY(store.setSetting("desired_retention", "0.85"));
+        }
+        Store reopened(path);
+        QString error;
+        QVERIFY(reopened.open(&error));
+        QCOMPARE(reopened.setting("new_per_day", "20"), QString("12"));
+        QCOMPARE(reopened.setting("desired_retention", "0.90"), QString("0.85"));
+    }
+
+    void storeCountsNewCardsToday() {
+        QTemporaryDir dir;
+        Store store(dir.filePath("state.db"));
+        QString error;
+        QVERIFY(store.open(&error));
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        const FsrsState state = Fsrs::review(Fsrs::initial(), 3, now).state;
+        store.logReview("new-1", 3, now, state, 1, true);
+        store.logReview("new-1", 3, now, state, 1, true); // same card twice
+        store.logReview("old-1", 3, now, state, 1, false);
+        QCOMPARE(store.newCardsToday(), 1);
+        QCOMPARE(store.summary().newToday, 1);
+
+        store.logReview("new-2", 1, now, state, 1, true);
+        QCOMPARE(store.newCardsToday(), 2);
+    }
+
+    void fsrsRetentionShapesIntervals() {
+        QVERIFY(Fsrs::interval(10.0, 0.80) > Fsrs::interval(10.0, 0.90));
+        QVERIFY(Fsrs::interval(10.0, 0.98) < Fsrs::interval(10.0, 0.90));
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        const ReviewResult relaxed = Fsrs::review(Fsrs::initial(), 3, now, 0.80);
+        const ReviewResult strict = Fsrs::review(Fsrs::initial(), 3, now, 0.95);
+        QVERIFY(relaxed.intervalDays >= strict.intervalDays);
+    }
+
+    void backendAppliesNewCardLimit() {
+        QTemporaryDir dir;
+        const QString database = dir.filePath("state.db");
+        {
+            Backend backend(dir.path(), database);
+            QString error;
+            QVERIFY(backend.initialize(&error));
+            QVERIFY(backend.createDeck("Limit", &error));
+            for (int i = 0; i < 5; ++i)
+                QVERIFY(backend.createCard("Limit", QString("Q%1").arg(i), "A", "basic", {}, &error));
+            backend.selectDeck("Limit");
+            QCOMPARE(backend.countDue(), 5);
+            QCOMPARE(backend.availableCount(), 5);
+
+            backend.setNewPerDay(2);
+            QCOMPARE(backend.availableCount(), 2);
+            QCOMPARE(backend.dueCount(), 2);
+            QCOMPARE(backend.reviewSummary().newToday, 0);
+
+            backend.flip();
+            backend.answer(3);
+            backend.flip();
+            backend.answer(3);
+            QCOMPARE(backend.reviewSummary().newToday, 2);
+            QCOMPARE(backend.availableCount(), 0);
+            QCOMPARE(backend.dueCount(), 0);
+
+            backend.setNewPerDay(3);
+            QCOMPARE(backend.availableCount(), 1);
+            backend.setDesiredRetention(0.85);
+        }
+        Backend reopened(dir.path(), database);
+        QString error;
+        QVERIFY(reopened.initialize(&error));
+        QCOMPARE(reopened.newPerDay(), 3);
+        QCOMPARE(reopened.desiredRetention(), 0.85);
+    }
+
     void themeFallsBack() {
         QTemporaryDir dir;
         Theme theme(dir.path());

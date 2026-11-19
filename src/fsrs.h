@@ -33,9 +33,10 @@ public:
     static const double weights[19];
 
     static FsrsState initial();
-    static ReviewResult review(const FsrsState &state, int rating, qint64 nowMs);
+    static ReviewResult review(const FsrsState &state, int rating, qint64 nowMs,
+                               double retention = desiredRetention);
     static double retrievability(const FsrsState &state, qint64 nowMs);
-    static int interval(double stability);
+    static int interval(double stability, double retention = desiredRetention);
     static double initialStability(int rating);
     static double initialDifficulty(int rating);
 

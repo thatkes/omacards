@@ -76,6 +76,8 @@ bool Backend::initialize(QString *error) {
         reportError(tr("Cannot open state database: %1").arg(m_store.path()));
         return false;
     }
+    m_newPerDay = qBound(0, m_store.setting("new_per_day", "20").toInt(), 9999);
+    m_desiredRetention = qBound(0.70, m_store.setting("desired_retention", "0.9").toDouble(), 0.99);
     m_watcher.addPath(m_decksDir);
     refresh();
     return true;
@@ -124,6 +126,32 @@ int Backend::countDue(const QString &deckName) const {
     return count;
 }
 
+int Backend::availableCount(const QString &deckName) const {
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const auto states = m_store.states();
+    const auto hashes = m_store.hashes();
+    int remainingNew = qMax(0, m_newPerDay - m_store.newCardsToday());
+    int count = 0;
+    for (const Deck &deck : m_decks) {
+        if (!deckName.isEmpty() && deck.name != deckName)
+            continue;
+        for (const Card &card : deck.cards) {
+            FsrsState state = states.value(card.id);
+            if (hashes.value(card.id) != DeckIO::contentHash(card))
+                state = FsrsState{};
+            if (state.reps == 0) {
+                if (remainingNew > 0) {
+                    ++count;
+                    --remainingNew;
+                }
+            } else if (state.due <= now) {
+                ++count;
+            }
+        }
+    }
+    return count;
+}
+
 void Backend::refresh() {
     load();
     rebuildQueue();
@@ -148,21 +176,34 @@ void Backend::rebuildQueue() {
         const auto states = m_store.states();
         const auto hashes = m_store.hashes();
         QVector<QPair<qint64, QString>> due;
+        QStringList fresh;
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        int remainingNew = qMax(0, m_newPerDay - m_store.newCardsToday());
         for (const Card &card : deck->cards) {
             FsrsState state = states.value(card.id);
             if (hashes.value(card.id) != DeckIO::contentHash(card))
                 state = FsrsState{};
-            if (state.due <= QDateTime::currentMSecsSinceEpoch())
+            if (state.reps == 0) {
+                if (remainingNew > 0) {
+                    fresh << card.id;
+                    --remainingNew;
+                }
+            } else if (state.due <= now) {
                 due.append({state.due, card.id});
+            }
         }
         std::sort(due.begin(), due.end(), [](const auto &a, const auto &b) {
             return a.first == b.first ? a.second < b.second : a.first < b.first;
         });
         for (const auto &item : due)
             m_reviewQueue << item.second;
+        // Due reviews come first so lapses are not hidden behind new material;
+        // new cards then follow in deck-file order up to the daily limit.
+        for (const QString &id : fresh)
+            m_reviewQueue << id;
     }
 
-    m_dueCount = countDue();
+    m_dueCount = availableCount();
     emit dueCountChanged();
     presentCard();
 }
@@ -360,6 +401,34 @@ QVariantList Backend::cardList() const {
     return list;
 }
 
+QVector<Card> Backend::dueCards(const QString &deckName) const {
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const auto states = m_store.states();
+    const auto hashes = m_store.hashes();
+    int remainingNew = qMax(0, m_newPerDay - m_store.newCardsToday());
+    QVector<Card> reviews;
+    QVector<Card> fresh;
+    for (const Deck &deck : m_decks) {
+        if (!deckName.isEmpty() && deck.name != deckName)
+            continue;
+        for (const Card &card : deck.cards) {
+            FsrsState state = states.value(card.id);
+            if (hashes.value(card.id) != DeckIO::contentHash(card))
+                state = FsrsState{};
+            if (state.reps == 0) {
+                if (remainingNew > 0) {
+                    fresh << card;
+                    --remainingNew;
+                }
+            } else if (state.due <= now) {
+                reviews << card;
+            }
+        }
+    }
+    reviews << fresh;
+    return reviews;
+}
+
 QVector<Card> Backend::searchCards(const QString &text, const QString &deckName) const {
     QVector<Card> result;
     const QString needle = text.trimmed().toLower();
@@ -381,6 +450,25 @@ void Backend::setCardFilter(const QString &filter) {
     m_cardFilter = filter;
     emit cardFilterChanged();
     emit cardsChanged();
+}
+
+void Backend::setNewPerDay(int count) {
+    const int clean = qBound(0, count, 9999);
+    if (m_newPerDay == clean)
+        return;
+    m_newPerDay = clean;
+    m_store.setSetting("new_per_day", QString::number(clean));
+    emit settingsChanged();
+    rebuildQueue();
+}
+
+void Backend::setDesiredRetention(double retention) {
+    const double clean = qBound(0.70, retention, 0.99);
+    if (qFuzzyCompare(m_desiredRetention, clean))
+        return;
+    m_desiredRetention = clean;
+    m_store.setSetting("desired_retention", QString::number(clean, 'f', 2));
+    emit settingsChanged();
 }
 
 QString Backend::mathEngine() const {
@@ -469,14 +557,15 @@ void Backend::answerReview(int rating) {
         state = FsrsState{};
 
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    const ReviewResult result = Fsrs::review(state, rating, now);
+    const bool wasNew = state.reps == 0;
+    const ReviewResult result = Fsrs::review(state, rating, now, m_desiredRetention);
     m_store.save(card->id, hash, result.state);
-    m_store.logReview(card->id, rating, now, result.state, result.intervalDays);
+    m_store.logReview(card->id, rating, now, result.state, result.intervalDays, wasNew);
     if (!m_reviewQueue.isEmpty() && m_reviewQueue.first() == card->id)
         m_reviewQueue.removeFirst();
     else
         m_reviewQueue.removeAll(card->id);
-    m_dueCount = countDue();
+    m_dueCount = availableCount();
     emit dueCountChanged();
 }
 
@@ -892,6 +981,9 @@ QVariantMap Backend::statsSummary() const {
     result.insert("due", m_dueCount);
     result.insert("cards", totalCards());
     result.insert("decks", m_deckNames.size());
+    result.insert("newToday", summary.newToday);
+    result.insert("newPerDay", m_newPerDay);
+    result.insert("retention", qRound(m_desiredRetention * 100));
     result.insert("sessionReviewed", m_reviewed);
     result.insert("sessionCorrect", m_correct);
     return result;

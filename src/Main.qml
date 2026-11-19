@@ -19,6 +19,7 @@ ApplicationWindow {
 
     property bool helpVisible: false
     property bool statsVisible: false
+    property bool settingsVisible: false
     property var statsData: ({})
     property string editCardId: ""
 
@@ -75,6 +76,14 @@ ApplicationWindow {
                 }
                 return;
             }
+            if (settingsVisible) {
+                if (event.key === Qt.Key_Escape) {
+                    settingsVisible = false;
+                    keyHandler.forceActiveFocus();
+                    event.accepted = true;
+                }
+                return;
+            }
             switch (event.key) {
             case Qt.Key_Space:
             case Qt.Key_Up:
@@ -113,6 +122,13 @@ ApplicationWindow {
                 openStats();
                 event.accepted = true;
                 break;
+            case Qt.Key_Comma:
+                newPerDaySpin.value = backend.newPerDay
+                retentionSlider.value = backend.desiredRetention
+                settingsVisible = true;
+                newPerDaySpin.forceActiveFocus();
+                event.accepted = true;
+                break;
             case Qt.Key_D:
                 newDeckDialog.open();
                 event.accepted = true;
@@ -148,6 +164,7 @@ ApplicationWindow {
             case Qt.Key_Escape:
                 helpVisible = false;
                 statsVisible = false;
+                settingsVisible = false;
                 if (browserDrawer.opened)
                     browserDrawer.close()
                 keyHandler.forceActiveFocus();
@@ -215,6 +232,20 @@ ApplicationWindow {
                     Label {
                         text: qsTr("%1 due").arg(backend.dueCount)
                         color: theme.accent
+                    }
+                    ToolButton {
+                        text: "⚙"
+                        ToolTip.visible: hovered
+                        ToolTip.text: qsTr("Settings (,)")
+                        onClicked: {
+                            newPerDaySpin.value = backend.newPerDay
+                            retentionSlider.value = backend.desiredRetention
+                            settingsVisible = !settingsVisible
+                            if (settingsVisible)
+                                newPerDaySpin.forceActiveFocus()
+                            else
+                                keyHandler.forceActiveFocus()
+                        }
                     }
                     ToolButton {
                         text: "?"
@@ -324,6 +355,7 @@ ApplicationWindow {
         width: Math.min(560, win.width - 40)
         height: Math.min(480, win.height - 40)
         modal: true
+        closePolicy: Popup.CloseOnEscape
         padding: 24
         onClosed: { helpVisible = false; keyHandler.forceActiveFocus() }
         background: Rectangle {
@@ -353,6 +385,7 @@ ApplicationWindow {
                         [qsTr("New deck"), "D"],
                         [qsTr("Browse / search"), "B"],
                         [qsTr("Stats"), "S"],
+                        [qsTr("Settings"), ","],
                         [qsTr("Undo / redo"), "Ctrl+Z / Ctrl+Shift+Z"],
                         [qsTr("Import"), "I"],
                         [qsTr("Edit deck file"), "E"],
@@ -379,8 +412,9 @@ ApplicationWindow {
         visible: statsVisible
         anchors.centerIn: parent
         width: Math.min(420, win.width - 40)
-        height: 330
+        height: Math.min(430, win.height - 40)
         modal: true
+        closePolicy: Popup.CloseOnEscape
         padding: 24
         onClosed: { statsVisible = false; keyHandler.forceActiveFocus() }
         background: Rectangle {
@@ -400,6 +434,8 @@ ApplicationWindow {
                 model: [
                     [qsTr("Reviews today"), (statsData.today || 0)],
                     [qsTr("Accuracy today"), (statsData.accuracy || 0) + "%"],
+                    [qsTr("New cards today"), qsTr("%1 of %2").arg((statsData.newToday || 0)).arg((statsData.newPerDay || 0))],
+                    [qsTr("Desired retention"), (statsData.retention || 90) + "%"],
                     [qsTr("Streak"), qsTr("%1 days").arg((statsData.streakDays || 0))],
                     [qsTr("Total reviews"), (statsData.totalReviews || 0)],
                     [qsTr("Due now"), (statsData.due || 0)],
@@ -417,6 +453,96 @@ ApplicationWindow {
             Label {
                 text: qsTr("Press Escape to close")
                 color: "#8e8e98"
+            }
+        }
+    }
+
+    Popup {
+        id: settingsPopup
+        parent: win.contentItem
+        visible: settingsVisible
+        anchors.centerIn: parent
+        width: Math.min(440, win.width - 40)
+        height: 360
+        modal: true
+        closePolicy: Popup.CloseOnEscape
+        padding: 24
+        onClosed: { settingsVisible = false; keyHandler.forceActiveFocus() }
+        background: Rectangle {
+            color: "#17171b"
+            radius: Math.min(8, theme.radius)
+            border.color: "#33333d"
+        }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 14
+            Label {
+                text: qsTr("Settings")
+                font.pixelSize: 22
+                font.bold: true
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: qsTr("New cards per day"); Layout.fillWidth: true }
+                SpinBox {
+                    id: newPerDaySpin
+                    from: 0
+                    to: 999
+                    editable: true
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("New cards join review sessions up to this limit each day. Set 0 to study only cards already in review.")
+                color: "#8e8e98"
+                wrapMode: Text.WordWrap
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: qsTr("Desired retention"); Layout.fillWidth: true }
+                Label {
+                    text: Math.round(retentionSlider.value * 100) + "%"
+                    color: theme.accent
+                    font.bold: true
+                }
+            }
+            Slider {
+                id: retentionSlider
+                Layout.fillWidth: true
+                from: 0.70
+                to: 0.99
+                stepSize: 0.01
+                snapMode: Slider.SnapAlways
+            }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Higher retention shortens intervals and means more reviews. Changes apply to future answers.")
+                color: "#8e8e98"
+                wrapMode: Text.WordWrap
+            }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Math: %1").arg(backend.mathEngine)
+                color: "#8e8e98"
+            }
+            Item { Layout.fillHeight: true }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                Button {
+                    text: qsTr("Cancel")
+                    onClicked: settingsVisible = false
+                }
+                Button {
+                    text: qsTr("Save")
+                    highlighted: true
+                    onClicked: {
+                        backend.setNewPerDay(newPerDaySpin.value)
+                        backend.setDesiredRetention(retentionSlider.value)
+                        settingsVisible = false
+                        keyHandler.forceActiveFocus()
+                    }
+                }
             }
         }
     }

@@ -32,6 +32,7 @@ Requirements: Qt 6 (base, declarative, wayland, SQL), qmake6, gcc/make. Optional
 | `D` | New deck |
 | `B` | Browse and search cards |
 | `S` | Stats for today and this session |
+| `,` | Settings: new cards per day and desired retention |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo a card or deck edit |
 | `I` | Import a file |
 | `E` | Open the current deck file in your editor |
@@ -43,6 +44,17 @@ Requirements: Qt 6 (base, declarative, wayland, SQL), qmake6, gcc/make. Optional
 Closing the window hides it to the system tray. The tray tooltip shows the number of due cards; clicking it opens a review session.
 
 `B` opens the card browser. It searches questions, answers and tags, and each card can be edited or deleted there. Card and deck edits are undoable with `Ctrl+Z`; `Ctrl+Shift+Z` (or `Ctrl+Y`) redoes them. The same history covers cards added from the GUI, CLI imports and deck deletions. Review answers are intentionally not undoable, so a lapse cannot be erased by accident.
+
+## Settings
+
+Press `,` (or the gear button) to open settings. Both values are stored in the SQLite sidecar and apply immediately after saving.
+
+![omacards settings](docs/settings.png)
+
+- **New cards per day** (default 20) caps how many never-reviewed cards enter a review session. This keeps a large Anki import manageable. Set it to 0 to study only cards that are already in review.
+- **Desired retention** (default 90%) is the FSRS target used when intervals are calculated. Higher values shorten intervals and mean more reviews; lower values stretch intervals. The change affects future answers, not existing due dates.
+
+Due reviews are shown before new cards, and new cards follow deck-file order. The tray count and due badge reflect the cards actually available now, after the daily limit. `omacards config` exposes the same two settings to agents.
 
 ## Deck format
 
@@ -83,6 +95,8 @@ omacards due --deck Spanish --json
 omacards review -c <card-id> -r 3 --json
 omacards cram --deck Spanish --steps 20 --json
 omacards stats --json
+omacards config --json
+omacards config --new-per-day 10 --retention 0.9 --json
 omacards skill install --json
 ```
 

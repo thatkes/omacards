@@ -12,6 +12,7 @@ struct ReviewSummary {
     int today = 0;
     int todayCorrect = 0;
     int streakDays = 0;
+    int newToday = 0;
 };
 
 // The SQLite sidecar. Deck files own card content; this database owns only
@@ -26,9 +27,13 @@ public:
     QHash<QString, QString> hashes() const;
     void save(const QString &cardId, const QString &hash, const FsrsState &state);
     void logReview(const QString &cardId, int rating, qint64 at,
-                   const FsrsState &state, int intervalDays);
+                   const FsrsState &state, int intervalDays, bool wasNew = false);
     void removeExcept(const QSet<QString> &ids);
     ReviewSummary summary() const;
+    int newCardsToday() const;
+
+    QString setting(const QString &key, const QString &fallback = {}) const;
+    bool setSetting(const QString &key, const QString &value);
 
     QString path() const { return m_path; }
 

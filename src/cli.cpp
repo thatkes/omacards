@@ -32,6 +32,8 @@ struct Options {
     QString path;
     int rating = 0;
     int steps = 10;
+    int newPerDay = -1;
+    double retention = -1.0;
     bool json = false;
     bool questionSet = false;
     bool answerSet = false;
@@ -43,7 +45,7 @@ bool isHeadlessCommand(const QString &command) {
     static const QStringList commands{
         "check", "decks", "cards", "search", "add-deck", "add-card", "edit-card",
         "delete-card", "delete-deck", "import", "due", "review", "cram", "skill",
-        "stats", "help",
+        "stats", "config", "help",
     };
     return commands.contains(command);
 }
@@ -65,6 +67,8 @@ Options parse(const QStringList &arguments) {
         else if (arg == "--card" || arg == "-c") options.card = value();
         else if (arg == "--rating" || arg == "-r") options.rating = value().toInt();
         else if (arg == "--steps") options.steps = value().toInt();
+        else if (arg == "--new-per-day") options.newPerDay = value().toInt();
+        else if (arg == "--retention") options.retention = value().toDouble();
         else if (arg.startsWith("--deck=")) options.deck = arg.section('=', 1);
         else if (arg.startsWith("--question=")) { options.question = arg.section('=', 1); options.questionSet = true; }
         else if (arg.startsWith("--answer=")) { options.answer = arg.section('=', 1); options.answerSet = true; }
@@ -139,6 +143,7 @@ QString usage() {
         "  omacards review -c ID -r 1|3 [--json]\n"
         "  omacards cram [-d D] [--steps N] [--json]\n"
         "  omacards stats [--json]\n"
+        "  omacards config [--new-per-day N] [--retention 0.70-0.99] [--json]\n"
         "  omacards skill install [--json]\n");
 }
 }
@@ -167,7 +172,7 @@ int run(const QStringList &arguments) {
 
     if (options.command == "check") {
         const int total = allCards(decks, {}).size();
-        const int due = backend.countDue();
+        const int due = backend.availableCount();
         QJsonArray deckArray;
         for (const Deck &deck : decks) {
             QJsonObject object;
@@ -181,11 +186,39 @@ int run(const QStringList &arguments) {
         object.insert("decks", deckArray);
         object.insert("cards", total);
         object.insert("due", due);
+        object.insert("totalDue", backend.countDue());
+        object.insert("newToday", backend.reviewSummary().newToday);
+        object.insert("newPerDay", backend.newPerDay());
+        object.insert("retention", backend.desiredRetention());
         object.insert("math", backend.mathEngine());
         object.insert("decksDir", backend.decksDirectory());
         object.insert("database", backend.databasePath());
         write(object, json, QObject::tr("%1 decks · %2 cards · %3 due · math: %4")
               .arg(decks.size()).arg(total).arg(due).arg(backend.mathEngine()));
+        return 0;
+    }
+
+    if (options.command == "config") {
+        if (options.retention > 0 && (options.retention < 0.70 || options.retention > 0.99))
+            return fail(QObject::tr("Retention must be between 0.70 and 0.99"), json);
+        if (options.newPerDay > 9999)
+            return fail(QObject::tr("New cards per day must be 9999 or less"), json);
+        if (options.newPerDay >= 0)
+            backend.setNewPerDay(options.newPerDay);
+        if (options.retention > 0)
+            backend.setDesiredRetention(options.retention);
+        const ReviewSummary summary = backend.reviewSummary();
+        QJsonObject object;
+        object.insert("ok", true);
+        object.insert("newPerDay", backend.newPerDay());
+        object.insert("retention", backend.desiredRetention());
+        object.insert("newToday", summary.newToday);
+        object.insert("newRemaining", qMax(0, backend.newPerDay() - summary.newToday));
+        write(object, json,
+              QObject::tr("New cards/day: %1 · reviewed new today: %2 · desired retention: %3%")
+                  .arg(backend.newPerDay())
+                  .arg(summary.newToday)
+                  .arg(qRound(backend.desiredRetention() * 100)));
         return 0;
     }
 
@@ -197,12 +230,15 @@ int run(const QStringList &arguments) {
         object.insert("today", summary.today);
         object.insert("todayCorrect", summary.todayCorrect);
         object.insert("streakDays", summary.streakDays);
-        object.insert("due", backend.countDue());
+        object.insert("newToday", summary.newToday);
+        object.insert("newPerDay", backend.newPerDay());
+        object.insert("due", backend.availableCount());
+        object.insert("totalDue", backend.countDue());
         object.insert("cards", allCards(decks, {}).size());
         object.insert("decks", decks.size());
         const int accuracy = summary.today > 0 ? qRound(100.0 * summary.todayCorrect / summary.today) : 0;
         write(object, json, QObject::tr("%1 reviews today · %2% correct · %3 day streak · %4 due")
-              .arg(summary.today).arg(accuracy).arg(summary.streakDays).arg(backend.countDue()));
+              .arg(summary.today).arg(accuracy).arg(summary.streakDays).arg(backend.availableCount()));
         return 0;
     }
 
@@ -362,14 +398,16 @@ int run(const QStringList &arguments) {
     }
 
     if (options.command == "due") {
+        const QVector<Card> cards = backend.dueCards(options.deck);
         QJsonArray array;
-        for (const Card &card : allCards(decks, options.deck))
+        for (const Card &card : cards)
             array << cardJson(card);
         QJsonObject object;
         object.insert("ok", true);
-        object.insert("count", backend.countDue(options.deck));
+        object.insert("count", cards.size());
+        object.insert("totalDue", backend.countDue(options.deck));
         object.insert("cards", array);
-        write(object, json, QString::number(backend.countDue(options.deck)));
+        write(object, json, QString::number(cards.size()));
         return 0;
     }
 
@@ -391,9 +429,10 @@ int run(const QStringList &arguments) {
         if (store.hashes().value(target->id) != DeckIO::contentHash(*target))
             state = FsrsState{};
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        const ReviewResult result = Fsrs::review(state, options.rating, now);
+        const bool wasNew = state.reps == 0;
+        const ReviewResult result = Fsrs::review(state, options.rating, now, backend.desiredRetention());
         store.save(target->id, DeckIO::contentHash(*target), result.state);
-        store.logReview(target->id, options.rating, now, result.state, result.intervalDays);
+        store.logReview(target->id, options.rating, now, result.state, result.intervalDays, wasNew);
 
         QJsonObject object;
         object.insert("ok", true);

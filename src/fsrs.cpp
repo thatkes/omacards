@@ -25,8 +25,9 @@ double Fsrs::initialDifficulty(int rating) {
     return clamp(weights[4] - qExp(weights[5] * (grade - 1)) + 1.0, 1.0, 10.0);
 }
 
-int Fsrs::interval(double stability) {
-    const double modifier = (qPow(desiredRetention, 1.0 / decay) - 1.0) / factor;
+int Fsrs::interval(double stability, double retention) {
+    const double desired = qBound(0.70, retention, 0.99);
+    const double modifier = (qPow(desired, 1.0 / decay) - 1.0) / factor;
     const auto days = static_cast<int>(qRound(stability * modifier));
     return clamp(days, 1, maximumInterval);
 }
@@ -38,7 +39,7 @@ double Fsrs::retrievability(const FsrsState &state, qint64 nowMs) {
     return qPow(1.0 + factor * elapsed / state.stability, decay);
 }
 
-ReviewResult Fsrs::review(const FsrsState &state, int rating, qint64 nowMs) {
+ReviewResult Fsrs::review(const FsrsState &state, int rating, qint64 nowMs, double retention) {
     const int grade = static_cast<int>(clamp(rating, 1, 4));
     const double elapsedDays = state.lastReview > 0
         ? qMax(0.0, (nowMs - state.lastReview) / 86400000.0)
@@ -88,7 +89,7 @@ ReviewResult Fsrs::review(const FsrsState &state, int rating, qint64 nowMs) {
     if (grade == 1)
         ++next.lapses;
 
-    const int days = interval(next.stability);
+    const int days = interval(next.stability, retention);
     next.due = nowMs + static_cast<qint64>(days) * 86400000LL;
 
     return ReviewResult{next, days, recall};

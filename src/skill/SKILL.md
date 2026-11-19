@@ -35,6 +35,8 @@ omacards due --json
 omacards review -c <card-id> -r 3 --json
 omacards cram --deck Spanish --steps 20 --json
 omacards stats --json
+omacards config --json
+omacards config --new-per-day 10 --retention 0.9 --json
 ```
 
 ## Hand-edited deck format
@@ -59,3 +61,13 @@ After editing a file by hand, run `omacards check --json` to validate it.
 
 - `1` = Again (forgot)
 - `3` = Good (recalled)
+
+## Scheduling settings
+
+`omacards config` reads the daily new-card limit and FSRS desired retention.
+Use `--new-per-day N` and `--retention R` (0.70–0.99) to change them. `due`,
+`check` and `stats` already account for the daily new-card limit. `totalDue`
+in their JSON is the unclamped count.
+
+Editing a card without an explicit `id:` line changes its id, so use the id
+returned by `edit-card` for any follow-up `review` or `delete-card`.
