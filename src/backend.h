@@ -47,6 +47,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString currentCardId READ currentCardId NOTIFY cardChanged)
     Q_PROPERTY(int newPerDay READ newPerDay WRITE setNewPerDay NOTIFY settingsChanged)
     Q_PROPERTY(double desiredRetention READ desiredRetention WRITE setDesiredRetention NOTIFY settingsChanged)
+    Q_PROPERTY(QString decksDirectory READ decksDirectory CONSTANT)
 
 public:
     explicit Backend(const QString &decksDirectory = {}, const QString &databasePath = {},

@@ -300,6 +300,72 @@ private slots:
         QVERIFY(relaxed.intervalDays >= strict.intervalDays);
     }
 
+    void backendReportsNewCountAndDeckSummaries() {
+        QTemporaryDir dir;
+        Backend backend(dir.path(), dir.filePath("state.db"));
+        QString error;
+        QVERIFY(backend.initialize(&error));
+        QVERIFY(backend.createDeck("Alpha", &error));
+        for (int i = 0; i < 4; ++i)
+            QVERIFY(backend.createCard("Alpha", QString("A%1").arg(i), "a", "basic", {}, &error));
+        QVERIFY(backend.createDeck("Beta", &error));
+        QVERIFY(backend.createCard("Beta", "B0", "b", "basic", {}, &error));
+
+        QCOMPARE(backend.totalCards(), 5);
+        QCOMPARE(backend.newCount(), 5);
+
+        const QVariantList summaries = backend.deckSummaries();
+        QCOMPARE(summaries.size(), 2);
+        QCOMPARE(summaries.at(0).toMap().value("name").toString(), QString("Alpha"));
+        QCOMPARE(summaries.at(0).toMap().value("cards").toInt(), 4);
+        QCOMPARE(summaries.at(0).toMap().value("new").toInt(), 4);
+        QCOMPARE(summaries.at(1).toMap().value("name").toString(), QString("Beta"));
+
+        backend.setNewPerDay(3);
+        QCOMPARE(backend.newCount(), 3);
+        const QVariantList capped = backend.deckSummaries();
+        QCOMPARE(capped.at(0).toMap().value("new").toInt(), 3);
+        QCOMPARE(capped.at(1).toMap().value("new").toInt(), 0);
+    }
+
+    void qmlCanNavigateLibraryCards() {
+        QTemporaryDir dir;
+        Backend backend(dir.path(), dir.filePath("state.db"));
+        QString error;
+        QVERIFY(backend.initialize(&error));
+        QVERIFY(backend.createDeck("Test", &error));
+        for (int i = 0; i < 3; ++i)
+            QVERIFY(backend.createCard("Test", QString("Q%1").arg(i), "A", "basic", {}, &error));
+        backend.selectDeck("Test");
+
+        QQmlEngine engine;
+        Theme theme;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        QQmlComponent component(&engine,
+                                QUrl::fromLocalFile(QStringLiteral(OMACARDS_SOURCE_DIR) + "/Main.qml"));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QObject *window = component.create();
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QCOMPARE(window->property("cardIndex").toInt(), 0);
+        QVERIFY(QMetaObject::invokeMethod(window, "moveCardSelection", Q_ARG(QVariant, 1)));
+        QCOMPARE(window->property("cardIndex").toInt(), 1);
+        QVERIFY(QMetaObject::invokeMethod(window, "moveCardSelection", Q_ARG(QVariant, -1)));
+        QCOMPARE(window->property("cardIndex").toInt(), 0);
+        QVERIFY(QMetaObject::invokeMethod(window, "moveCardSelection", Q_ARG(QVariant, -1)));
+        QCOMPARE(window->property("cardIndex").toInt(), 2); // wraps around
+
+        QVariant selected;
+        QVERIFY(QMetaObject::invokeMethod(window, "selectedCard", Q_RETURN_ARG(QVariant, selected)));
+        QCOMPARE(selected.toMap().value("question").toString(), QString("Q2"));
+
+        QVERIFY(QMetaObject::invokeMethod(window, "removeSelectedCard"));
+        QCOMPARE(backend.totalCards(), 2);
+        QCOMPARE(backend.cardList().size(), 2);
+        delete window;
+    }
+
     void backendAppliesNewCardLimit() {
         QTemporaryDir dir;
         const QString database = dir.filePath("state.db");

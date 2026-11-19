@@ -31,6 +31,10 @@ Requirements: Qt 6 (base, declarative, wayland, SQL), qmake6, gcc/make. Optional
 | `N` | New card |
 | `D` | New deck |
 | `B` | Browse and search cards |
+| `J` / `K` | Move the card selection in the library (wraps around) |
+| `Enter` | Edit the selected card in the library |
+| `Delete` / `Backspace` | Delete the selected card in the library |
+| `/` | Focus library search |
 | `S` | Stats for today and this session |
 | `,` | Settings: new cards per day and desired retention |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo a card or deck edit |
@@ -43,7 +47,7 @@ Requirements: Qt 6 (base, declarative, wayland, SQL), qmake6, gcc/make. Optional
 
 Closing the window hides it to the system tray. The tray tooltip shows the number of due cards; clicking it opens a review session.
 
-`B` opens the card browser. It searches questions, answers and tags, and each card can be edited or deleted there. Card and deck edits are undoable with `Ctrl+Z`; `Ctrl+Shift+Z` (or `Ctrl+Y`) redoes them. The same history covers cards added from the GUI, CLI imports and deck deletions. Review answers are intentionally not undoable, so a lapse cannot be erased by accident.
+`B` opens the card browser. It searches questions, answers and tags, and each card can be edited or deleted there. The selected row is highlighted; `J`/`K` (or the arrow keys) move it, `Enter` edits it and `Delete` removes it. Clicking a row selects it, and `/` jumps to the search field. Card and deck edits are undoable with `Ctrl+Z`; `Ctrl+Shift+Z` (or `Ctrl+Y`) redoes them. The same history covers cards added from the GUI, CLI imports and deck deletions. Review answers are intentionally not undoable, so a lapse cannot be erased by accident.
 
 ## Settings
 

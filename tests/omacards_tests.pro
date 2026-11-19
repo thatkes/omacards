@@ -4,6 +4,7 @@ TARGET = omacards_tests
 TEMPLATE = app
 
 INCLUDEPATH += ../src
+DEFINES += OMACARDS_SOURCE_DIR=\\\"$$PWD/../src\\\"
 
 HEADERS += ../src/backend.h ../src/cli.h ../src/deck.h ../src/fsrs.h \
            ../src/mathrender.h ../src/store.h ../src/theme.h ../src/translator.h

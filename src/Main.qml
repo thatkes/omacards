@@ -31,6 +31,7 @@ ApplicationWindow {
     property var statsData: ({})
     property string editCardId: ""
     property string pendingDeck: ""
+    property int cardIndex: 0
 
     function withAlpha(color, alpha) {
         return Qt.rgba(color.r, color.g, color.b, alpha)
@@ -53,7 +54,36 @@ ApplicationWindow {
     function openLibrary() {
         backend.refresh()
         screen = "library"
+        cardIndex = Math.min(Math.max(cardIndex, 0), Math.max(0, backend.cardList.length - 1))
         keyHandler.forceActiveFocus()
+    }
+
+    function moveCardSelection(delta) {
+        const count = backend.cardList.length
+        if (count === 0)
+            return
+        let next = cardIndex + delta
+        if (next < 0) next = count - 1
+        if (next >= count) next = 0
+        cardIndex = next
+        cardView.positionViewAtIndex(next, ListView.Contain)
+    }
+
+    function selectedCard() {
+        const list = backend.cardList
+        if (list.length === 0 || cardIndex < 0 || cardIndex >= list.length)
+            return null
+        return list[cardIndex]
+    }
+
+    function editSelectedCard() {
+        const card = selectedCard()
+        if (card) openEditor(card)
+    }
+
+    function removeSelectedCard() {
+        const card = selectedCard()
+        if (card) backend.removeCard(card.id)
     }
 
     function openSettings() {
@@ -392,6 +422,35 @@ ApplicationWindow {
                         break
                     case Qt.Key_C:
                         startStudy("cram")
+                        event.accepted = true
+                        break
+                    }
+                }
+
+                if (screen === "library") {
+                    switch (event.key) {
+                    case Qt.Key_J:
+                    case Qt.Key_Down:
+                        win.moveCardSelection(1)
+                        event.accepted = true
+                        break
+                    case Qt.Key_K:
+                    case Qt.Key_Up:
+                        win.moveCardSelection(-1)
+                        event.accepted = true
+                        break
+                    case Qt.Key_Return:
+                    case Qt.Key_Enter:
+                        win.editSelectedCard()
+                        event.accepted = true
+                        break
+                    case Qt.Key_Delete:
+                    case Qt.Key_Backspace:
+                        win.removeSelectedCard()
+                        event.accepted = true
+                        break
+                    case Qt.Key_Slash:
+                        librarySearch.forceActiveFocus()
                         event.accepted = true
                         break
                     }
@@ -875,7 +934,10 @@ ApplicationWindow {
                                                 MouseArea {
                                                     anchors.fill: parent
                                                     cursorShape: Qt.PointingHandCursor
-                                                    onClicked: backend.selectDeck(deckRow.modelData.name)
+                                                    onClicked: {
+                                                        backend.selectDeck(deckRow.modelData.name)
+                                                        win.cardIndex = 0
+                                                    }
                                                 }
                                             }
                                         }
@@ -938,7 +1000,10 @@ ApplicationWindow {
                                             Layout.fillWidth: true
                                             placeholderText: qsTr("Search questions, answers and tags")
                                             text: backend.cardFilter
-                                            onTextChanged: backend.cardFilter = text
+                                            onTextChanged: {
+                                                backend.cardFilter = text
+                                                win.cardIndex = 0
+                                            }
                                             onAccepted: keyHandler.forceActiveFocus()
                                             Keys.onEscapePressed: {
                                                 win.goHome()
@@ -958,19 +1023,27 @@ ApplicationWindow {
                                         }
 
                                         ListView {
+                                            id: cardView
                                             Layout.fillWidth: true
                                             Layout.fillHeight: true
                                             clip: true
                                             spacing: 6
                                             model: backend.cardList
+                                            currentIndex: win.cardIndex
+                                            onCurrentIndexChanged: win.cardIndex = currentIndex
 
                                             delegate: Rectangle {
                                                 id: cardRow
                                                 required property var modelData
+                                                required property int index
                                                 width: ListView.view.width
                                                 height: 52
                                                 radius: Math.min(8, theme.radius)
-                                                color: hover.hovered ? win.raised : win.withAlpha(win.raised, 0.45)
+                                                color: cardRow.ListView.isCurrentItem
+                                                       ? win.withAlpha(theme.accent, 0.16)
+                                                       : hover.hovered ? win.raised : win.withAlpha(win.raised, 0.45)
+                                                border.width: cardRow.ListView.isCurrentItem ? 1 : 0
+                                                border.color: win.withAlpha(theme.accent, 0.6)
 
                                                 Rectangle {
                                                     width: 3
@@ -1021,13 +1094,23 @@ ApplicationWindow {
                                                 }
 
                                                 HoverHandler { id: hover }
+
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    z: -1
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: {
+                                                        win.cardIndex = cardRow.index
+                                                        keyHandler.forceActiveFocus()
+                                                    }
+                                                }
                                             }
                                         }
 
                                         RowLayout {
                                             Layout.fillWidth: true
                                             Label {
-                                                text: qsTr("Ctrl+Z undo")
+                                                text: qsTr("J/K move · Enter edit · Del delete · / search · Ctrl+Z undo")
                                                 color: win.muted
                                                 font.pixelSize: 11
                                             }
@@ -1315,6 +1398,10 @@ ApplicationWindow {
                         { keys: "2 / G / →", action: qsTr("Good") },
                         { keys: "R / C", action: qsTr("Review or cram mode") },
                         { keys: "B", action: qsTr("Open the library") },
+                        { keys: "J / K", action: qsTr("Move the card selection in the library") },
+                        { keys: "Enter", action: qsTr("Edit the selected card in the library") },
+                        { keys: "Del", action: qsTr("Delete the selected card in the library") },
+                        { keys: "/", action: qsTr("Focus library search") },
                         { keys: "S", action: qsTr("Stats for today and this session") },
                         { keys: ",", action: qsTr("Settings") },
                         { keys: "N / D", action: qsTr("New card or new deck") },
