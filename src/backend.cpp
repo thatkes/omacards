@@ -611,7 +611,7 @@ void Backend::flip() {
     emit cardChanged();
 }
 
-void Backend::answer(int rating) {
+void Backend::rate(int rating) {
     if (!hasCard())
         return;
     if (rating != 1 && rating != 3)

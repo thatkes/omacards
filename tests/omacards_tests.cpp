@@ -1,6 +1,9 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QQmlComponent>
+#include <QQmlContext>
+#include <QQmlEngine>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -147,11 +150,40 @@ private slots:
         for (int i = 0; i < 12; ++i) {
             backend.flip();
             QVERIFY(backend.showingAnswer());
-            backend.answer(i % 3 == 0 ? 1 : 3);
+            backend.rate(i % 3 == 0 ? 1 : 3);
             QVERIFY(backend.hasCard()); // endless: the card comes back on every box interval
         }
         QCOMPARE(backend.reviewed(), 12);
         QVERIFY(backend.correct() > 0);
+    }
+
+    void qmlCanRateCards() {
+        QTemporaryDir dir;
+        Backend backend(dir.path(), dir.filePath("state.db"));
+        QString error;
+        QVERIFY(backend.initialize(&error));
+        QVERIFY(backend.createDeck("Test", &error));
+        QVERIFY(backend.createCard("Test", "Question?", "Answer", "basic", {}, &error));
+        backend.selectDeck("Test");
+        backend.setMode("cram");
+        backend.flip();
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        QQmlComponent component(&engine);
+        component.setData(R"QML(
+            import QtQuick 2.15
+            QtObject {
+                Component.onCompleted: backend.rate(3)
+            }
+        )QML", QUrl("qrc:/rate-test.qml"));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QObject *object = component.create();
+        QVERIFY2(object, qPrintable(component.errorString()));
+        delete object;
+
+        QCOMPARE(backend.reviewed(), 1);
+        QCOMPARE(backend.correct(), 1);
     }
 
     void backendEditsCardsWithUndo() {
@@ -288,9 +320,9 @@ private slots:
             QCOMPARE(backend.reviewSummary().newToday, 0);
 
             backend.flip();
-            backend.answer(3);
+            backend.rate(3);
             backend.flip();
-            backend.answer(3);
+            backend.rate(3);
             QCOMPARE(backend.reviewSummary().newToday, 2);
             QCOMPARE(backend.availableCount(), 0);
             QCOMPARE(backend.dueCount(), 0);

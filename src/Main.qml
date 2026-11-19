@@ -120,7 +120,7 @@ ApplicationWindow {
         radius: Math.min(10, theme.radius)
         color: primary ? theme.accent : (hover.hovered ? raised : panel)
         border.width: primary ? 0 : 1
-        border.color: danger ? withAlpha(theme.red, 0.6) : border
+        border.color: danger ? withAlpha(theme.red, 0.6) : win.border
         opacity: enabled ? 1 : 0.4
         Behavior on color { ColorAnimation { duration: 90 } }
 
@@ -377,13 +377,13 @@ ApplicationWindow {
                     case Qt.Key_1:
                     case Qt.Key_A:
                     case Qt.Key_Left:
-                        backend.showingAnswer ? backend.answer(1) : backend.flip()
+                        backend.showingAnswer ? backend.rate(1) : backend.flip()
                         event.accepted = true
                         break
                     case Qt.Key_2:
                     case Qt.Key_G:
                     case Qt.Key_Right:
-                        backend.showingAnswer ? backend.answer(3) : backend.flip()
+                        backend.showingAnswer ? backend.rate(3) : backend.flip()
                         event.accepted = true
                         break
                     case Qt.Key_R:
@@ -724,7 +724,7 @@ ApplicationWindow {
                                     label: qsTr("Again")
                                     hint: "1"
                                     enabled: backend.hasCard && backend.showingAnswer
-                                    onClicked: { backend.answer(1); keyHandler.forceActiveFocus() }
+                                    onClicked: { backend.rate(1); keyHandler.forceActiveFocus() }
                                 }
 
                                 ActionButton {
@@ -732,7 +732,7 @@ ApplicationWindow {
                                     label: qsTr("Good")
                                     hint: "2"
                                     enabled: backend.hasCard && backend.showingAnswer
-                                    onClicked: { backend.answer(3); keyHandler.forceActiveFocus() }
+                                    onClicked: { backend.rate(3); keyHandler.forceActiveFocus() }
                                 }
 
                                 Item { Layout.fillWidth: true }

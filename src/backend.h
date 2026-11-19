@@ -108,7 +108,9 @@ public slots:
     Q_INVOKABLE void selectDeck(const QString &name);
     Q_INVOKABLE void setMode(const QString &mode);
     Q_INVOKABLE void flip();
-    Q_INVOKABLE void answer(int rating);
+    // Named `rate` rather than `answer` because `answer` is also the Q_PROPERTY
+    // holding the revealed answer text; QML resolves the property first.
+    Q_INVOKABLE void rate(int rating);
     Q_INVOKABLE void showNext();
     Q_INVOKABLE void newDeck(const QString &name);
     Q_INVOKABLE void addCard(const QString &question, const QString &answer);
