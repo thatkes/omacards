@@ -22,14 +22,19 @@ card's content changes.
 omacards check --json
 omacards decks --json
 omacards cards --deck Spanish --json
+omacards search gato --json
 omacards add-deck "Spanish" --json
 omacards add-card --deck Spanish -q 'What is "gato"?' -a 'cat' --tags vocab,animals --json
 omacards add-card --deck Physics -q 'Solve \\(x^2+1=0\\)' -a '\\(x=\\pm i\\)' --json
+omacards edit-card -c <card-id> -a 'a cat' --tags vocab --json
+omacards delete-card -c <card-id> --json
+omacards delete-deck Spanish --json
 omacards import ~/Downloads/deck.apkg --deck Spanish --json
 omacards import ~/Downloads/words.csv --deck Spanish --json
 omacards due --json
 omacards review -c <card-id> -r 3 --json
 omacards cram --deck Spanish --steps 20 --json
+omacards stats --json
 ```
 
 ## Hand-edited deck format

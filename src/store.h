@@ -7,6 +7,13 @@
 #include <QSqlDatabase>
 #include <QString>
 
+struct ReviewSummary {
+    int total = 0;
+    int today = 0;
+    int todayCorrect = 0;
+    int streakDays = 0;
+};
+
 // The SQLite sidecar. Deck files own card content; this database owns only
 // scheduling state, so deleting it never loses a card.
 class Store {
@@ -21,6 +28,7 @@ public:
     void logReview(const QString &cardId, int rating, qint64 at,
                    const FsrsState &state, int intervalDays);
     void removeExcept(const QSet<QString> &ids);
+    ReviewSummary summary() const;
 
     QString path() const { return m_path; }
 

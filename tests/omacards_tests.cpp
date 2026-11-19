@@ -1,5 +1,6 @@
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -75,6 +76,10 @@ private slots:
         QVERIFY(roundTrip.contains("# Deck: Spanish"));
         QVERIFY(roundTrip.contains("Q: What is \"gato\"?"));
         QVERIFY(roundTrip.contains("tags: vocab, animals"));
+        QVERIFY(roundTrip.contains("id: fixed-id"));
+
+        // Generated ids stay implicit so edited files remain readable.
+        QVERIFY(!roundTrip.contains("id: " + deck.cards.first().id));
     }
 
     void clozeCardsHideAndReveal() {
@@ -109,6 +114,18 @@ private slots:
         QCOMPARE(store.states().value("card-1").reps, 1);
         QCOMPARE(store.hashes().value("card-1"), QString("hash-1"));
         QCOMPARE(store.states().value("card-1").stability, state.stability);
+
+        store.removeExcept({});
+        QVERIFY(store.states().isEmpty());
+
+        const qint64 today = QDateTime::currentMSecsSinceEpoch();
+        store.logReview("card-2", 3, today, state, 3);
+        store.logReview("card-2", 1, today - 86400000LL, state, 1);
+        const ReviewSummary summary = store.summary();
+        QCOMPARE(summary.total, 3);
+        QCOMPARE(summary.today, 2);
+        QCOMPARE(summary.todayCorrect, 2);
+        QCOMPARE(summary.streakDays, 2);
     }
 
     void backendCreatesCardsAndCramsForever() {
@@ -135,6 +152,76 @@ private slots:
         }
         QCOMPARE(backend.reviewed(), 12);
         QVERIFY(backend.correct() > 0);
+    }
+
+    void backendEditsCardsWithUndo() {
+        QTemporaryDir dir;
+        Backend backend(dir.path(), dir.filePath("state.db"));
+        QString error;
+        QVERIFY(backend.initialize(&error));
+        QVERIFY(backend.createDeck("Test", &error));
+        QVERIFY(backend.createCard("Test", "Question?", "Answer", "basic", "tag", &error));
+
+        const Card original = backend.allDecks().last().cards.first();
+        const QString changedId = original.id;
+        QVERIFY(backend.modifyCard("Test", changedId, "Edited?", "Better", "cloze", "a, b", &error));
+        QVERIFY(error.isEmpty());
+        const Card edited = backend.allDecks().last().cards.first();
+        QCOMPARE(edited.question, QString("Edited?"));
+        QCOMPARE(edited.answer, QString("Better"));
+        QCOMPARE(edited.type, QString("cloze"));
+        QCOMPARE(edited.tags, QStringList({"a", "b"}));
+        QVERIFY(edited.id != changedId); // content hash follows edits
+        QVERIFY(backend.canUndo());
+
+        backend.undo();
+        QCOMPARE(backend.allDecks().last().cards.first().question, QString("Question?"));
+        QVERIFY(backend.canRedo());
+
+        backend.redo();
+        QCOMPARE(backend.allDecks().last().cards.first().question, QString("Edited?"));
+
+        QVERIFY(backend.deleteCard("Test", backend.allDecks().last().cards.first().id, &error));
+        QVERIFY(backend.allDecks().last().cards.isEmpty());
+        backend.undo();
+        QCOMPARE(backend.allDecks().last().cards.size(), 1);
+    }
+
+    void backendDeletesDeckAndUndoes() {
+        QTemporaryDir dir;
+        Backend backend(dir.path(), dir.filePath("state.db"));
+        QString error;
+        QVERIFY(backend.initialize(&error));
+        QVERIFY(backend.createDeck("Temporary", &error));
+        QVERIFY(backend.decks().contains("Temporary"));
+
+        QVERIFY(backend.removeDeck("Temporary", &error));
+        QVERIFY(!backend.decks().contains("Temporary"));
+        QVERIFY(!QFileInfo::exists(dir.filePath("Temporary.txt")));
+
+        backend.undo();
+        QVERIFY(backend.decks().contains("Temporary"));
+        QVERIFY(QFileInfo::exists(dir.filePath("Temporary.txt")));
+    }
+
+    void backendFiltersCardList() {
+        QTemporaryDir dir;
+        Backend backend(dir.path(), dir.filePath("state.db"));
+        QString error;
+        QVERIFY(backend.initialize(&error));
+        QVERIFY(backend.createDeck("Filter", &error));
+        QVERIFY(backend.createCard("Filter", "alpha question", "one", "basic", "red", &error));
+        QVERIFY(backend.createCard("Filter", "beta question", "two", "basic", "blue", &error));
+        backend.selectDeck("Filter");
+        QCOMPARE(backend.cardList().size(), 2);
+
+        backend.setCardFilter("blue");
+        QCOMPARE(backend.cardList().size(), 1);
+        QCOMPARE(backend.cardList().first().toMap().value("question").toString(), QString("beta question"));
+
+        backend.setCardFilter("alpha");
+        QCOMPARE(backend.cardList().size(), 1);
+        QCOMPARE(backend.searchCards("alpha").size(), 1);
     }
 
     void themeFallsBack() {

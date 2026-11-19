@@ -2,6 +2,8 @@
 
 ![omacards review screen](docs/screenshot.png)
 
+![omacards card browser](docs/browser.png)
+
 A keyboard-first flashcards app for Omarchy. It has two study modes:
 
 - **Review** — FSRS-5 long-term scheduling with Again and Good.
@@ -28,6 +30,9 @@ Requirements: Qt 6 (base, declarative, wayland, SQL), qmake6, gcc/make. Optional
 | `2`, `G`, `→` | Good |
 | `N` | New card |
 | `D` | New deck |
+| `B` | Browse and search cards |
+| `S` | Stats for today and this session |
+| `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo a card or deck edit |
 | `I` | Import a file |
 | `E` | Open the current deck file in your editor |
 | `C` | Cram mode |
@@ -36,6 +41,8 @@ Requirements: Qt 6 (base, declarative, wayland, SQL), qmake6, gcc/make. Optional
 | `Q` | Quit |
 
 Closing the window hides it to the system tray. The tray tooltip shows the number of due cards; clicking it opens a review session.
+
+`B` opens the card browser. It searches questions, answers and tags, and each card can be edited or deleted there. Card and deck edits are undoable with `Ctrl+Z`; `Ctrl+Shift+Z` (or `Ctrl+Y`) redoes them. The same history covers cards added from the GUI, CLI imports and deck deletions. Review answers are intentionally not undoable, so a lapse cannot be erased by accident.
 
 ## Deck format
 
@@ -64,13 +71,18 @@ Every command accepts `--json`, prints errors to stderr and exits 0 or 1.
 omacards check --json
 omacards decks --json
 omacards cards --deck Spanish --json
+omacards search gato --deck Spanish --json
 omacards add-deck Spanish --json
 omacards add-card --deck Spanish -q 'What is "gato"?' -a cat --tags vocab --json
+omacards edit-card -c <card-id> -a 'a cat' --json
+omacards delete-card -c <card-id> --json
+omacards delete-deck Spanish --json
 omacards import ~/Downloads/deck.apkg --deck Spanish --json
 omacards import ~/Downloads/words.csv --deck Spanish --json
 omacards due --deck Spanish --json
 omacards review -c <card-id> -r 3 --json
 omacards cram --deck Spanish --steps 20 --json
+omacards stats --json
 omacards skill install --json
 ```
 

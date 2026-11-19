@@ -10,12 +10,14 @@
 #include <QProcess>
 #include <QRandomGenerator>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QSet>
 #include <QSqlQuery>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTextStream>
 #include <QUrl>
+#include <QVariantMap>
 #include <QCryptographicHash>
 #include <algorithm>
 
@@ -99,6 +101,7 @@ void Backend::load() {
 
     emit decksChanged();
     emit currentDeckChanged();
+    emit cardsChanged();
     dueCountChanged();
 }
 
@@ -236,6 +239,148 @@ void Backend::setStatus(const QString &status) {
 void Backend::reportError(const QString &message) {
     setStatus(message);
     emit errorOccurred(message);
+}
+
+QByteArray Backend::readFileBytes(const QString &path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    return file.readAll();
+}
+
+void Backend::recordHistory(const QString &path, const QByteArray &before, bool existedBefore,
+                            const QString &description) {
+    const bool existsAfter = QFileInfo::exists(path);
+    const QByteArray after = existsAfter ? readFileBytes(path) : QByteArray();
+    if (existedBefore == existsAfter && before == after)
+        return;
+    m_undoStack.append(FileSnapshot{path, before, after, existedBefore, existsAfter, description});
+    if (m_undoStack.size() > 50)
+        m_undoStack.removeFirst();
+    m_redoStack.clear();
+    emit historyChanged();
+}
+
+bool Backend::applySnapshot(const FileSnapshot &snapshot, bool restoreBefore, QString *error) {
+    const bool exists = restoreBefore ? snapshot.existedBefore : snapshot.existsAfter;
+    if (!exists) {
+        if (QFileInfo::exists(snapshot.path) && !QFile::remove(snapshot.path)) {
+            if (error) *error = tr("Cannot remove %1").arg(snapshot.path);
+            return false;
+        }
+        return true;
+    }
+
+    QSaveFile file(snapshot.path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        if (error) *error = tr("Cannot write %1").arg(snapshot.path);
+        return false;
+    }
+    file.write(restoreBefore ? snapshot.before : snapshot.after);
+    if (!file.commit()) {
+        if (error) *error = tr("Cannot write %1").arg(snapshot.path);
+        return false;
+    }
+    return true;
+}
+
+void Backend::undo() {
+    if (m_undoStack.isEmpty()) {
+        setStatus(tr("Nothing to undo"));
+        return;
+    }
+    const FileSnapshot snapshot = m_undoStack.takeLast();
+    QString error;
+    if (!applySnapshot(snapshot, true, &error)) {
+        m_undoStack.append(snapshot);
+        reportError(error);
+        return;
+    }
+    m_redoStack.append(snapshot);
+    emit historyChanged();
+    refresh();
+    setStatus(tr("Undid %1").arg(snapshot.description));
+}
+
+void Backend::redo() {
+    if (m_redoStack.isEmpty()) {
+        setStatus(tr("Nothing to redo"));
+        return;
+    }
+    const FileSnapshot snapshot = m_redoStack.takeLast();
+    QString error;
+    if (!applySnapshot(snapshot, false, &error)) {
+        m_redoStack.append(snapshot);
+        reportError(error);
+        return;
+    }
+    m_undoStack.append(snapshot);
+    emit historyChanged();
+    refresh();
+    setStatus(tr("Redid %1").arg(snapshot.description));
+}
+
+QVariantList Backend::cardList() const {
+    QVariantList list;
+    const QString needle = m_cardFilter.trimmed().toLower();
+    const auto states = m_store.states();
+    const auto hashes = m_store.hashes();
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    for (const Deck &deck : m_decks) {
+        if (!m_currentDeck.isEmpty() && deck.name != m_currentDeck)
+            continue;
+        for (const Card &card : deck.cards) {
+            const QString haystack = (card.question + " " + card.answer + " " + card.tags.join(' ')).toLower();
+            if (!needle.isEmpty() && !haystack.contains(needle))
+                continue;
+            FsrsState state = states.value(card.id);
+            if (hashes.value(card.id) != DeckIO::contentHash(card))
+                state = FsrsState{};
+
+            QVariantMap entry;
+            entry.insert("id", card.id);
+            entry.insert("deck", deck.name);
+            entry.insert("question", card.question);
+            entry.insert("answer", card.answer);
+            entry.insert("type", card.type);
+            entry.insert("tags", card.tags.join(", "));
+            entry.insert("due", state.due);
+            entry.insert("isDue", state.due <= now);
+            entry.insert("new", state.reps == 0);
+            entry.insert("reps", state.reps);
+            entry.insert("dueText", state.reps == 0
+                             ? tr("new")
+                             : state.due <= now
+                                 ? tr("due now")
+                                 : QDateTime::fromMSecsSinceEpoch(state.due).toString("yyyy-MM-dd"));
+            list << entry;
+        }
+    }
+    return list;
+}
+
+QVector<Card> Backend::searchCards(const QString &text, const QString &deckName) const {
+    QVector<Card> result;
+    const QString needle = text.trimmed().toLower();
+    for (const Deck &deck : m_decks) {
+        if (!deckName.isEmpty() && deck.name != deckName)
+            continue;
+        for (const Card &card : deck.cards) {
+            const QString haystack = (card.question + " " + card.answer + " " + card.tags.join(' ')).toLower();
+            if (needle.isEmpty() || haystack.contains(needle))
+                result << card;
+        }
+    }
+    return result;
+}
+
+void Backend::setCardFilter(const QString &filter) {
+    if (m_cardFilter == filter)
+        return;
+    m_cardFilter = filter;
+    emit cardFilterChanged();
+    emit cardsChanged();
 }
 
 QString Backend::mathEngine() const {
@@ -380,8 +525,11 @@ bool Backend::createDeck(const QString &name, QString *error) {
     Deck deck;
     deck.name = clean;
     deck.path = QDir(m_decksDir).filePath(safeFileName(clean) + ".txt");
+    const bool existed = QFileInfo::exists(deck.path);
+    const QByteArray before = existed ? readFileBytes(deck.path) : QByteArray();
     if (!DeckIO::save(deck, error))
         return false;
+    recordHistory(deck.path, before, existed, tr("creating deck %1").arg(clean));
     refresh();
     selectDeck(clean);
     return true;
@@ -403,22 +551,62 @@ bool Backend::createCard(const QString &deckName, const QString &question, const
     card.question = question.trimmed();
     card.answer = answer.trimmed();
     card.type = type == "cloze" ? "cloze" : "basic";
-    for (const QString &tag : tags.split(',', Qt::SkipEmptyParts))
-        card.tags << tag.trimmed();
+    for (const QString &tag : tags.split(',', Qt::SkipEmptyParts)) {
+        const QString clean = tag.trimmed();
+        if (!clean.isEmpty() && !card.tags.contains(clean))
+            card.tags << clean;
+    }
     card.id = DeckIO::cardId(card);
     deck->cards << card;
+    const QByteArray before = readFileBytes(deck->path);
     if (!DeckIO::save(*deck, error))
         return false;
+    recordHistory(deck->path, before, true, tr("adding a card"));
     refresh();
     return true;
 }
 
-void Backend::addCard(const QString &question, const QString &answer) {
-    QString error;
-    if (!createCard(m_currentDeck, question, answer, "basic", {}, &error))
-        reportError(error);
-    else
-        setStatus(tr("Card added"));
+bool Backend::modifyCard(const QString &deckName, const QString &cardId, const QString &question,
+                         const QString &answer, const QString &type, const QString &tags,
+                         QString *error) {
+    Deck *deck = deckByName(deckName.isEmpty() ? m_currentDeck : deckName);
+    if (!deck) {
+        if (error) *error = tr("No such deck: %1").arg(deckName);
+        return false;
+    }
+    Card *card = nullptr;
+    for (Card &candidate : deck->cards)
+        if (candidate.id == cardId)
+            card = &candidate;
+    if (!card) {
+        if (error) *error = tr("No such card: %1").arg(cardId);
+        return false;
+    }
+    if (question.trimmed().isEmpty()) {
+        if (error) *error = tr("A card needs a question");
+        return false;
+    }
+
+    card->question = question.trimmed();
+    card->answer = answer.trimmed();
+    card->type = type == "cloze" ? "cloze" : "basic";
+    card->tags.clear();
+    for (const QString &tag : tags.split(',', Qt::SkipEmptyParts)) {
+        const QString clean = tag.trimmed();
+        if (!clean.isEmpty() && !card->tags.contains(clean))
+            card->tags << clean;
+    }
+    // An explicit id pinned in the file survives edits; a generated id follows
+    // the content so the card resets its schedule when it changes.
+    if (!card->explicitId)
+        card->id = DeckIO::cardId(*card);
+
+    const QByteArray before = readFileBytes(deck->path);
+    if (!DeckIO::save(*deck, error))
+        return false;
+    recordHistory(deck->path, before, true, tr("editing a card"));
+    refresh();
+    return true;
 }
 
 bool Backend::deleteCard(const QString &deckName, const QString &cardId, QString *error) {
@@ -435,20 +623,85 @@ bool Backend::deleteCard(const QString &deckName, const QString &cardId, QString
         if (error) *error = tr("No such card: %1").arg(cardId);
         return false;
     }
+    const QByteArray contents = readFileBytes(deck->path);
     if (!DeckIO::save(*deck, error))
         return false;
+    recordHistory(deck->path, contents, true, tr("removing a card"));
     refresh();
     return true;
+}
+
+bool Backend::removeDeck(const QString &name, QString *error) {
+    const Deck *deck = deckByName(name);
+    if (!deck) {
+        if (error) *error = tr("No such deck: %1").arg(name);
+        return false;
+    }
+    const QString path = deck->path;
+    const QByteArray before = readFileBytes(path);
+    if (!QFile::remove(path)) {
+        if (error) *error = tr("Cannot remove deck file: %1").arg(path);
+        return false;
+    }
+    recordHistory(path, before, true, tr("deleting deck %1").arg(name));
+    if (m_currentDeck == name)
+        m_currentDeck.clear();
+    refresh();
+    return true;
+}
+
+void Backend::addCard(const QString &question, const QString &answer) {
+    QString error;
+    if (!createCard(m_currentDeck, question, answer, "basic", {}, &error))
+        reportError(error);
+    else
+        setStatus(tr("Card added"));
+}
+
+void Backend::addCardDetails(const QString &question, const QString &answer, const QString &type,
+                             const QString &tags) {
+    QString error;
+    if (!createCard(m_currentDeck, question, answer, type, tags, &error))
+        reportError(error);
+    else
+        setStatus(tr("Card added"));
+}
+
+void Backend::updateCard(const QString &cardId, const QString &question, const QString &answer,
+                         const QString &type, const QString &tags) {
+    QString error;
+    if (!modifyCard(m_currentDeck, cardId, question, answer, type, tags, &error))
+        reportError(error);
+    else
+        setStatus(tr("Card updated"));
 }
 
 void Backend::removeCurrentCard() {
     if (m_currentId.isEmpty())
         return;
+    removeCard(m_currentId);
+}
+
+void Backend::removeCard(const QString &cardId) {
     QString error;
-    if (!deleteCard(m_currentDeck, m_currentId, &error))
+    if (!deleteCard(m_currentDeck, cardId, &error))
         reportError(error);
     else
         setStatus(tr("Card removed"));
+}
+
+void Backend::deleteDeck(const QString &name) {
+    QString error;
+    if (!removeDeck(name, &error))
+        reportError(error);
+    else
+        setStatus(tr("Deck removed"));
+}
+
+void Backend::deleteCurrentDeck() {
+    if (m_currentDeck.isEmpty())
+        return;
+    deleteDeck(m_currentDeck);
 }
 
 QStringList Backend::splitDelimited(const QString &line, QChar delimiter) {
@@ -624,4 +877,22 @@ QString Backend::statsText() const {
     const double accuracy = m_reviewed > 0 ? 100.0 * m_correct / m_reviewed : 0.0;
     return tr("%1 reviewed · %2% correct · box %3")
         .arg(m_reviewed).arg(qRound(accuracy)).arg(m_box);
+}
+
+QVariantMap Backend::statsSummary() const {
+    const ReviewSummary summary = m_store.summary();
+    QVariantMap result;
+    result.insert("totalReviews", summary.total);
+    result.insert("today", summary.today);
+    result.insert("todayCorrect", summary.todayCorrect);
+    result.insert("streakDays", summary.streakDays);
+    result.insert("accuracy", summary.today > 0
+                      ? qRound(100.0 * summary.todayCorrect / summary.today)
+                      : 0);
+    result.insert("due", m_dueCount);
+    result.insert("cards", totalCards());
+    result.insert("decks", m_deckNames.size());
+    result.insert("sessionReviewed", m_reviewed);
+    result.insert("sessionCorrect", m_correct);
+    return result;
 }

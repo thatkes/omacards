@@ -1,5 +1,7 @@
 #include "store.h"
 
+#include <QDate>
+#include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
 #include <QSqlError>
@@ -140,7 +142,41 @@ void Store::removeExcept(const QSet<QString> &ids) {
     }
     query.prepare("DELETE FROM cards WHERE id = ?");
     for (const QString &id : stale) {
-        query.addBindValue(id);
+        query.bindValue(0, id);
         query.exec();
     }
+}
+
+ReviewSummary Store::summary() const {
+    ReviewSummary result;
+    if (!m_db.isOpen())
+        return result;
+    QSqlQuery query(m_db);
+    if (!query.exec("SELECT at, rating FROM reviews ORDER BY at"))
+        return result;
+
+    const QDate today = QDate::currentDate();
+    QSet<QDate> days;
+    while (query.next()) {
+        const QDateTime at = QDateTime::fromMSecsSinceEpoch(query.value(0).toLongLong());
+        const QDate day = at.date();
+        days.insert(day);
+        ++result.total;
+        if (day == today) {
+            ++result.today;
+            if (query.value(1).toInt() == 3)
+                ++result.todayCorrect;
+        }
+    }
+
+    // A streak survives until midnight after a review day, so a user who has
+    // not reviewed yet today still sees yesterday's total.
+    QDate cursor = today;
+    if (!days.contains(cursor))
+        cursor = cursor.addDays(-1);
+    while (days.contains(cursor)) {
+        ++result.streakDays;
+        cursor = cursor.addDays(-1);
+    }
+    return result;
 }

@@ -12,6 +12,7 @@ struct Card {
     QString deck;
     QString type = "basic"; // basic | cloze
     QStringList tags;
+    bool explicitId = false; // an `id:` line pins identity across edits
 };
 
 struct Deck {

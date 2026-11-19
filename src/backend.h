@@ -5,10 +5,12 @@
 #include "mathrender.h"
 #include "store.h"
 
+#include <QByteArray>
 #include <QFileSystemWatcher>
 #include <QObject>
 #include <QStringList>
 #include <QTimer>
+#include <QVariantList>
 #include <QVector>
 
 struct CramEntry {
@@ -33,6 +35,11 @@ class Backend : public QObject {
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(QString mathEngine READ mathEngine CONSTANT)
     Q_PROPERTY(int totalCards READ totalCards NOTIFY decksChanged)
+    Q_PROPERTY(QVariantList cardList READ cardList NOTIFY cardsChanged)
+    Q_PROPERTY(QString cardFilter READ cardFilter WRITE setCardFilter NOTIFY cardFilterChanged)
+    Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyChanged)
+    Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyChanged)
+    Q_PROPERTY(QString currentCardId READ currentCardId NOTIFY cardChanged)
 
 public:
     explicit Backend(const QString &decksDirectory = {}, const QString &databasePath = {},
@@ -56,15 +63,26 @@ public:
     int totalCards() const;
     QString decksDirectory() const { return m_decksDir; }
     QString databasePath() const { return m_store.path(); }
+    QString cardFilter() const { return m_cardFilter; }
+    QString currentCardId() const { return m_currentId; }
+    bool canUndo() const { return !m_undoStack.isEmpty(); }
+    bool canRedo() const { return !m_redoStack.isEmpty(); }
+    QVariantList cardList() const;
+    ReviewSummary reviewSummary() const { return m_store.summary(); }
 
     QVector<Deck> allDecks() const { return m_decks; }
     int countDue(const QString &deckName = {}) const;
+    QVector<Card> searchCards(const QString &text, const QString &deckName = {}) const;
 
     // Headless helpers used by the agent CLI.
     bool createDeck(const QString &name, QString *error = nullptr);
     bool createCard(const QString &deckName, const QString &question, const QString &answer,
                     const QString &type = "basic", const QString &tags = {}, QString *error = nullptr);
+    bool modifyCard(const QString &deckName, const QString &cardId, const QString &question,
+                    const QString &answer, const QString &type, const QString &tags,
+                    QString *error = nullptr);
     bool deleteCard(const QString &deckName, const QString &cardId, QString *error = nullptr);
+    bool removeDeck(const QString &name, QString *error = nullptr);
     bool importFile(const QString &path, const QString &deckName, QString *error = nullptr);
     bool importCsv(const QString &path, const QString &deckName, QString *error = nullptr);
     bool importApkg(const QString &path, const QString &deckName, QString *error = nullptr);
@@ -78,10 +96,21 @@ public slots:
     Q_INVOKABLE void showNext();
     Q_INVOKABLE void newDeck(const QString &name);
     Q_INVOKABLE void addCard(const QString &question, const QString &answer);
+    Q_INVOKABLE void addCardDetails(const QString &question, const QString &answer,
+                                    const QString &type, const QString &tags);
     Q_INVOKABLE void removeCurrentCard();
+    Q_INVOKABLE void removeCard(const QString &cardId);
+    Q_INVOKABLE void deleteDeck(const QString &name);
+    Q_INVOKABLE void deleteCurrentDeck();
+    Q_INVOKABLE void updateCard(const QString &cardId, const QString &question, const QString &answer,
+                                const QString &type, const QString &tags);
+    Q_INVOKABLE void setCardFilter(const QString &filter);
+    Q_INVOKABLE void undo();
+    Q_INVOKABLE void redo();
     Q_INVOKABLE void editDeckFile();
     Q_INVOKABLE void requestShow();
     Q_INVOKABLE QString statsText() const;
+    Q_INVOKABLE QVariantMap statsSummary() const;
 
 signals:
     void decksChanged();
@@ -91,10 +120,22 @@ signals:
     void dueCountChanged();
     void statsChanged();
     void statusChanged();
+    void cardsChanged();
+    void cardFilterChanged();
+    void historyChanged();
     void showWindowRequested();
     void errorOccurred(const QString &message);
 
 private:
+    struct FileSnapshot {
+        QString path;
+        QByteArray before;
+        QByteArray after;
+        bool existedBefore = false;
+        bool existsAfter = true;
+        QString description;
+    };
+
     void load();
     void rebuildQueue();
     void presentCard();
@@ -105,6 +146,10 @@ private:
     Card *cardById(const QString &id);
     void answerCram(int rating);
     void answerReview(int rating);
+    void recordHistory(const QString &path, const QByteArray &before, bool existedBefore,
+                       const QString &description);
+    bool applySnapshot(const FileSnapshot &snapshot, bool restoreBefore, QString *error);
+    static QByteArray readFileBytes(const QString &path);
     static QString safeFileName(const QString &name);
     static QStringList splitDelimited(const QString &line, QChar delimiter);
     static QString stripHtml(const QString &html);
@@ -116,10 +161,13 @@ private:
     QString m_answer;
     QString m_status;
     QString m_currentId;
+    QString m_cardFilter;
     QStringList m_deckNames;
     QVector<Deck> m_decks;
     QVector<CramEntry> m_cramQueue;
     QStringList m_reviewQueue;
+    QVector<FileSnapshot> m_undoStack;
+    QVector<FileSnapshot> m_redoStack;
     Store m_store;
     MathRenderer m_math;
     QFileSystemWatcher m_watcher;

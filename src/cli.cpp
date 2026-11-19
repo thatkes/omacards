@@ -33,12 +33,17 @@ struct Options {
     int rating = 0;
     int steps = 10;
     bool json = false;
+    bool questionSet = false;
+    bool answerSet = false;
+    bool typeSet = false;
+    bool tagsSet = false;
 };
 
 bool isHeadlessCommand(const QString &command) {
     static const QStringList commands{
-        "check", "decks", "cards", "add-deck", "add-card", "delete-card",
-        "import", "due", "review", "cram", "skill", "stats", "help",
+        "check", "decks", "cards", "search", "add-deck", "add-card", "edit-card",
+        "delete-card", "delete-deck", "import", "due", "review", "cram", "skill",
+        "stats", "help",
     };
     return commands.contains(command);
 }
@@ -53,16 +58,16 @@ Options parse(const QStringList &arguments) {
         const QString arg = rest.at(i);
         auto value = [&]() { return i + 1 < rest.size() ? rest.at(++i) : QString(); };
         if (arg == "--deck" || arg == "-d") options.deck = value();
-        else if (arg == "--question" || arg == "-q") options.question = value();
-        else if (arg == "--answer" || arg == "-a") options.answer = value();
-        else if (arg == "--type") options.type = value();
-        else if (arg == "--tags") options.tags = value();
+        else if (arg == "--question" || arg == "-q") { options.question = value(); options.questionSet = true; }
+        else if (arg == "--answer" || arg == "-a") { options.answer = value(); options.answerSet = true; }
+        else if (arg == "--type") { options.type = value(); options.typeSet = true; }
+        else if (arg == "--tags") { options.tags = value(); options.tagsSet = true; }
         else if (arg == "--card" || arg == "-c") options.card = value();
         else if (arg == "--rating" || arg == "-r") options.rating = value().toInt();
         else if (arg == "--steps") options.steps = value().toInt();
         else if (arg.startsWith("--deck=")) options.deck = arg.section('=', 1);
-        else if (arg.startsWith("--question=")) options.question = arg.section('=', 1);
-        else if (arg.startsWith("--answer=")) options.answer = arg.section('=', 1);
+        else if (arg.startsWith("--question=")) { options.question = arg.section('=', 1); options.questionSet = true; }
+        else if (arg.startsWith("--answer=")) { options.answer = arg.section('=', 1); options.answerSet = true; }
         else if (options.path.isEmpty()) options.path = arg;
     }
     options.json = arguments.contains(QString("--json"));
@@ -123,9 +128,12 @@ QString usage() {
         "  omacards check [--json]          Show decks, cards, due count and math engine\n"
         "  omacards decks [--json]          List decks\n"
         "  omacards cards [--deck D] [--json]\n"
+        "  omacards search TERM [--deck D] [--json]\n"
         "  omacards add-deck NAME [--json]\n"
         "  omacards add-card -q Q -a A [-d D] [--type cloze] [--tags a,b] [--json]\n"
+        "  omacards edit-card -c ID [-q Q] [-a A] [--type T] [--tags a,b] [--json]\n"
         "  omacards delete-card -c ID [-d D] [--json]\n"
+        "  omacards delete-deck NAME [--json]\n"
         "  omacards import PATH [-d D] [--json]\n"
         "  omacards due [-d D] [--json]\n"
         "  omacards review -c ID -r 1|3 [--json]\n"
@@ -157,7 +165,7 @@ int run(const QStringList &arguments) {
     const QVector<Deck> decks = backend.allDecks();
     const bool json = options.json;
 
-    if (options.command == "check" || options.command == "stats") {
+    if (options.command == "check") {
         const int total = allCards(decks, {}).size();
         const int due = backend.countDue();
         QJsonArray deckArray;
@@ -178,6 +186,23 @@ int run(const QStringList &arguments) {
         object.insert("database", backend.databasePath());
         write(object, json, QObject::tr("%1 decks · %2 cards · %3 due · math: %4")
               .arg(decks.size()).arg(total).arg(due).arg(backend.mathEngine()));
+        return 0;
+    }
+
+    if (options.command == "stats") {
+        const ReviewSummary summary = backend.reviewSummary();
+        QJsonObject object;
+        object.insert("ok", true);
+        object.insert("totalReviews", summary.total);
+        object.insert("today", summary.today);
+        object.insert("todayCorrect", summary.todayCorrect);
+        object.insert("streakDays", summary.streakDays);
+        object.insert("due", backend.countDue());
+        object.insert("cards", allCards(decks, {}).size());
+        object.insert("decks", decks.size());
+        const int accuracy = summary.today > 0 ? qRound(100.0 * summary.todayCorrect / summary.today) : 0;
+        write(object, json, QObject::tr("%1 reviews today · %2% correct · %3 day streak · %4 due")
+              .arg(summary.today).arg(accuracy).arg(summary.streakDays).arg(backend.countDue()));
         return 0;
     }
 
@@ -215,6 +240,22 @@ int run(const QStringList &arguments) {
         return 0;
     }
 
+    if (options.command == "search") {
+        const QVector<Card> matches = backend.searchCards(options.path, options.deck);
+        QJsonArray array;
+        for (const Card &card : matches)
+            array << cardJson(card);
+        QJsonObject object;
+        object.insert("ok", true);
+        object.insert("count", matches.size());
+        object.insert("cards", array);
+        QStringList lines;
+        for (const Card &card : matches)
+            lines << QString("[%1] %2 → %3").arg(card.id, card.question, card.answer);
+        write(object, json, lines.join('\n'));
+        return 0;
+    }
+
     if (options.command == "add-deck") {
         if (options.path.isEmpty())
             return fail(QObject::tr("Give a deck name"), json);
@@ -246,6 +287,43 @@ int run(const QStringList &arguments) {
         return 0;
     }
 
+    if (options.command == "edit-card") {
+        if (options.card.isEmpty())
+            return fail(QObject::tr("Use --card / -c"), json);
+        const QVector<Card> cards = allCards(decks, options.deck);
+        const Card *target = nullptr;
+        for (const Card &card : cards)
+            if (card.id == options.card)
+                target = &card;
+        if (!target)
+            return fail(QObject::tr("No such card: %1").arg(options.card), json);
+
+        const QString question = options.questionSet ? options.question : target->question;
+        const QString answer = options.answerSet ? options.answer : target->answer;
+        const QString type = options.typeSet ? options.type : target->type;
+        QString tags;
+        if (options.tagsSet) {
+            tags = options.tags;
+        } else {
+            tags = target->tags.join(", ");
+        }
+        if (!backend.modifyCard(options.deck, options.card, question, answer, type, tags, &error))
+            return fail(error, json);
+
+        const Card *updated = nullptr;
+        for (const Card &card : backend.searchCards(question, target->deck))
+            if (card.question == question.trimmed() && card.answer == answer.trimmed())
+                updated = &card;
+
+        QJsonObject object;
+        object.insert("ok", true);
+        object.insert("id", updated ? updated->id : options.card);
+        if (updated)
+            object.insert("card", cardJson(*updated));
+        write(object, json, QObject::tr("Updated card %1").arg(options.card));
+        return 0;
+    }
+
     if (options.command == "delete-card") {
         if (options.card.isEmpty())
             return fail(QObject::tr("Use --card / -c"), json);
@@ -255,6 +333,19 @@ int run(const QStringList &arguments) {
         object.insert("ok", true);
         object.insert("id", options.card);
         write(object, json, QObject::tr("Removed card %1").arg(options.card));
+        return 0;
+    }
+
+    if (options.command == "delete-deck") {
+        const QString name = options.path.isEmpty() ? options.deck : options.path;
+        if (name.isEmpty())
+            return fail(QObject::tr("Give a deck name"), json);
+        if (!backend.removeDeck(name, &error))
+            return fail(error, json);
+        QJsonObject object;
+        object.insert("ok", true);
+        object.insert("deck", name);
+        write(object, json, QObject::tr("Removed deck %1").arg(name));
         return 0;
     }
 

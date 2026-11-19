@@ -86,6 +86,7 @@ Deck load(const QString &path, QString *error) {
                     currentKey.clear();
                 } else if (key == "id") {
                     card.id = value;
+                    card.explicitId = !value.isEmpty();
                     currentKey.clear();
                 }
             } else if (raw.startsWith(QLatin1String("  ")) && !currentKey.isEmpty()) {
@@ -184,26 +185,30 @@ QString serialize(const Deck &deck) {
             out << "type: " + card.type;
         if (!card.tags.isEmpty())
             out << "tags: " + card.tags.join(", ");
+        // Only write the id when it pins the card; hashes stay implicit so the
+        // file keeps reading like plain notes.
+        if (card.explicitId || (!card.id.isEmpty() && card.id != cardId(card)))
+            out << "id: " + card.id;
     }
     return out.join('\n') + "\n";
 }
 
 bool save(const Deck &deck, QString *error) {
-    QString path = deck.path;
-    if (path.isEmpty()) {
-        const QDir dir(QFileInfo(deck.path).absolutePath());
-        path = dir.filePath(deck.name + ".txt");
+    if (deck.path.isEmpty()) {
+        if (error)
+            *error = QObject::tr("Deck %1 has no file path").arg(deck.name);
+        return false;
     }
-    QSaveFile file(path);
+    QSaveFile file(deck.path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         if (error)
-            *error = QObject::tr("Cannot write deck file: %1").arg(path);
+            *error = QObject::tr("Cannot write deck file: %1").arg(deck.path);
         return false;
     }
     file.write(serialize(deck).toUtf8());
     if (!file.commit()) {
         if (error)
-            *error = QObject::tr("Cannot save deck file: %1").arg(path);
+            *error = QObject::tr("Cannot save deck file: %1").arg(deck.path);
         return false;
     }
     return true;
