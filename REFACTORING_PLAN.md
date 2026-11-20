@@ -4,12 +4,13 @@ Companion to the code-quality review. Goal: pay down structural debt **before** 
 
 ## Current state (snapshot, re-measured 2026-11-19)
 
-- **4,879 LOC** of C++/Qt 6 across `src/` (13 `.cpp` + 13 `.h`), plus `src/Main.qml` and i18n resources.
+- **4,921 LOC** of C++/Qt 6 across `src/` (14 `.cpp` + 14 `.h`), plus `src/Main.qml` and i18n resources.
 - **1,386 LOC** in one test file (`tests/omacards_tests.cpp`), containing **52 test slots**, plus a 15-line `tests/omacards_tests.pro`.
 - Largest units: `backend.cpp` **1,058**, `cli.cpp` **856**, `mathrender.cpp` **446**, `deck.cpp` **376**, `importer.cpp` **324**, `store.cpp` **274**, `backend.h` **241**.
+- `main.cpp` is now **87 LOC** (down from 135); tray code lives in `traycontroller.cpp` (64) / `traycontroller.h` (26).
 - Active, disciplined refactoring history (study queue, file history, import parsing, domain enums, shared scheduling reads).
 - Strong test suite (`./bin/test`, offscreen Qt Test), injectable paths, env isolation, headless CLI parity.
-- The snapshot above includes uncommitted day-start-hour work (`config.h`, `backend.*`, `store.*`, tests). Land that feature before starting #1 or #5, then re-check these numbers.
+- The snapshot includes the committed day-start-hour work (`bed92cf`) and the tray extraction (`2ab7293`, local only). Re-check these numbers before starting #1 or #5.
 
 Overall rating: **8.5/10**. See strengths/weaknesses below.
 
@@ -18,7 +19,7 @@ Overall rating: **8.5/10**. See strengths/weaknesses below.
 | # | Item | Status |
 |---|------|--------|
 | 1 | Decompose `Backend` | Not started (epic — split into sub-items) |
-| 2 | Extract tray + app bootstrap from `main.cpp` | Not started (detailed plan below) |
+| 2 | Extract tray + app bootstrap from `main.cpp` | **Done** (`src/traycontroller.{h,cpp}`, `2ab7293`) |
 | 3 | Centralize configuration constants | **Done** (`src/config.h`, `Config::againDelayMs()`, `Backend::fromEnvironment()`) |
 | 4 | Type safety at boundaries | **Deferred** — explicitly out of scope for this pass; revisit later |
 | 5 | Split the test file | Not started (detailed plan below) |
@@ -35,6 +36,7 @@ Overall rating: **8.5/10**. See strengths/weaknesses below.
 - Faithful, well-commented FSRS-5 implementation with configurable retention.
 - Agent-first ergonomics: JSON CLI, plain-text decks, headless commands, skill install.
 - Card identity by content hash with optional pinned `id:`.
+- Tray icon/menu lifecycle isolated in `TrayController`; `main()` is startup and QML wiring only.
 
 ## Weaknesses / debt
 
@@ -42,15 +44,15 @@ Overall rating: **8.5/10**. See strengths/weaknesses below.
 - `QString` is the universal currency, including at the QML boundary; enums round-trip through strings, losing type safety outside `Domain`. **Deferred with #4** — the concrete string comparisons in `backend.cpp` are already routed through `Domain::*`.
 - Hardcoded constants: Again delay 60000 ms, new-per-day 20, retention 0.9, Leitner boxes 1/2/4/8/16 — largely centralized by #3 (day-start-hour is the newest addition).
 - `Backend` constructor defaults to empty paths, relying on env vars — implicit and surprising; mitigated by `Backend::fromEnvironment()`.
-- `main.cpp` mixes tray icon drawing, CLI dispatch, QML engine setup.
-- ~~Minor ownership leak: `new QMenu` without parent in tray code.~~ Resolved by #6; keep the fix when moving the code in #2.
+- ~~`main.cpp` mixes tray icon drawing, CLI dispatch, QML engine setup.~~ Resolved by #2.
+- ~~Minor ownership leak: `new QMenu` without parent in tray code.~~ Resolved by #6 and preserved by #2 (`m_menu` declared before `m_tray`).
 - ~~No lint/format/CI config.~~ Resolved by #6.
 - Tests are a single monolithic file (**1,386 LOC, 52 slots**).
 - ~~Optional toolchain detection (math) is runtime and ad hoc.~~ Resolved by #7.
 
 ## Near-term improvements (do before new features)
 
-Priority order. #2 and #5 are independent, single-commit changes. #1 is an epic and should be split into sub-items. #4 (type safety) is intentionally deferred to a later pass and is not part of this work.
+Priority order. Remaining work: #5 (independent, single-commit) first, then #1 (epic, split into sub-items). #2 is done; #4 (type safety) is intentionally deferred to a later pass and is not part of this work.
 
 ### 1. Decompose `Backend` (highest impact, epic)
 - Extract `StudySession` (queue advancement, repeat scheduling, reviewed/correct/box counters, stats).
@@ -60,7 +62,9 @@ Priority order. #2 and #5 are independent, single-commit changes. #1 is an epic 
 - Preserve the `StudySnapshot` invariant while splitting: availability queries and card views must still read one consistent snapshot.
 - Do not pull type-safety changes (#4) into this item; keep `m_mode` as-is for now.
 
-### 2. Extract tray + app bootstrap from `main.cpp`
+### 2. Extract tray + app bootstrap from `main.cpp` — ✅ Done (`2ab7293`)
+
+The plan below is kept as the implementation record; as-built details are inlined.
 
 **Goal.** After this change `main()` does only: argument parsing, offscreen dispatch, `QApplication`/style setup, translator/theme/backend construction, QML engine load, the `activate` callback, and `app.exec()`. All tray icon drawing, menu construction and signal wiring moves into a new `TrayController`.
 
@@ -74,6 +78,7 @@ Priority order. #2 and #5 are independent, single-commit changes. #1 is an epic 
 
 ```cpp
 #pragma once
+#include <QMenu>
 #include <QObject>
 #include <QSystemTrayIcon>
 #include <functional>
@@ -81,7 +86,6 @@ Priority order. #2 and #5 are independent, single-commit changes. #1 is an epic 
 
 class Backend;
 class Theme;
-class QMenu;
 
 class TrayController : public QObject {
 public:
@@ -98,6 +102,8 @@ private:
 ```
 
 No `Q_OBJECT` macro is needed: the class only uses base-`QObject` `QObject::connect` with `this` as context. (If own signals are added later, add `Q_OBJECT`; qmake AUTOMOC picks it up from `HEADERS`.)
+
+As built, `<QMenu>` is included in the header rather than forward-declared: `std::unique_ptr<QMenu>`'s deleter is instantiated where `TrayController` is destroyed (`main.cpp`), so the type must be complete there.
 
 **Implementation steps**
 
@@ -127,9 +133,10 @@ No `Q_OBJECT` macro is needed: the class only uses base-`QObject` `QObject::conn
 6. Keep the existing `"review"` / `"cram"` strings at the boundary; do not pull #4 into this item.
 
 **Verification**
-- `./bin/build` succeeds; `./bin/test` stays green (52 slots).
-- Manual, on a machine with a system tray: icon appears; theme switch recolors it; tooltip updates when the due count changes; Open/Review/Cram/Quit work; a right-click does not re-open the window.
-- Diff review: every removed line from `main.cpp` should have an equivalent line in `traycontroller.cpp`.
+- `./bin/build` succeeds; `./bin/test` reported **54 passed, 0 failed, 0 skipped** (52 slots plus Qt Test's init/cleanup cases), unchanged from before the refactor.
+- `clang-format --dry-run --Werror` clean on all touched C++ files.
+- Diff review confirmed every removed line from `main.cpp` has an equivalent line in `traycontroller.cpp`.
+- Still manual, on a machine with a system tray: icon appears; theme switch recolors it; tooltip updates when the due count changes; Open/Review/Cram/Quit work; a right-click does not re-open the window.
 
 ### 3. Centralize configuration constants — ✅ Done
 - Create `config.h` with named constants: `kDefaultNewPerDay`, `kDefaultRetention`, `kAgainDelayMs`, `kLeitnerBoxes`, `kMaxIntervalDays`.
@@ -225,13 +232,13 @@ int main(int argc, char **argv) {
 
 **Migration steps (keep the suite green)**
 
-1. Commit A — support extraction only: add `test_support.h`, include it from the monolith, delete the monolith's local `EnvGuard` and static helpers, add the header to `.pro` `HEADERS`. `./bin/test` → 52 green.
+1. Commit A — support extraction only: add `test_support.h`, include it from the monolith, delete the monolith's local `EnvGuard` and static helpers, add the header to `.pro` `HEADERS`. `./bin/test` → 54/54 green (52 slots + init/cleanup).
 2. Commit B — the split, done atomically:
    - Create all 11 header/source pairs; move slot bodies verbatim (only adding the `void TestX::` qualifier).
    - Delete `tests/omacards_tests.cpp`, including its `QTEST_MAIN` and `.moc` include.
    - Add `test_main.cpp` with the 11 `qExec` calls.
    - Rewrite `tests/omacards_tests.pro`: `HEADERS` gains `test_support.h` + all `test_*.h`; `SOURCES` becomes `test_main.cpp` + all `test_*.cpp` + the existing `../src/*.cpp` list; remove `omacards_tests.cpp`. Keep `QT += ... testlib`, `CONFIG`, `TARGET`, `INCLUDEPATH`, `DEFINES` unchanged.
-   - `./bin/test` → 52 green. Do this in one commit: a half-migrated tree either has two `main()` functions or silently stops running moved tests.
+   - `./bin/test` → 54/54 green (52 slots + init/cleanup). Do this in one commit: a half-migrated tree either has two `main()` functions or silently stops running moved tests.
 3. Optional follow-up: order `qExec` calls fast-unit-first (DOMAIN/CONFIG/FSRS before QML/CLI) for quicker feedback.
 
 **Invariants and traps**
@@ -243,7 +250,7 @@ int main(int argc, char **argv) {
 - Distribute Qt includes to the area that uses them; `<QtTest>` in each `.cpp` is simplest. CLI tests still skip if `../build/omacards` is absent — `appBinary()` logic is unchanged.
 
 **Acceptance**
-- `./bin/test` reports 52 passes, 0 failures, with no skips beyond the permission/binary ones already present.
+- `./bin/test` reports 54 passes, 0 failures (52 slots plus Qt Test's init/cleanup cases), with no skips beyond the permission/binary ones already present.
 - Each moved slot's diff is only a qualification change; no assertion or setup is altered.
 - `qmake6` from a clean `build/tests` generates all `moc_test_*.cpp` files without manual `.moc` includes.
 
@@ -266,8 +273,8 @@ int main(int argc, char **argv) {
 ## Definition of done for this plan
 
 - [ ] `backend.cpp` < 400 LOC (staged via #1: interim target < 600); no type-safety changes bundled.
-- [ ] Tray/bootstrap extracted; `main.cpp` contains no tray drawing or menu wiring. (#2)
-- [ ] Tests split into per-area classes with a shared support header and single runner; 52/52 green. (#5)
+- [x] Tray/bootstrap extracted; `main.cpp` contains no tray drawing or menu wiring. (#2, `2ab7293`)
+- [ ] Tests split into per-area classes with a shared support header and single runner; 54/54 green (52 slots). (#5)
 - [x] `.clang-format` committed and applied.
-- [x] CI runs build + tests. (workflow added; first remote run pending a push)
-- [x] No behavior change so far: `./bin/test` was 51/51 green at the last commit; the uncommitted day-start-hour work adds one slot (52).
+- [x] CI runs build + tests; last remote run succeeded on `c21b67a` (later local commits unpushed).
+- [x] No behavior change so far: `./bin/test` was 54/54 green before and after #2.
