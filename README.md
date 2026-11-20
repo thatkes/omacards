@@ -37,8 +37,6 @@ omarchy install package poppler
 
 ### On Arch:
 
-```
-```
 ```sh
 sudo pacman -S tectonic poppler
 ```
@@ -53,7 +51,7 @@ tectonic --untrusted --outdir=/tmp/omacards-tex /tmp/omacards-tex/warm.tex
 
 ```
 ```
-The one-off `tectonic` run downloads the TeX bundle into `~/.cache/tectonic`; doing it ahead of time avoids a long pause on the first card. Normal renders then use Tectonic's `--only-cached` mode. Restart omacards after installing so it detects the toolchain, and confirm with `omacards check --json` (`"math": "LaTeX (SVG)"`). SVGs are cached under `~/.cache/omacards/math`; delete that directory to force a re-render.
+This is a one-time, global download of Tectonic's TeX bundle (stored in `~/.cache/tectonic`) — not something you repeat per deck. Doing it ahead of time avoids a long pause on the first card that uses math. After that, normal renders use Tectonic's `--only-cached` mode, and each rendered expression is cached as an SVG under `~/.cache/omacards/math`. Restart omacards after installing so it detects the toolchain, and confirm with `omacards check --json` (`"math": "LaTeX (SVG)"`). Delete `~/.cache/omacards/math` to force a re-render.
 
 ## Keyboard shortcuts
 
@@ -130,7 +128,7 @@ omacards search gato --deck Spanish
 omacards add-deck Spanish
 omacards add-card --deck Spanish -q 'What is "gato"?' -a cat --tags vocab
 omacards edit-card -c <card-id> -a 'a cat'
-omacards delete-card -check <card-id>
+omacards delete-card -c <card-id>
 omacards delete-deck Spanish
 omacards import ~/Downloads/deck.apkg --deck Spanish
 omacards import ~/Downloads/words.csv --deck Spanish
