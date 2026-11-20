@@ -23,6 +23,7 @@ private slots:
     void reviewCommandContract();
     void cramCommandDeterminism();
     void addCardJsonContracts();
+    void cardsJsonPreservesUnknownFileType();
     void addCardsInputValidationErrors();
     void editDeleteErrorContracts();
     void importJsonAndCsvContracts();

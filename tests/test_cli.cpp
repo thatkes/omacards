@@ -582,6 +582,29 @@ void TestCli::addCardJsonContracts() {
     QVERIFY(QFileInfo::exists(QDir(decks).filePath("Fresh.txt")));
 }
 
+void TestCli::cardsJsonPreservesUnknownFileType() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    const QString path = QDir(decks).filePath("Types.txt");
+    QVERIFY(writeFile(path, "# Deck: Types\n---\nQ: Unknown\nA: answer\ntype: FUTURE\n"));
+
+    QString error;
+    const Deck deck = DeckIO::load(path, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(deck.cards.size(), 1);
+
+    int code = -1;
+    const QJsonObject result = runCli({"cards", "--deck", "Types", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    const QJsonArray cards = result.value(QStringLiteral("cards")).toArray();
+    QCOMPARE(cards.size(), 1);
+    const QJsonObject card = cards.at(0).toObject();
+    QCOMPARE(card.value(QStringLiteral("id")).toString(), deck.cards.first().id);
+    QCOMPARE(card.value(QStringLiteral("type")).toString(), QString("future"));
+}
+
 void TestCli::addCardsInputValidationErrors() {
     QTemporaryDir dir;
     const QString decks = dir.filePath("decks");
