@@ -4,9 +4,11 @@
 
 ![omacards card browser](docs/browser.png)
 
-A keyboard-first flashcards app for Omarchy. It has two study modes:
+A keyboard-first flashcards app for Omarchy. It follows Omarchy's theme and is built for agent-driven study.
 
-- **Review** — FSRS-5 long-term scheduling with Again and Good. Again moves the card to a future due date but also brings it back for one more try after a short break in the same session.
+It has two study modes:
+
+- **Review** — FSRS-5 long-term scheduling with Again and Good.
 - **Cram** — endless in-session Leitner boxes (1, 2, 4, 8, 16 cards) that reset on Again and re-surface weak cards until you quit.
 
 Deck content lives in plain text files under `~/.local/share/omacards/decks/`, so agents and editors can change it directly. Scheduling state lives in a SQLite sidecar at `~/.local/share/omacards/state.db`; deleting the database never deletes a card.
@@ -19,19 +21,38 @@ Deck content lives in plain text files under `~/.local/share/omacards/decks/`, s
 ./bin/install   # makepkg -fsi, adds the binary, launcher entry and icon
 ```
 
-Requirements: Qt 6 (base, declarative, wayland, SQL), qmake6, gcc/make. Optional: `unzip` for Anki `.apkg` imports, `tectonic`/`pdftocairo` or `latex`/`dvisvgm` for LaTeX math. Without a TeX toolchain, math is rendered as Unicode.
+Requirements: Qt 6 (base, declarative, wayland, SQL), qmake6, gcc/make.
+Optional: `unzip` for Anki `.apkg` imports, `tectonic`/`pdftocairo` or `latex`/`dvisvgm` for LaTeX math. (Without a TeX toolchain, math is rendered as Unicode.)
 
 ## LaTeX math
 
-Math inside `\(...\)` or `$$...$$` becomes a cached SVG when a TeX toolchain is available. On Omarchy/Arch:
+Math inside `\(...\)` or `$$...$$` becomes a cached SVG when a TeX toolchain is available.
+
+### On Omarchy:
 
 ```sh
-sudo pacman -S tectonic poppler   # poppler provides pdftocairo
+omarchy install package tectonic
+omarchy install package poppler
+```
+
+### On Arch:
+
+```
+```
+```sh
+sudo pacman -S tectonic poppler
+```
+
+### After install:
+
+```sh
 mkdir -p /tmp/omacards-tex
 printf '\\documentclass{article}\n\\begin{document}$x^2$\\end{document}\n' > /tmp/omacards-tex/warm.tex
 tectonic --untrusted --outdir=/tmp/omacards-tex /tmp/omacards-tex/warm.tex
 ```
 
+```
+```
 The one-off `tectonic` run downloads the TeX bundle into `~/.cache/tectonic`; doing it ahead of time avoids a long pause on the first card. Normal renders then use Tectonic's `--only-cached` mode. Restart omacards after installing so it detects the toolchain, and confirm with `omacards check --json` (`"math": "LaTeX (SVG)"`). SVGs are cached under `~/.cache/omacards/math`; delete that directory to force a re-render.
 
 ## Keyboard shortcuts
@@ -44,7 +65,7 @@ The one-off `tectonic` run downloads the TeX bundle into `~/.cache/tectonic`; do
 | `N` | New card |
 | `D` | New deck |
 | `B` | Browse and search cards |
-| `J` / `K` | Move the card selection in the library (wraps around) |
+| `J` / `K` | Move the card selection in the library |
 | `Enter` | Edit the selected card in the library |
 | `Delete` / `Backspace` | Delete the selected card in the library |
 | `/` | Focus library search |
@@ -64,7 +85,7 @@ Closing the window quits the app. While omacards is open, the tray tooltip shows
 
 ## Settings
 
-Press `,` (or the gear button) to open settings. All three values are stored in the SQLite sidecar and apply immediately after saving.
+Press `,` (or the gear button) to open settings. All settings values are stored in the SQLite sidecar and apply immediately after saving.
 
 ![omacards settings](docs/settings.png)
 
@@ -102,24 +123,24 @@ Anki `.apkg` imports preserve HTML entities, tags, and cloze note types (`{{c1::
 Every command accepts `--json`, prints errors to stderr and exits 0 or 1.
 
 ```sh
-omacards check --json
-omacards decks --json
-omacards cards --deck Spanish --json
-omacards search gato --deck Spanish --json
-omacards add-deck Spanish --json
-omacards add-card --deck Spanish -q 'What is "gato"?' -a cat --tags vocab --json
-omacards edit-card -c <card-id> -a 'a cat' --json
-omacards delete-card -c <card-id> --json
-omacards delete-deck Spanish --json
-omacards import ~/Downloads/deck.apkg --deck Spanish --json
-omacards import ~/Downloads/words.csv --deck Spanish --json
-omacards due --deck Spanish --json
-omacards review -c <card-id> -r 3 --json
-omacards cram --deck Spanish --steps 20 --json
-omacards stats --json
-omacards config --json
-omacards config --new-per-day 10 --day-start-hour 3 --retention 0.9 --json
-omacards skill install --json
+omacards check
+omacards decks
+omacards cards --deck Spanish
+omacards search gato --deck Spanish
+omacards add-deck Spanish
+omacards add-card --deck Spanish -q 'What is "gato"?' -a cat --tags vocab
+omacards edit-card -c <card-id> -a 'a cat'
+omacards delete-card -check <card-id>
+omacards delete-deck Spanish
+omacards import ~/Downloads/deck.apkg --deck Spanish
+omacards import ~/Downloads/words.csv --deck Spanish
+omacards due --deck Spanish
+omacards review -c <card-id> -r 3
+omacards cram --deck Spanish --steps 20
+omacards stats
+omacards config
+omacards config --new-per-day 10 --day-start-hour 3 --retention 0.9
+omacards skill install
 ```
 
 `omacards skill install` writes a short agent skill to `~/.agents/skills/omacards/SKILL.md`. Set `OMACARDS_DECKS_DIR` and `OMACARDS_STATE_DB` to isolate data for tests or scripts.
@@ -148,3 +169,15 @@ pkgbuild/                Arch package, desktop entry, icon
 ```
 
 Theme watching follows Omacut and Monologue (MIT, David Heinemeier Hansson).
+
+## Roadmap
+- Omarchy plugin support
+- Install script
+- Tectonic warming script
+- Fix tray entry
+- Fix settings UI
+- Update README.md pictures
+- Update settings list in README.md
+- Redo deck format in README.md
+- Update layout in README.md
+- Ensure switching themes works properly
