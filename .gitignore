@@ -2,3 +2,8 @@
 /pkgbuild/pkg/
 /pkgbuild/src/
 *.pkg.tar.*
+
+# Local-only agent instructions; keep out of the remote.
+/AGENTS.md
+# Inert while this file is tracked; applies if it is ever untracked.
+/.gitignore
