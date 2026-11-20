@@ -516,7 +516,7 @@ void TestStudyPlanner::cardListFiltersAndFormats() {
     QVERIFY(store.open(&error));
 
     Card alpha = makeCard("alpha", "alpha question", "Beta answer", "List");
-    alpha.type = "basic";
+    alpha.type = Domain::parseCardType("cloze");
     alpha.tags << "Geometry";
     Card gamma = makeCard("gamma", "gamma question", "delta answer", "List");
     gamma.tags << "blue";
@@ -554,6 +554,8 @@ void TestStudyPlanner::cardListFiltersAndFormats() {
     }
 
     QCOMPARE(cards.at(0).toMap().value("dueText").toString(), QString("NEW"));
+    QCOMPARE(cards.at(0).toMap().value("type").toString(), QString("cloze"));
+    QCOMPARE(cards.at(1).toMap().value("type").toString(), QString("basic"));
     QCOMPARE(cards.at(0).toMap().value("tags").toString(), QString("Geometry"));
     QCOMPARE(cards.at(1).toMap().value("tags").toString(), QString("blue"));
     QCOMPARE(cards.at(2).toMap().value("dueText").toString(), QString("DUE"));

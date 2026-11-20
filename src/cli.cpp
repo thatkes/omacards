@@ -164,7 +164,7 @@ QJsonObject cardJson(const Card &card) {
     object.insert("deck", card.deck);
     object.insert("question", card.question);
     object.insert("answer", card.answer);
-    object.insert("type", card.type);
+    object.insert("type", Domain::toString(card.type));
     QJsonArray tags;
     for (const QString &tag : card.tags)
         tags << tag;
@@ -655,7 +655,7 @@ int run(const QStringList &arguments) {
 
         const QString question = options.questionSet ? options.question : target->question;
         const QString answer = options.answerSet ? options.answer : target->answer;
-        const QString type = options.typeSet ? options.type : target->type;
+        const QString type = options.typeSet ? options.type : Domain::toString(target->type);
         QString tags;
         if (options.tagsSet) {
             tags = options.tags;

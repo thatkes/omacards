@@ -84,7 +84,7 @@ Deck load(const QString &path, QString *error) {
                     currentKey = "tags";
                     card.tags << value.split(',', Qt::SkipEmptyParts);
                 } else if (key == "type") {
-                    card.type = value.isEmpty() ? "basic" : value.toLower();
+                    card.type = Domain::parseCardType(value.toLower());
                     currentKey.clear();
                 } else if (key == "id") {
                     card.id = value;
@@ -302,8 +302,9 @@ QString serialize(const Deck &deck) {
         out << "---";
         out << "Q: " + card.question;
         out << "A: " + card.answer;
-        if (card.type != "basic")
-            out << "type: " + card.type;
+        const QString typeText = Domain::toString(card.type);
+        if (typeText != QLatin1String("basic"))
+            out << "type: " + typeText;
         if (!card.tags.isEmpty())
             out << "tags: " + card.tags.join(", ");
         // Only write the id when it pins the card; hashes stay implicit so the
@@ -350,7 +351,7 @@ static QString stripCloze(const QString &text, bool reveal) {
 }
 
 QString contentHash(const Card &card) {
-    const QString source = card.question + "\x1f" + card.answer + "\x1f" + card.type;
+    const QString source = card.question + "\x1f" + card.answer + "\x1f" + Domain::toString(card.type);
     return QString::fromLatin1(QCryptographicHash::hash(source.toUtf8(), QCryptographicHash::Sha256).toHex().left(16));
 }
 
@@ -362,13 +363,13 @@ QString safeFileName(const QString &name) {
 }
 
 QString displayQuestion(const Card &card) {
-    if (card.type == "cloze")
+    if (card.type.kind == CardType::Cloze)
         return stripCloze(card.question, false);
     return card.question;
 }
 
 QString displayAnswer(const Card &card) {
-    if (card.type == "cloze")
+    if (card.type.kind == CardType::Cloze)
         return stripCloze(card.question, true);
     return card.answer;
 }

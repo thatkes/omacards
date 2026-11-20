@@ -14,6 +14,7 @@
 #include "backend.h"
 #include "cli.h"
 #include "deck.h"
+#include "domain.h"
 #include "store.h"
 
 using namespace TestSupport;
@@ -57,7 +58,7 @@ void TestCli::addCardsCreatesDeckBulk() {
     QCOMPARE(deck.description, QString("Bulk math"));
     QCOMPARE(deck.cards.size(), 2);
     QCOMPARE(deck.cards.at(0).tags, QStringList({"x", "y"}));
-    QCOMPARE(deck.cards.at(1).type, QString("cloze"));
+    QCOMPARE(Domain::toString(deck.cards.at(1).type), QString("cloze"));
     QCOMPARE(deck.cards.at(1).tags, QStringList({"z", "w"}));
 }
 

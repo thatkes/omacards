@@ -1,5 +1,7 @@
 #pragma once
 
+#include "domain.h"
+
 #include <QMetaType>
 #include <QString>
 #include <QStringList>
@@ -10,7 +12,7 @@ struct Card {
     QString question;
     QString answer;
     QString deck;
-    QString type = "basic"; // basic | cloze
+    CardTypeValue type; // typed kind plus the exact boundary text
     QStringList tags;
     bool explicitId = false; // an `id:` line pins identity across edits
 };

@@ -18,6 +18,7 @@
 #include "test_backend.h"
 #include "test_support.h"
 #include "backend.h"
+#include "domain.h"
 #include "config.h"
 #include "deck.h"
 #include "fsrs.h"
@@ -133,7 +134,7 @@ void TestBackend::backendEditsCardsWithUndo() {
     const Card edited = backend.allDecks().last().cards.first();
     QCOMPARE(edited.question, QString("Edited?"));
     QCOMPARE(edited.answer, QString("Better"));
-    QCOMPARE(edited.type, QString("cloze"));
+    QCOMPARE(edited.type.kind, CardType::Cloze);
     QCOMPARE(edited.tags, QStringList({"a", "b"}));
     QVERIFY(edited.id != changedId); // content hash follows edits
     QVERIFY(backend.canUndo());
@@ -237,7 +238,7 @@ void TestBackend::backendImportsAnkiClozeAndMedia() {
     const Card *basic = nullptr;
     const Card *cloze = nullptr;
     for (const Card &card : cards) {
-        if (card.type == "cloze")
+        if (card.type.kind == CardType::Cloze)
             cloze = &card;
         else
             basic = &card;
@@ -921,10 +922,10 @@ void TestBackend::modifyCardInvalidTypeNormalizesToBasic() {
     QVERIFY(backend.modifyCard("Types", id, "Q", "A", "not-a-type", {}, &error, &finalId));
     QVERIFY(error.isEmpty());
     QVERIFY(!finalId.isEmpty());
-    QCOMPARE(backend.allDecks().first().cards.first().type, QString("basic"));
+    QCOMPARE(backend.allDecks().first().cards.first().type.kind, CardType::Basic);
 
     QVERIFY(backend.modifyCard("Types", finalId, "Q", "A", "cloze", {}, &error, &finalId));
-    QCOMPARE(backend.allDecks().first().cards.first().type, QString("cloze"));
+    QCOMPARE(backend.allDecks().first().cards.first().type.kind, CardType::Cloze);
 }
 
 void TestBackend::deckSummariesAndSearchFilterByDeck() {

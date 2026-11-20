@@ -288,7 +288,9 @@ bool DeckRepository::createCards(const QString &deckName, QString *currentDeck, 
         card.deck = deck->name;
         card.question = draft.question.trimmed();
         card.answer = draft.answer.trimmed();
-        card.type = Domain::toString(Domain::cardTypeFromString(draft.type));
+        // Validated above; toString() collapses Invalid to the basic text,
+        // keeping the stored kind and text canonical.
+        card.type = Domain::parseCardType(Domain::toString(Domain::cardTypeFromString(draft.type)));
         for (const QString &tag : draft.tags) {
             const QString clean = tag.trimmed();
             if (!clean.isEmpty() && !card.tags.contains(clean))
@@ -353,7 +355,8 @@ bool DeckRepository::modifyCard(const QString &deckName, const QString &cardId, 
     const Deck original = *deck;
     card->question = question.trimmed();
     card->answer = answer.trimmed();
-    card->type = Domain::toString(Domain::cardTypeFromString(type));
+    // Invalid input normalizes to { Basic, "basic" } as before.
+    card->type = Domain::parseCardType(Domain::toString(Domain::cardTypeFromString(type)));
     card->tags.clear();
     for (const QString &tag : tags.split(',', Qt::SkipEmptyParts)) {
         const QString clean = tag.trimmed();

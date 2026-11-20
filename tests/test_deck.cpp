@@ -5,6 +5,7 @@
 #include "test_deck.h"
 #include "test_support.h"
 #include "deck.h"
+#include "domain.h"
 
 using namespace TestSupport;
 
@@ -46,7 +47,7 @@ void TestDeck::deckParsesAndSerializes() {
 
 void TestDeck::clozeCardsHideAndReveal() {
     Card card;
-    card.type = "cloze";
+    card.type = Domain::parseCardType("cloze");
     card.question = "The {{c1::cat}} sleeps.";
     QVERIFY(DeckIO::displayQuestion(card).contains('['));
     QVERIFY(!DeckIO::displayQuestion(card).contains("cat"));
@@ -58,12 +59,12 @@ void TestDeck::deckCardIdIsStableAndIgnoresType() {
     basic.deck = "Deck";
     basic.question = "Q";
     basic.answer = "A";
-    basic.type = "basic";
+    basic.type = Domain::parseCardType("basic");
 
     Card cloze = basic;
-    cloze.type = "cloze";
+    cloze.type = Domain::parseCardType("cloze");
     Card unknown = basic;
-    unknown.type = "future";
+    unknown.type = Domain::parseCardType("future");
     Card otherDeck = basic;
     otherDeck.deck = "Other";
     Card otherAnswer = basic;
@@ -93,15 +94,17 @@ void TestDeck::deckContentHashPinsHashBytes() {
     card.question = "Q";
     card.answer = "A";
 
-    card.type = "basic";
+    card.type = Domain::parseCardType("basic");
     QCOMPARE(DeckIO::contentHash(card), QString("8cad942f67dcac72"));
-    card.type.clear(); // omitted type in a file is the canonical "basic"
+    // A card built directly can still carry empty boundary text; file parsing
+    // canonicalizes an omitted type to "basic" before it reaches the card.
+    card.type = {CardType::Basic, QString()};
     QCOMPARE(DeckIO::contentHash(card), QString("0f6bb18bba5bb6f0"));
-    card.type = "cloze";
+    card.type = Domain::parseCardType("cloze");
     QCOMPARE(DeckIO::contentHash(card), QString("145a501a9cf1dfe5"));
-    card.type = "future"; // unknown file types are preserved verbatim
+    card.type = Domain::parseCardType("future"); // unknown file types are preserved verbatim
     QCOMPARE(DeckIO::contentHash(card), QString("25036129cb0549b6"));
-    card.type = "CLOZE"; // hashing is byte-exact, not case-folded
+    card.type = Domain::parseCardType("CLOZE"); // hashing is byte-exact, not case-folded
     QCOMPARE(DeckIO::contentHash(card), QString("965e4671d78fa6bd"));
     QCOMPARE(DeckIO::contentHash(card).size(), 16);
 }
@@ -125,16 +128,16 @@ void TestDeck::deckLoadPreservesUnknownTypeText() {
     QCOMPARE(deck.cards.size(), 2);
 
     const Card &cloze = deck.cards.first();
-    QCOMPARE(cloze.type, QString("cloze"));
+    QCOMPARE(Domain::toString(cloze.type), QString("cloze"));
     QVERIFY(DeckIO::displayQuestion(cloze).contains('['));
     QCOMPARE(DeckIO::displayAnswer(cloze), QString("The cat sleeps."));
 
     const Card &unknown = deck.cards.at(1);
-    QCOMPARE(unknown.type, QString("future"));
+    QCOMPARE(Domain::toString(unknown.type), QString("future"));
     QCOMPARE(DeckIO::displayQuestion(unknown), QString("Unknown"));
     QCOMPARE(DeckIO::displayAnswer(unknown), QString("answer"));
     Card basic = unknown;
-    basic.type = "basic";
+    basic.type = Domain::parseCardType("basic");
     QCOMPARE(DeckIO::cardId(unknown), DeckIO::cardId(basic));
 
     const QString text = DeckIO::serialize(deck);
@@ -148,8 +151,8 @@ void TestDeck::deckLoadPreservesUnknownTypeText() {
     const Deck roundTrip = DeckIO::load(roundTripPath, &error);
     QVERIFY2(error.isEmpty(), qPrintable(error));
     QCOMPARE(roundTrip.cards.size(), 2);
-    QCOMPARE(roundTrip.cards.first().type, QString("cloze"));
-    QCOMPARE(roundTrip.cards.at(1).type, QString("future"));
+    QCOMPARE(Domain::toString(roundTrip.cards.first().type), QString("cloze"));
+    QCOMPARE(Domain::toString(roundTrip.cards.at(1).type), QString("future"));
     QCOMPARE(roundTrip.cards.at(1).id, unknown.id);
     QCOMPARE(DeckIO::contentHash(roundTrip.cards.at(1)), DeckIO::contentHash(unknown));
 }
@@ -184,12 +187,12 @@ void TestDeck::deckLoadAcceptsCaseInsensitiveKeysAndContinuations() {
     QCOMPARE(first.question, QString("First\ncontinued question"));
     QCOMPARE(first.answer, QString("answer\ncontinued answer\nalias"));
     QCOMPARE(first.tags, QStringList({"one", "two", "three"}));
-    QCOMPARE(first.type, QString("cloze")); // type values are lowercased
+    QCOMPARE(Domain::toString(first.type), QString("cloze")); // type values are lowercased
     QCOMPARE(first.id, QString("pinned"));
     QVERIFY(first.explicitId);
 
     const Card &second = deck.cards.at(1);
-    QCOMPARE(second.type, QString("basic"));
+    QCOMPARE(Domain::toString(second.type), QString("basic"));
     QVERIFY(!second.explicitId);
     QCOMPARE(second.question, QString("The {{c1::cat}} sleeps."));
 }
@@ -266,7 +269,7 @@ void TestDeck::deckSaveRoundTripsAndRejectsEmptyPath() {
     card.deck = deck.name;
     card.question = "Q?";
     card.answer = "A";
-    card.type = "cloze";
+    card.type = Domain::parseCardType("cloze");
     card.tags = {"one", "two"};
     card.id = "pinned-id";
     card.explicitId = true;
@@ -281,7 +284,7 @@ void TestDeck::deckSaveRoundTripsAndRejectsEmptyPath() {
     QCOMPARE(loaded.name, QString("Round"));
     QCOMPARE(loaded.description, QString("Saved deck"));
     QCOMPARE(loaded.cards.size(), 1);
-    QCOMPARE(loaded.cards.first().type, QString("cloze"));
+    QCOMPARE(Domain::toString(loaded.cards.first().type), QString("cloze"));
     QCOMPARE(loaded.cards.first().tags, QStringList({"one", "two"}));
     QCOMPARE(loaded.cards.first().id, QString("pinned-id"));
     QVERIFY(loaded.cards.first().explicitId);
@@ -338,7 +341,7 @@ void TestDeck::deckLintReportsIssues() {
 
 void TestDeck::deckClozeEdgeCases() {
     Card card;
-    card.type = "cloze";
+    card.type = Domain::parseCardType("cloze");
 
     card.question = "The {{c1::cat}} and {{c2::dog}} sleep.";
     const QString hidden = DeckIO::displayQuestion(card);
@@ -358,7 +361,7 @@ void TestDeck::deckClozeEdgeCases() {
     QCOMPARE(DeckIO::displayAnswer(card), card.question);
 
     // Basic cards do not interpret cloze markers at all.
-    card.type = "basic";
+    card.type = Domain::parseCardType("basic");
     card.question = "The {{c1::cat}} sleeps.";
     QCOMPARE(DeckIO::displayQuestion(card), card.question);
     QCOMPARE(DeckIO::displayAnswer(card), card.answer);

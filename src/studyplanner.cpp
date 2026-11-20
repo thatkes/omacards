@@ -213,7 +213,7 @@ QVariantList StudyPlanner::cardList(const QString &currentDeck, const QString &f
             entry.insert("deck", deck.name);
             entry.insert("question", card.question);
             entry.insert("answer", card.answer);
-            entry.insert("type", card.type);
+            entry.insert("type", Domain::toString(card.type));
             entry.insert("tags", card.tags.join(", "));
             entry.insert("due", state.due);
             entry.insert("isDue", due);

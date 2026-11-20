@@ -8,6 +8,7 @@
 #include "test_deckrepository.h"
 #include "deck.h"
 #include "deckrepository.h"
+#include "domain.h"
 #include "filehistory.h"
 #include "fsrs.h"
 #include "store.h"
@@ -278,9 +279,9 @@ void TestDeckRepository::createCardsCanonicalizesAndRejectsTypes() {
     const Deck *deck = f.repo.deckByName("Types");
     QVERIFY(deck);
     QCOMPARE(deck->cards.size(), 3);
-    QCOMPARE(deck->cards.at(0).type, QString("basic"));
-    QCOMPARE(deck->cards.at(1).type, QString("basic"));
-    QCOMPARE(deck->cards.at(2).type, QString("cloze"));
+    QCOMPARE(deck->cards.at(0).type.kind, CardType::Basic);
+    QCOMPARE(deck->cards.at(1).type.kind, CardType::Basic);
+    QCOMPARE(deck->cards.at(2).type.kind, CardType::Cloze);
 }
 
 void TestDeckRepository::createCardRequiresExistingDeckAndSplitsTags() {
@@ -332,7 +333,7 @@ void TestDeckRepository::modifyCardRejectsEmptyQuestionAndNormalizesType() {
     QString finalId;
     QVERIFY(f.repo.modifyCard("D", id, "New", "A", "nonsense", {}, &error, &finalId));
     QVERIFY(error.isEmpty());
-    QCOMPARE(f.repo.deckByName("D")->cards.first().type, QString("basic"));
+    QCOMPARE(f.repo.deckByName("D")->cards.first().type.kind, CardType::Basic);
     QVERIFY(!finalId.isEmpty());
 }
 
