@@ -1,0 +1,20 @@
+#pragma once
+
+#include <QObject>
+
+class TestStudyPlanner : public QObject {
+    Q_OBJECT
+
+private slots:
+    void noDecksIsSafe();
+    void refreshReadsStatesAndHashes();
+    void refreshBrokenStoreInvalidatesSnapshot();
+    void configureLimitsAndCounts();
+    void futureReviewsAreNotAvailable();
+    void recordReviewUpdatesStoreAndSnapshot();
+    void updateNewBudgetTracksLoggedReviews();
+    void reviewIdsFollowAvailabilityOrder();
+    void cardListFiltersAndFormats();
+    void deckSummariesReportCounts();
+    void statsSummaryNumericContract();
+};

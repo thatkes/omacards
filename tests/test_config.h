@@ -7,4 +7,5 @@ class TestConfig : public QObject {
 
 private slots:
     void configDayStartHelpers();
+    void configAgainDelayFallsBackAndClamps();
 };

@@ -9,4 +9,8 @@ private slots:
     void fsrsInitialState();
     void fsrsReviewMovesDueForward();
     void fsrsRetentionShapesIntervals();
+    void fsrsInitialGradesClampAndPinWeights();
+    void fsrsIntervalClampsRetentionAndMaximum();
+    void fsrsRetrievabilityHandlesMissingAndFutureReviews();
+    void fsrsReviewClampsRatingAndRetention();
 };

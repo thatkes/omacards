@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QProcess>
+#include <QSignalSpy>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -669,4 +670,334 @@ void TestBackend::statsSummaryKeepsContract() {
     QCOMPARE(summary.value("decks").toInt(), backend.decks().size());
     QCOMPARE(summary.value("due").toInt(), backend.dueCount());
     QCOMPARE(summary.value("sessionReviewed").toInt(), backend.reviewed());
+}
+
+void TestBackend::setModeBoundarySemantics() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Modes", &error));
+    QVERIFY(backend.createCard("Modes", "Q1", "A1", "basic", {}, &error));
+    QVERIFY(backend.createCard("Modes", "Q2", "A2", "basic", {}, &error));
+    backend.selectDeck("Modes");
+    QVERIFY(backend.hasCard());
+    QCOMPARE(backend.mode(), QString("review"));
+
+    QSignalSpy modeChanged(&backend, &Backend::modeChanged);
+    QSignalSpy statsChanged(&backend, &Backend::statsChanged);
+    QSignalSpy cardChanged(&backend, &Backend::cardChanged);
+    QStringList order;
+    QObject::connect(&backend, &Backend::modeChanged, &backend, [&order] { order << QStringLiteral("mode"); });
+    QObject::connect(&backend, &Backend::statsChanged, &backend, [&order] { order << QStringLiteral("stats"); });
+
+    // Unknown text normalizes to review; the raw argument still differs from
+    // the canonical mode, so the boundary runs and the queue is rebuilt.
+    backend.flip();
+    QVERIFY(backend.showingAnswer());
+    order.clear();
+    backend.setMode("banana");
+    QCOMPARE(backend.mode(), QString("review"));
+    QVERIFY(statsChanged.count() >= 1);
+    QVERIFY(cardChanged.count() >= 1);
+    QVERIFY(!backend.showingAnswer()); // rebuild re-presented the card
+    // The rebuild re-presents the card, so statsChanged is observable. Note
+    // that the current facade forwards the normalized mode to the session,
+    // which dedupes it: no modeChanged is emitted for this input today.
+    QVERIFY(order.contains(QStringLiteral("stats")));
+
+    modeChanged.clear();
+    statsChanged.clear();
+    cardChanged.clear();
+    backend.flip();
+    backend.setMode("CRAM");
+    QCOMPARE(backend.mode(), QString("review"));
+    QVERIFY(statsChanged.count() >= 1);
+    QVERIFY(cardChanged.count() >= 1);
+    QVERIFY(!backend.showingAnswer());
+
+    // Canonical input in the current mode is a complete no-op.
+    modeChanged.clear();
+    statsChanged.clear();
+    cardChanged.clear();
+    order.clear();
+    backend.setMode("review");
+    QCOMPARE(modeChanged.count(), 0);
+    QCOMPARE(statsChanged.count(), 0);
+    QCOMPARE(cardChanged.count(), 0);
+    QVERIFY(order.isEmpty());
+
+    // A real switch resets the session counters and emits modeChanged first.
+    backend.flip();
+    backend.rate(3);
+    QCOMPARE(backend.reviewed(), 1);
+    QCOMPARE(backend.correct(), 1);
+    modeChanged.clear();
+    statsChanged.clear();
+    order.clear();
+    backend.setMode("cram");
+    QCOMPARE(backend.mode(), QString("cram"));
+    QCOMPARE(backend.reviewed(), 0);
+    QCOMPARE(backend.correct(), 0);
+    QCOMPARE(modeChanged.count(), 1);
+    QVERIFY(statsChanged.count() >= 1);
+    QVERIFY(order.size() >= 2);
+    QCOMPARE(order.at(0), QStringLiteral("mode"));
+    QCOMPARE(order.at(1), QStringLiteral("stats"));
+}
+
+void TestBackend::invalidRatingsAreNoOps() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Ratings", &error));
+    QVERIFY(backend.createCard("Ratings", "Q1", "A1", "basic", {}, &error));
+    backend.selectDeck("Ratings");
+    QVERIFY(backend.hasCard());
+
+    QSignalSpy statsChanged(&backend, &Backend::statsChanged);
+    QSignalSpy cardChanged(&backend, &Backend::cardChanged);
+    QSignalSpy statusChanged(&backend, &Backend::statusChanged);
+    QSignalSpy decksChanged(&backend, &Backend::decksChanged);
+    const QString status = backend.status();
+    for (int rating : {0, 2, 4}) {
+        backend.rate(rating);
+        QCOMPARE(backend.reviewed(), 0);
+        QCOMPARE(backend.correct(), 0);
+        QCOMPARE(backend.status(), status);
+    }
+    QCOMPARE(statsChanged.count(), 0);
+    QCOMPARE(cardChanged.count(), 0);
+    QCOMPARE(statusChanged.count(), 0);
+    QCOMPARE(decksChanged.count(), 0);
+
+    QTemporaryDir emptyRoot;
+    Backend empty(emptyRoot.path(), emptyRoot.filePath("state.db"));
+    QVERIFY(empty.initialize(&error));
+    QVERIFY(!empty.hasCard());
+    QSignalSpy emptyStats(&empty, &Backend::statsChanged);
+    QSignalSpy emptyCards(&empty, &Backend::cardChanged);
+    empty.rate(3);
+    QCOMPARE(empty.reviewed(), 0);
+    QCOMPARE(emptyStats.count(), 0);
+    QCOMPARE(emptyCards.count(), 0);
+}
+
+void TestBackend::settingsClampAndPersist() {
+    QTemporaryDir dir;
+    const QString database = dir.filePath("state.db");
+    {
+        Backend backend(dir.path(), database);
+        QString error;
+        QVERIFY(backend.initialize(&error));
+        QSignalSpy changed(&backend, &Backend::settingsChanged);
+
+        backend.setNewPerDay(-5);
+        QCOMPARE(backend.newPerDay(), 0);
+        QCOMPARE(changed.count(), 1);
+        backend.setNewPerDay(10000);
+        QCOMPARE(backend.newPerDay(), Config::kMaxNewPerDay);
+        QCOMPARE(changed.count(), 2);
+
+        backend.setDesiredRetention(0.1);
+        QCOMPARE(backend.desiredRetention(), Config::kMinRetention);
+        QCOMPARE(changed.count(), 3);
+        backend.setDesiredRetention(2.0);
+        QCOMPARE(backend.desiredRetention(), Config::kMaxRetention);
+        QCOMPARE(changed.count(), 4);
+
+        backend.setDayStartHour(12);
+        QCOMPARE(changed.count(), 5);
+        backend.setDayStartHour(-3);
+        QCOMPARE(backend.dayStartHour(), 0);
+        QCOMPARE(changed.count(), 6);
+        backend.setDayStartHour(99);
+        QCOMPARE(backend.dayStartHour(), Config::kMaxDayStartHour);
+        QCOMPARE(changed.count(), 7);
+    }
+    {
+        Backend reopened(dir.path(), database);
+        QString error;
+        QVERIFY(reopened.initialize(&error));
+        QCOMPARE(reopened.newPerDay(), Config::kMaxNewPerDay);
+        QCOMPARE(reopened.desiredRetention(), Config::kMaxRetention);
+        QCOMPARE(reopened.dayStartHour(), Config::kMaxDayStartHour);
+    }
+
+    QTemporaryDir rawDir;
+    const QString rawDatabase = rawDir.filePath("state.db");
+    {
+        Store store(rawDatabase);
+        QString error;
+        QVERIFY(store.open(&error));
+        QVERIFY(store.setSetting("new_per_day", "100000"));
+        QVERIFY(store.setSetting("desired_retention", "7.5"));
+        QVERIFY(store.setSetting("day_start_hour", "77"));
+    }
+    Backend clamped(rawDir.path(), rawDatabase);
+    QString error;
+    QVERIFY(clamped.initialize(&error));
+    QCOMPARE(clamped.newPerDay(), Config::kMaxNewPerDay);
+    QCOMPARE(clamped.desiredRetention(), Config::kMaxRetention);
+    QCOMPARE(clamped.dayStartHour(), Config::kMaxDayStartHour);
+}
+
+void TestBackend::signalContractsForRefreshAndNavigation() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Nav", &error));
+    QVERIFY(backend.createCard("Nav", "Q1", "A1", "basic", {}, &error));
+    backend.selectDeck("Nav");
+
+    QSignalSpy decks(&backend, &Backend::decksChanged);
+    QSignalSpy current(&backend, &Backend::currentDeckChanged);
+    QSignalSpy cards(&backend, &Backend::cardsChanged);
+    QSignalSpy filter(&backend, &Backend::cardFilterChanged);
+
+    backend.refresh();
+    QCOMPARE(decks.count(), 1);
+    QCOMPARE(current.count(), 1);
+    QCOMPARE(cards.count(), 1);
+
+    decks.clear();
+    current.clear();
+    cards.clear();
+    backend.selectDeck("");
+    backend.selectDeck("NoSuchDeck");
+    QCOMPARE(decks.count(), 0);
+    QCOMPARE(current.count(), 0);
+    QCOMPARE(cards.count(), 0);
+
+    backend.setCardFilter("Q1");
+    QCOMPARE(filter.count(), 1);
+    QCOMPARE(cards.count(), 1);
+    filter.clear();
+    cards.clear();
+    backend.setCardFilter("Q1");
+    QCOMPARE(filter.count(), 0);
+    QCOMPARE(cards.count(), 0);
+
+    QTemporaryDir emptyRoot;
+    Backend empty(emptyRoot.path(), emptyRoot.filePath("state.db"));
+    QVERIFY(empty.initialize(&error));
+    QSignalSpy status(&empty, &Backend::statusChanged);
+    QVERIFY(!empty.canUndo());
+    QVERIFY(!empty.canRedo());
+    empty.undo();
+    QCOMPARE(empty.status(), QString("Nothing to undo"));
+    QCOMPARE(status.count(), 1);
+    empty.redo();
+    QCOMPARE(empty.status(), QString("Nothing to redo"));
+    QCOMPARE(status.count(), 2);
+}
+
+void TestBackend::modifyCardInvalidTypeNormalizesToBasic() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Types", &error));
+    QVERIFY(backend.createCard("Types", "Q", "A", "basic", {}, &error));
+    const QString id = backend.allDecks().first().cards.first().id;
+    QString finalId;
+    QVERIFY(backend.modifyCard("Types", id, "Q", "A", "not-a-type", {}, &error, &finalId));
+    QVERIFY(error.isEmpty());
+    QVERIFY(!finalId.isEmpty());
+    QCOMPARE(backend.allDecks().first().cards.first().type, QString("basic"));
+
+    QVERIFY(backend.modifyCard("Types", finalId, "Q", "A", "cloze", {}, &error, &finalId));
+    QCOMPARE(backend.allDecks().first().cards.first().type, QString("cloze"));
+}
+
+void TestBackend::deckSummariesAndSearchFilterByDeck() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Alpha", &error));
+    QVERIFY(backend.createCard("Alpha", "alpha question", "one", "basic", {}, &error));
+    QVERIFY(backend.createCard("Alpha", "other card", "two", "basic", {}, &error));
+    QVERIFY(backend.createDeck("Beta", &error));
+    QVERIFY(backend.createCard("Beta", "beta question", "three", "basic", {}, &error));
+
+    backend.selectDeck("Alpha");
+    QVariantList summaries = backend.deckSummaries();
+    QCOMPARE(summaries.size(), 2);
+    QVERIFY(summaries.at(0).toMap().value("active").toBool());
+    QVERIFY(!summaries.at(1).toMap().value("active").toBool());
+
+    backend.selectDeck("Beta");
+    summaries = backend.deckSummaries();
+    QVERIFY(!summaries.at(0).toMap().value("active").toBool());
+    QVERIFY(summaries.at(1).toMap().value("active").toBool());
+
+    QCOMPARE(backend.availableCount("Alpha"), 2);
+    QCOMPARE(backend.availableCount("Beta"), 1);
+    QCOMPARE(backend.availableCount(), 3);
+
+    QCOMPARE(backend.searchCards("question").size(), 2);
+    QCOMPARE(backend.searchCards("question", "Alpha").size(), 1);
+    QCOMPARE(backend.searchCards("").size(), 3);
+    QCOMPARE(backend.searchCards("", "Beta").size(), 1);
+}
+
+void TestBackend::emptySessionHelpersAndStatsText() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(!backend.hasCard());
+
+    QSignalSpy cardChanged(&backend, &Backend::cardChanged);
+    QSignalSpy statusChanged(&backend, &Backend::statusChanged);
+    backend.flip();
+    backend.showNext();
+    QCOMPARE(cardChanged.count(), 0);
+    QCOMPARE(statusChanged.count(), 0);
+
+    QSignalSpy shown(&backend, &Backend::showWindowRequested);
+    backend.requestShow();
+    QCOMPARE(shown.count(), 1);
+
+    QVERIFY(backend.createDeck("Stats", &error));
+    QVERIFY(backend.createCard("Stats", "Q1", "A1", "basic", {}, &error));
+    backend.selectDeck("Stats");
+    backend.setMode("cram");
+    backend.flip();
+    backend.rate(3);
+    QCOMPARE(backend.reviewed(), 1);
+    QCOMPARE(backend.correct(), 1);
+    QCOMPARE(backend.box(), 2);
+    QCOMPARE(backend.statsText(), QString("1 reviewed · 100% correct · box 2"));
+}
+
+void TestBackend::setDeckDescriptionAndQmlErrorSignals() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Described", &error, "Original"));
+
+    QSignalSpy decks(&backend, &Backend::decksChanged);
+    QVERIFY(backend.setDeckDescription("Described", " Original "));
+    QCOMPARE(decks.count(), 0);
+    QVERIFY(backend.setDeckDescription("Described", "Updated"));
+    QCOMPARE(decks.count(), 1);
+    QCOMPARE(backend.allDecks().first().description, QString("Updated"));
+
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    backend.newDeck("");
+    QCOMPARE(errors.count(), 1);
+    QVERIFY(!backend.status().isEmpty());
+
+    QTemporaryDir emptyRoot;
+    Backend empty(emptyRoot.path(), emptyRoot.filePath("state.db"));
+    QVERIFY(empty.initialize(&error));
+    QSignalSpy emptyErrors(&empty, &Backend::errorOccurred);
+    empty.addCard("Q", "A");
+    QCOMPARE(emptyErrors.count(), 1);
+    QVERIFY(!empty.status().isEmpty());
 }

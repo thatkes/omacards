@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QByteArray>
 #include <QDateTime>
 
 #include "test_config.h"
@@ -6,6 +7,27 @@
 #include "config.h"
 
 using namespace TestSupport;
+
+namespace {
+class EnvGuardValue {
+public:
+    explicit EnvGuardValue(const char *name) : m_name(name), m_old(qgetenv(name)), m_had(!m_old.isNull()) {}
+
+    ~EnvGuardValue() {
+        if (m_had)
+            qputenv(m_name, m_old);
+        else
+            qunsetenv(m_name);
+    }
+
+    void set(const QByteArray &value) { qputenv(m_name, value); }
+
+private:
+    const char *m_name;
+    QByteArray m_old;
+    bool m_had;
+};
+} // namespace
 
 void TestConfig::configDayStartHelpers() {
     const qint64 dueNight = QDateTime(QDate(2026, 11, 19), QTime(22, 49)).toMSecsSinceEpoch();
@@ -25,4 +47,34 @@ void TestConfig::configDayStartHelpers() {
              QDateTime(QDate(2026, 11, 18), QTime(3, 0)).toMSecsSinceEpoch());
     QCOMPARE(Config::studyDayStartMs(beforeRollover, 0),
              QDateTime(QDate(2026, 11, 19), QTime(0, 0)).toMSecsSinceEpoch());
+}
+
+void TestConfig::configAgainDelayFallsBackAndClamps() {
+    EnvGuardValue guard("OMACARDS_AGAIN_DELAY_MS");
+
+    // No override, non-numeric text, and an empty value all use the default.
+    qunsetenv("OMACARDS_AGAIN_DELAY_MS");
+    QCOMPARE(Config::againDelayMs(), Config::kAgainDelayMs);
+    guard.set("not-a-number");
+    QCOMPARE(Config::againDelayMs(), Config::kAgainDelayMs);
+    guard.set("");
+    QCOMPARE(Config::againDelayMs(), Config::kAgainDelayMs);
+
+    // Valid values pass through unchanged; the supported window is 0..10 min.
+    guard.set("0");
+    QCOMPARE(Config::againDelayMs(), 0);
+    guard.set("12345");
+    QCOMPARE(Config::againDelayMs(), 12345);
+    guard.set("600000");
+    QCOMPARE(Config::againDelayMs(), Config::kMaxAgainDelayMs);
+
+    guard.set("-1");
+    QCOMPARE(Config::againDelayMs(), 0);
+    guard.set("999999999");
+    QCOMPARE(Config::againDelayMs(), Config::kMaxAgainDelayMs);
+
+    // A value with trailing non-digits is rejected as a whole, not parsed as
+    // a prefix.
+    guard.set("250ms");
+    QCOMPARE(Config::againDelayMs(), Config::kAgainDelayMs);
 }

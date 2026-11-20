@@ -7,4 +7,9 @@ class TestDomain : public QObject {
 
 private slots:
     void domainParsesSharedValues();
+    void domainModeIsTotalAndCaseSensitive();
+    void domainModeRoundTrips();
+    void domainRatingConversionsAreExact();
+    void domainCardTypeIsCaseSensitive();
+    void domainCardTypeRoundTrips();
 };

@@ -8,4 +8,13 @@ class TestMathRender : public QObject {
 private slots:
     void mathFallsBackToUnicode();
     void tectonicRendererUsesSupportedFlags();
+    void renderEscapesPlainTextAndRendersMath();
+    void renderExpressionUnicodeFallbackIsStable();
+    void unicodeMathCharacterization();
+    void warningsDeduplicateAndFilterCommands();
+    void dviToolchainUsesNoShellEscapeAndNoFonts();
+    void failedLatexRenderFallsBackToUnicode();
+    void pdftocairoPixelUnitsScaleImageAndSvg();
+    void cachedSvgSkipsSecondToolchainRun();
+    void invalidInkNormalizesToBlack();
 };

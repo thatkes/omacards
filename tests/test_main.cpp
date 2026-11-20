@@ -12,6 +12,11 @@
 #include "test_filehistory.h"
 #include "test_config.h"
 #include "test_domain.h"
+#include "test_studyplanner.h"
+#include "test_studysession.h"
+#include "test_importer.h"
+#include "test_deckrepository.h"
+#include "test_translator.h"
 
 int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
@@ -40,6 +45,16 @@ int main(int argc, char **argv) {
     failed += QTest::qExec(&config, argc, argv);
     TestDomain domain;
     failed += QTest::qExec(&domain, argc, argv);
+    TestStudyPlanner studyplanner;
+    failed += QTest::qExec(&studyplanner, argc, argv);
+    TestStudySession studysession;
+    failed += QTest::qExec(&studysession, argc, argv);
+    TestImporter importer;
+    failed += QTest::qExec(&importer, argc, argv);
+    TestDeckRepository deckrepository;
+    failed += QTest::qExec(&deckrepository, argc, argv);
+    TestTranslator translator;
+    failed += QTest::qExec(&translator, argc, argv);
 
     return failed == 0 ? 0 : 1;
 }

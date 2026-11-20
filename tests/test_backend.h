@@ -28,4 +28,12 @@ private slots:
     void deckSwitchKeepsPendingAgainRepeat();
     void setMathColorsNotifiesColorChange();
     void statsSummaryKeepsContract();
+    void setModeBoundarySemantics();
+    void invalidRatingsAreNoOps();
+    void settingsClampAndPersist();
+    void signalContractsForRefreshAndNavigation();
+    void modifyCardInvalidTypeNormalizesToBasic();
+    void deckSummariesAndSearchFilterByDeck();
+    void emptySessionHelpersAndStatsText();
+    void setDeckDescriptionAndQmlErrorSignals();
 };

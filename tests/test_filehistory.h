@@ -8,4 +8,11 @@ class TestFileHistory : public QObject {
 private slots:
     void fileHistoryUndoRedoText();
     void fileHistoryUndoRemovesCreatedFile();
+    void fileHistoryUnchangedRecordIsNoop();
+    void fileHistoryUndoRedoDeletedFile();
+    void fileHistoryRecordClearsRedo();
+    void fileHistoryEmptyStacksAreNoops();
+    void fileHistoryKeepsFiftySnapshots();
+    void fileHistoryUndoFailureKeepsSnapshot();
+    void fileHistoryDescriptionOutParams();
 };
