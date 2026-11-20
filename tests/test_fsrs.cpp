@@ -84,12 +84,11 @@ void TestFsrs::fsrsIntervalClampsRetentionAndMaximum() {
     QCOMPARE(Fsrs::interval(20.0, -1.0), Fsrs::interval(20.0, Config::kMinRetention));
     QCOMPARE(Fsrs::interval(20.0, 2.0), Fsrs::interval(20.0, Config::kMaxRetention));
 
-    // A huge stability clamps to the configured maximum when the intermediate
-    // days value still fits in a 32-bit int (default retention has a modifier
-    // of ~1). A lower retention gives a larger modifier, so stability*modifier
-    // overflows the int cast and the negative result clamps to the floor.
+    // Huge stability clamps to the configured maximum at both default and
+    // lower retention. Clamping happens in double space before the int cast,
+    // so a large intermediate value cannot wrap around to the one-day floor.
     QCOMPARE(Fsrs::interval(1e9), Config::kMaxIntervalDays);
-    QCOMPARE(Fsrs::interval(1e9, 0.70), 1);
+    QCOMPARE(Fsrs::interval(1e9, 0.70), Config::kMaxIntervalDays);
 }
 
 void TestFsrs::fsrsRetrievabilityHandlesMissingAndFutureReviews() {

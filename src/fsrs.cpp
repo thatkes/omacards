@@ -28,8 +28,10 @@ double Fsrs::initialDifficulty(int rating) {
 int Fsrs::interval(double stability, double retention) {
     const double desired = qBound(Config::kMinRetention, retention, Config::kMaxRetention);
     const double modifier = (qPow(desired, 1.0 / decay) - 1.0) / factor;
-    const auto days = static_cast<int>(qRound(stability * modifier));
-    return clamp(days, 1, maximumInterval);
+    // Clamp before converting to int: a large stability at low retention can
+    // otherwise overflow the int cast and wrap around to the one-day floor.
+    const double days = clamp(stability * modifier, 1.0, static_cast<double>(maximumInterval));
+    return qRound(days);
 }
 
 double Fsrs::retrievability(const FsrsState &state, qint64 nowMs) {

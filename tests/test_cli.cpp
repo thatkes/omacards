@@ -8,8 +8,6 @@
 #include <QJsonValue>
 #include <QProcess>
 #include <QTemporaryDir>
-#include <cstdio>
-#include <unistd.h>
 
 #include "test_cli.h"
 #include "test_support.h"
@@ -26,43 +24,6 @@ QStringList sortedKeys(const QJsonObject &object) {
     keys.sort();
     return keys;
 }
-
-// Capture Cli::run's stdout. Unknown commands are not headless, so main.cpp
-// launches the GUI instead of calling Cli::run; exercise the pure function
-// directly and capture its stdout via a pipe.
-struct StdoutCapture {
-    int saved = -1;
-    int pipefd[2] = {-1, -1};
-    QByteArray out;
-
-    StdoutCapture() {
-        fflush(stdout);
-        saved = dup(STDOUT_FILENO);
-        ::pipe(pipefd);
-        dup2(pipefd[1], STDOUT_FILENO);
-    }
-
-    ~StdoutCapture() {
-        close(pipefd[0]);
-        close(pipefd[1]);
-    }
-
-    // Restore stdout first so the pipe's write end is fully closed before
-    // reading, otherwise read() would block waiting for more writers.
-    QByteArray bytes() {
-        fflush(stdout);
-        dup2(saved, STDOUT_FILENO);
-        close(saved);
-        saved = -1;
-        close(pipefd[1]);
-        pipefd[1] = -1;
-        char buffer[4096];
-        ssize_t count;
-        while ((count = read(pipefd[0], buffer, sizeof(buffer))) > 0)
-            out.append(buffer, static_cast<int>(count));
-        return out;
-    }
-};
 } // namespace
 
 void TestCli::helpIsHeadless() {
@@ -317,18 +278,22 @@ void TestCli::headlessCommandDetectionIsComplete() {
     QVERIFY(!Cli::needsOffscreen({}));
     QVERIFY(!Cli::needsOffscreen({""}));
     QVERIFY(!Cli::needsOffscreen({"open"}));
-    QVERIFY(!Cli::needsOffscreen({"banana"}));
     QVERIFY(!Cli::needsOffscreen({"open", "check"}));
+    // Unknown commands are headless too, so they fail fast instead of opening
+    // a GUI event loop that never returns.
+    QVERIFY(Cli::needsOffscreen({"banana"}));
+    QVERIFY(Cli::needsOffscreen({"banana", "--json"}));
     QVERIFY(Cli::needsOffscreen({"check", "open"}));
 }
 
 void TestCli::unknownCommandJsonError() {
-    // An unknown command is not headless, so invoking the app binary would
-    // start the GUI and block. Cli::run itself still reports a JSON error.
-    QVERIFY(!Cli::needsOffscreen({"banana", "--json"}));
-    StdoutCapture capture;
-    const int code = Cli::run({"banana", "--json"});
-    const QJsonObject result = QJsonDocument::fromJson(capture.bytes()).object();
+    // Regression test: spawning the binary with an unknown command used to
+    // launch the GUI instead of returning from Cli::run, so it never exited.
+    QVERIFY(Cli::needsOffscreen({"banana", "--json"}));
+
+    QTemporaryDir dir;
+    int code = -1;
+    const QJsonObject result = runCli({"banana", "--json"}, dir.filePath("decks"), dir.filePath("state.db"), &code);
     QCOMPARE(code, 1);
     QVERIFY(!result.value(QStringLiteral("ok")).toBool());
     QCOMPARE(result.value(QStringLiteral("error")).toString(), QString("Unknown command: banana"));

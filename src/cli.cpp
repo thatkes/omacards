@@ -288,7 +288,14 @@ QString usage() {
 namespace Cli {
 
 bool needsOffscreen(const QStringList &arguments) {
-    return !arguments.isEmpty() && isHeadlessCommand(arguments.first());
+    if (arguments.isEmpty() || arguments.first().isEmpty())
+        return false; // no command: start the GUI
+
+    // `open` is a documented GUI alias. Every other first argument is an
+    // attempted CLI command, including unknown ones. Running those headlessly
+    // makes typos fail fast with an error instead of starting a GUI event loop
+    // that never returns (and hangs agent invocations).
+    return arguments.first() != "open";
 }
 
 int run(const QStringList &arguments) {
