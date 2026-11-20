@@ -5,14 +5,12 @@
 #include "deckrepository.h"
 #include "domain.h"
 #include "filehistory.h"
-#include "mathrender.h"
 #include "store.h"
 #include "studyplanner.h"
-#include "studyqueue.h"
+#include "studysession.h"
 
 #include <QObject>
 #include <QStringList>
-#include <QTimer>
 #include <QVariantList>
 #include <QVariantMap>
 #include <QVector>
@@ -60,31 +58,33 @@ public:
     bool initialize(QString *error = nullptr);
 
     // Keeps equations in the same ink as the surrounding QML labels.
-    void setMathColors(const QString &questionColor, const QString &answerColor);
+    void setMathColors(const QString &questionColor, const QString &answerColor) {
+        m_session.setMathColors(questionColor, answerColor);
+    }
 
     QStringList decks() const { return m_deckRepo.deckNames(); }
     QString currentDeck() const { return m_currentDeck; }
     QString mode() const { return m_mode; }
-    QString question() const { return m_question; }
-    QString answer() const { return m_answer; }
-    bool showingAnswer() const { return m_showingAnswer; }
-    bool hasCard() const { return !m_currentId.isEmpty(); }
-    bool waitingForRepeat() const { return m_waitingForRepeat; }
-    int dueCount() const { return m_dueCount; }
+    QString question() const { return m_session.question(); }
+    QString answer() const { return m_session.answer(); }
+    bool showingAnswer() const { return m_session.showingAnswer(); }
+    bool hasCard() const { return m_session.hasCard(); }
+    bool waitingForRepeat() const { return m_session.waitingForRepeat(); }
+    int dueCount() const { return m_session.dueCount(); }
     int newCount() const { return m_planner.newCount(); }
     int deckDue() const { return m_planner.deckDue(m_deckRepo.deckIndex(m_currentDeck)); }
     int deckNew() const { return m_planner.deckNew(m_deckRepo.deckIndex(m_currentDeck)); }
     int streak() const { return m_store.summary(m_dayStartHour).streakDays; }
-    int reviewed() const { return m_reviewed; }
-    int correct() const { return m_correct; }
-    int box() const { return m_box; }
-    QString status() const { return m_status; }
+    int reviewed() const { return m_session.reviewed(); }
+    int correct() const { return m_session.correct(); }
+    int box() const { return m_session.box(); }
+    QString status() const { return m_session.status(); }
     QString mathEngine() const;
     int totalCards() const { return m_deckRepo.totalCards(); }
     QString decksDirectory() const { return m_deckRepo.decksDirectory(); }
     QString databasePath() const { return m_store.path(); }
     QString cardFilter() const { return m_cardFilter; }
-    QString currentCardId() const { return m_currentId; }
+    QString currentCardId() const { return m_session.currentCardId(); }
     bool canUndo() const { return m_history.canUndo(); }
     bool canRedo() const { return m_history.canRedo(); }
     int newPerDay() const { return m_newPerDay; }
@@ -147,7 +147,7 @@ public slots:
     Q_INVOKABLE void requestShow();
     Q_INVOKABLE QString statsText() const;
     Q_INVOKABLE QVariantMap statsSummary() const {
-        return m_planner.statsSummary(m_dueCount, totalCards(), m_deckRepo.deckNames().size(), m_reviewed, m_correct,
+        return m_planner.statsSummary(dueCount(), totalCards(), m_deckRepo.deckNames().size(), reviewed(), correct(),
                                       m_desiredRetention);
     }
 
@@ -168,40 +168,19 @@ signals:
 
 private:
     void load();
-    void scheduleNextRepeat();
-    void rebuildQueue();
-    void refreshDueCount();
-    void presentCard();
     void setStatus(const QString &status);
     void reportError(const QString &message);
     void saveSetting(const QString &key, const QString &value);
-    void answerCram(Rating rating);
-    void answerReview(Rating rating);
 
     Store m_store;
     FileHistory m_history;
     DeckRepository m_deckRepo;
     StudyPlanner m_planner;
-    StudyQueue m_queue;
-    QTimer m_reviewAgainTimer;
-    MathRenderer m_math;
-    qint64 m_reviewAgainDelayMs = Config::kAgainDelayMs;
-    int m_dueCount = 0;
-    int m_reviewed = 0;
-    int m_correct = 0;
-    int m_box = 0;
+    StudySession m_session;
     int m_newPerDay = Config::kDefaultNewPerDay;
     double m_desiredRetention = Config::kDefaultRetention;
     int m_dayStartHour = Config::kDefaultDayStartHour;
     QString m_currentDeck;
     QString m_mode = "review";
-    QString m_question;
-    QString m_answer;
-    QString m_questionInk = "#000000";
-    QString m_answerInk = "#000000";
-    QString m_status;
-    QString m_currentId;
     QString m_cardFilter;
-    bool m_showingAnswer = false;
-    bool m_waitingForRepeat = false;
 };

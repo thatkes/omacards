@@ -18,6 +18,7 @@ HEADERS += \
     src/store.h \
     src/studyplanner.h \
     src/studyqueue.h \
+    src/studysession.h \
     src/theme.h \
     src/traycontroller.h \
     src/translator.h
@@ -36,6 +37,7 @@ SOURCES += \
     src/store.cpp \
     src/studyplanner.cpp \
     src/studyqueue.cpp \
+    src/studysession.cpp \
     src/theme.cpp \
     src/traycontroller.cpp \
     src/translator.cpp

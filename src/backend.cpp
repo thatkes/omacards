@@ -1,14 +1,13 @@
-// Backend owns cards, scheduling and files. QML only binds to properties and
-// calls the small set of Q_INVOKABLE actions below.
+// Backend is the QML/CLI facade: it validates input, keeps the current deck
+// and settings, and forwards state from the repository, planner and session.
 #include "backend.h"
 
-#include <QDateTime>
+#include "mathrender.h"
+
 #include <QDesktopServices>
 #include <QFileInfo>
-#include <QHash>
 #include <QStandardPaths>
 #include <QUrl>
-#include <QVariantMap>
 
 namespace {
 QString defaultDataDirectory() {
@@ -29,25 +28,22 @@ QString defaultDatabasePath() {
     return fromEnv.isEmpty() ? defaultDataDirectory() + "/state.db" : fromEnv;
 }
 
-// TeX typesets at 12pt (~16px at 96dpi) while the QML labels use 30px/24px.
-// Scaling the SVG keeps inline math legible next to the surrounding text.
-constexpr double kQuestionMathScale = 2.0;
-constexpr double kAnswerMathScale = 1.6;
-
 } // namespace
 
 Backend::Backend(const QString &decksDirectory, const QString &databasePath, QObject *parent)
     : QObject(parent), m_store(databasePath.isEmpty() ? defaultDatabasePath() : databasePath),
       m_deckRepo(decksDirectory.isEmpty() ? defaultDecksDirectory() : decksDirectory, m_store, m_history, this),
-      m_planner(m_store) {
+      m_planner(m_store), m_session(m_deckRepo, m_planner, this) {
     connect(&m_deckRepo, &DeckRepository::reloadRequested, this, &Backend::refresh);
     connect(&m_deckRepo, &DeckRepository::errorOccurred, this, &Backend::reportError);
     connect(&m_deckRepo, &DeckRepository::historyChanged, this, &Backend::historyChanged);
     connect(&m_deckRepo, &DeckRepository::statusMessage, this, &Backend::setStatus);
-
-    m_reviewAgainDelayMs = Config::againDelayMs();
-    m_reviewAgainTimer.setSingleShot(true);
-    connect(&m_reviewAgainTimer, &QTimer::timeout, this, &Backend::presentCard);
+    connect(&m_session, &StudySession::modeChanged, this, &Backend::modeChanged);
+    connect(&m_session, &StudySession::cardChanged, this, &Backend::cardChanged);
+    connect(&m_session, &StudySession::dueCountChanged, this, &Backend::dueCountChanged);
+    connect(&m_session, &StudySession::statsChanged, this, &Backend::statsChanged);
+    connect(&m_session, &StudySession::statusChanged, this, &Backend::statusChanged);
+    connect(&m_session, &StudySession::errorOccurred, this, &Backend::reportError);
 }
 
 std::unique_ptr<Backend> Backend::fromEnvironment(QObject *parent) {
@@ -75,19 +71,6 @@ bool Backend::initialize(QString *error) {
     return true;
 }
 
-void Backend::setMathColors(const QString &questionColor, const QString &answerColor) {
-    if (m_questionInk == questionColor && m_answerInk == answerColor)
-        return;
-    m_questionInk = questionColor;
-    m_answerInk = answerColor;
-    const Card *card = m_deckRepo.cardById(m_currentId);
-    if (!card)
-        return;
-    m_question = m_math.render(DeckIO::displayQuestion(*card), m_questionInk, kQuestionMathScale);
-    m_answer = m_math.render(DeckIO::displayAnswer(*card), m_answerInk, kAnswerMathScale);
-    emit cardChanged();
-}
-
 void Backend::load() {
     m_deckRepo.load(&m_currentDeck);
     m_planner.setDecks(m_deckRepo.deckData());
@@ -99,118 +82,16 @@ void Backend::load() {
     emit decksChanged();
     emit currentDeckChanged();
     emit cardsChanged();
-    dueCountChanged();
-}
-
-void Backend::refreshDueCount() {
-    // Pending Again repeats are not "due" in the database yet, but they are
-    // still work waiting in this session.
-    m_dueCount = availableCount() + m_queue.pendingRepeatCount();
-    emit dueCountChanged();
+    m_session.updateDueCount();
 }
 
 void Backend::refresh() {
     load();
-    rebuildQueue();
-}
-
-void Backend::rebuildQueue() {
-    // A watcher refresh can rebuild the queue while a repeat is pending. Keep
-    // those deadlines for cards that are still available; explicit deck and
-    // mode changes clear them instead.
-    const QHash<QString, qint64> pending = m_queue.pendingRepeats();
-    m_reviewAgainTimer.stop();
-    m_currentId.clear();
-
-    const Deck *deck = m_deckRepo.deckByName(m_currentDeck);
-    if (deck && Domain::modeFromString(m_mode) == StudyMode::Cram) {
-        m_queue.buildCram(deck->cards);
-    } else if (deck) {
-        QStringList dueIds;
-        QStringList freshIds;
-        m_planner.reviewIds(m_currentDeck, &dueIds, &freshIds);
-        m_queue.buildReview(dueIds, freshIds, pending);
-    } else {
-        m_queue.clear();
-    }
-
-    refreshDueCount();
-    presentCard();
-}
-
-void Backend::scheduleNextRepeat() {
-    m_reviewAgainTimer.stop();
-    if (Domain::modeFromString(m_mode) != StudyMode::Review)
-        return;
-    const qint64 wait = m_queue.nextWait(QDateTime::currentMSecsSinceEpoch());
-    if (wait > 0)
-        m_reviewAgainTimer.start(wait);
-}
-
-void Backend::presentCard() {
-    m_showingAnswer = false;
-    m_waitingForRepeat = false;
-    const bool cram = Domain::modeFromString(m_mode) == StudyMode::Cram;
-    QString nextId;
-    int nextBox = 0;
-    const StudyQueue::Next next = m_queue.next(QDateTime::currentMSecsSinceEpoch(), &nextId, nullptr, &nextBox);
-
-    if (next == StudyQueue::Next::Finished) {
-        m_currentId.clear();
-        m_question.clear();
-        m_answer.clear();
-        m_reviewAgainTimer.stop();
-        setStatus(cram ? tr("No cards yet. Press N to add one.")
-                       : tr("All caught up. Press C to cram or N to add a card."));
-        emit cardChanged();
-        return;
-    }
-    if (next == StudyQueue::Next::Waiting) {
-        scheduleNextRepeat();
-        m_waitingForRepeat = true;
-        m_currentId.clear();
-        m_question.clear();
-        m_answer.clear();
-        setStatus(tr("Repeating a card in a moment…"));
-        emit cardChanged();
-        return;
-    }
-
-    m_currentId = nextId;
-    if (cram)
-        m_box = nextBox;
-    scheduleNextRepeat();
-
-    const Card *card = m_deckRepo.cardById(m_currentId);
-    if (!card) {
-        m_queue.remove(m_currentId);
-        m_currentId.clear();
-        presentCard();
-        return;
-    }
-    m_question = m_math.render(DeckIO::displayQuestion(*card), m_questionInk, kQuestionMathScale);
-    m_answer = m_math.render(DeckIO::displayAnswer(*card), m_answerInk, kAnswerMathScale);
-
-    if (Domain::modeFromString(m_mode) == StudyMode::Review) {
-        const FsrsState state = m_planner.stateFor(*card);
-        const double recall = state.reps > 0 ? Fsrs::retrievability(state, QDateTime::currentMSecsSinceEpoch()) : 1.0;
-        setStatus(
-            tr("Review · predicted recall %1% · FSRS box %2").arg(qRound(recall * 100)).arg(qMax(1, m_reviewed + 1)));
-    } else {
-        setStatus(tr("Cram · box %1 of %2 · next in %3 cards")
-                      .arg(m_box)
-                      .arg(Config::kLeitnerBoxes)
-                      .arg(Config::kLeitnerIntervals[m_box - 1]));
-    }
-    emit statsChanged();
-    emit cardChanged();
+    m_session.rebuild(m_currentDeck);
 }
 
 void Backend::setStatus(const QString &status) {
-    if (m_status == status)
-        return;
-    m_status = status;
-    emit statusChanged();
+    m_session.setStatus(status);
 }
 
 void Backend::reportError(const QString &message) {
@@ -264,7 +145,7 @@ void Backend::setNewPerDay(int count) {
     if (!storeError.isEmpty())
         reportError(tr("Cannot read scheduling state: %1").arg(storeError));
     emit settingsChanged();
-    rebuildQueue();
+    m_session.rebuild(m_currentDeck);
 }
 
 void Backend::setDesiredRetention(double retention) {
@@ -296,7 +177,7 @@ void Backend::saveSetting(const QString &key, const QString &value) {
 }
 
 QString Backend::mathEngine() const {
-    switch (m_math.detect()) {
+    switch (m_session.mathEngine()) {
     case MathRenderer::Engine::LatexSvg:
         return tr("LaTeX (SVG)");
     case MathRenderer::Engine::Unicode:
@@ -313,71 +194,30 @@ void Backend::selectDeck(const QString &name) {
     emit currentDeckChanged();
     emit cardsChanged();
     emit decksChanged();
-    rebuildQueue();
+    m_session.rebuild(m_currentDeck);
 }
 
 void Backend::setMode(const QString &mode) {
     if (mode == m_mode)
         return;
     m_mode = Domain::toString(Domain::modeFromString(mode));
-    m_reviewed = 0;
-    m_correct = 0;
-    emit modeChanged();
-    emit statsChanged();
-    rebuildQueue();
+    m_session.setMode(m_mode);
+    m_session.rebuild(m_currentDeck);
 }
 
 void Backend::flip() {
-    if (!hasCard())
-        return;
-    m_showingAnswer = !m_showingAnswer;
-    emit cardChanged();
+    m_session.flip();
 }
 
 void Backend::rate(int rating) {
-    if (!hasCard())
+    if (!m_session.rate(rating, m_desiredRetention))
         return;
-    const Rating parsed = Domain::ratingFromInt(rating);
-    if (parsed == Rating::Invalid)
-        return;
-    ++m_reviewed;
-    if (parsed == Rating::Good)
-        ++m_correct;
-    if (Domain::modeFromString(m_mode) == StudyMode::Cram)
-        answerCram(parsed);
-    else
-        answerReview(parsed);
-    emit statsChanged();
-    presentCard();
     emit cardsChanged();
     emit decksChanged();
 }
 
-void Backend::answerReview(Rating rating) {
-    Card *card = m_deckRepo.cardById(m_currentId);
-    if (!card)
-        return;
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    QString storeError;
-    if (!m_planner.recordReview(*card, rating, m_desiredRetention, now, &storeError))
-        reportError(tr("Cannot save review: %1").arg(storeError));
-
-    m_queue.remove(card->id);
-    if (rating == Rating::Again) {
-        // Keep the FSRS due date above, but give the card one more appearance
-        // in this sitting after a short break.
-        m_queue.repeatAfter(card->id, now + m_reviewAgainDelayMs);
-    }
-    refreshDueCount();
-}
-
-void Backend::answerCram(Rating rating) {
-    m_queue.advanceCram(m_currentId, rating, &m_box);
-}
-
 void Backend::showNext() {
-    if (m_showingAnswer)
-        flip();
+    m_session.showNext();
 }
 
 void Backend::newDeck(const QString &name) {
@@ -471,9 +311,10 @@ void Backend::updateCard(const QString &cardId, const QString &question, const Q
 }
 
 void Backend::removeCurrentCard() {
-    if (m_currentId.isEmpty())
+    const QString cardId = m_session.currentCardId();
+    if (cardId.isEmpty())
         return;
-    removeCard(m_currentId);
+    removeCard(cardId);
 }
 
 void Backend::removeCard(const QString &cardId) {
@@ -541,6 +382,5 @@ void Backend::requestShow() {
 }
 
 QString Backend::statsText() const {
-    const double accuracy = m_reviewed > 0 ? 100.0 * m_correct / m_reviewed : 0.0;
-    return tr("%1 reviewed · %2% correct · box %3").arg(m_reviewed).arg(qRound(accuracy)).arg(m_box);
+    return m_session.statsText();
 }
