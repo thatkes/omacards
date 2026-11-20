@@ -8,6 +8,7 @@ HEADERS += \
     src/backend.h \
     src/cli.h \
     src/config.h \
+    src/deckrepository.h \
     src/deck.h \
     src/domain.h \
     src/filehistory.h \
@@ -25,6 +26,7 @@ SOURCES += \
     src/backend.cpp \
     src/cli.cpp \
     src/deck.cpp \
+    src/deckrepository.cpp \
     src/domain.cpp \
     src/filehistory.cpp \
     src/fsrs.cpp \

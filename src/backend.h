@@ -2,6 +2,7 @@
 
 #include "config.h"
 #include "deck.h"
+#include "deckrepository.h"
 #include "domain.h"
 #include "filehistory.h"
 #include "fsrs.h"
@@ -10,7 +11,6 @@
 #include "studyqueue.h"
 
 #include <QByteArray>
-#include <QFileSystemWatcher>
 #include <QHash>
 #include <QObject>
 #include <QStringList>
@@ -19,10 +19,6 @@
 #include <QVector>
 
 #include <memory>
-
-namespace DeckImport {
-struct Result;
-}
 
 class Backend : public QObject {
     Q_OBJECT
@@ -67,7 +63,7 @@ public:
     // Keeps equations in the same ink as the surrounding QML labels.
     void setMathColors(const QString &questionColor, const QString &answerColor);
 
-    QStringList decks() const { return m_deckNames; }
+    QStringList decks() const { return m_deckRepo.deckNames(); }
     QString currentDeck() const { return m_currentDeck; }
     QString mode() const { return m_mode; }
     QString question() const { return m_question; }
@@ -86,7 +82,7 @@ public:
     QString status() const { return m_status; }
     QString mathEngine() const;
     int totalCards() const;
-    QString decksDirectory() const { return m_decksDir; }
+    QString decksDirectory() const { return m_deckRepo.decksDirectory(); }
     QString databasePath() const { return m_store.path(); }
     QString cardFilter() const { return m_cardFilter; }
     QString currentCardId() const { return m_currentId; }
@@ -100,7 +96,7 @@ public:
     QVariantList cardList() const;
     ReviewSummary reviewSummary() const { return m_store.summary(m_dayStartHour); }
 
-    QVector<Deck> allDecks() const { return m_decks; }
+    QVector<Deck> allDecks() const { return m_deckRepo.decks(); }
     int countDue(const QString &deckName = {}) const;
     QVector<Card> dueCards(const QString &deckName = {}) const;
     QVector<Card> searchCards(const QString &text, const QString &deckName = {}) const;
@@ -185,7 +181,6 @@ private:
         QVector<int> dueIncludingNewPerDeck; // totalDue in CLI stats includes new cards
     };
 
-    bool commitImport(const DeckImport::Result &result, QString *error);
     void load();
     bool refreshSnapshot();
     FsrsState effectiveState(const Card &card) const;
@@ -197,35 +192,15 @@ private:
     void setStatus(const QString &status);
     void reportError(const QString &message);
     void saveSetting(const QString &key, const QString &value);
-    Deck *deckByName(const QString &name);
-    const Deck *deckByName(const QString &name) const;
-    int deckIndex(const QString &name) const;
-    Card *cardById(const QString &id);
     void answerCram(Rating rating);
     void answerReview(Rating rating);
-    void recordHistory(const QString &path, const QByteArray &before, bool existedBefore, const QString &description);
-    bool commitDeckEdit(Deck *deck, const Deck &original, const QByteArray &before, const QString &description,
-                        QString *error);
 
-    QString m_decksDir;
-    QString m_currentDeck;
-    QString m_mode = "review";
-    QString m_question;
-    QString m_answer;
-    QString m_questionInk = "#000000";
-    QString m_answerInk = "#000000";
-    QString m_status;
-    QString m_currentId;
-    QString m_cardFilter;
-    QStringList m_deckNames;
-    QVector<Deck> m_decks;
+    Store m_store;
+    FileHistory m_history;
+    DeckRepository m_deckRepo;
     StudyQueue m_queue;
     QTimer m_reviewAgainTimer;
-    FileHistory m_history;
-    Store m_store;
     MathRenderer m_math;
-    QFileSystemWatcher m_watcher;
-    QTimer m_reloadTimer;
     StudySnapshot m_snapshot;
     bool m_snapshotValid = false;
     qint64 m_reviewAgainDelayMs = Config::kAgainDelayMs;
@@ -236,6 +211,15 @@ private:
     int m_newPerDay = Config::kDefaultNewPerDay;
     double m_desiredRetention = Config::kDefaultRetention;
     int m_dayStartHour = Config::kDefaultDayStartHour;
+    QString m_currentDeck;
+    QString m_mode = "review";
+    QString m_question;
+    QString m_answer;
+    QString m_questionInk = "#000000";
+    QString m_answerInk = "#000000";
+    QString m_status;
+    QString m_currentId;
+    QString m_cardFilter;
     bool m_showingAnswer = false;
     bool m_waitingForRepeat = false;
 };
