@@ -64,84 +64,20 @@ Priority order. Remaining work: #5 (independent, single-commit) first, then #1 (
 
 ### 2. Extract tray + app bootstrap from `main.cpp` — ✅ Done (`2ab7293`)
 
-The plan below is kept as the implementation record; as-built details are inlined.
+Moved tray icon painting, menu construction and signal wiring into
+`src/traycontroller.{h,cpp}`; `main()` now only handles startup, QML wiring
+and `app.exec()`. `TrayController` holds `m_menu` as a `std::unique_ptr<QMenu>`
+declared before `m_tray` so the tray is destroyed first and never owns a
+dangling context menu. Kept the existing `"review"` / `"cram"` boundary
+strings (no type-safety changes). Verified with `./bin/build`, a clean
+`clang-format --dry-run --Werror` and `./bin/test` at 54/54; manual tray
+checks (icon, theme recolor, tooltip, menu actions, right-click) still need
+a desktop run.
 
-**Goal.** After this change `main()` does only: argument parsing, offscreen dispatch, `QApplication`/style setup, translator/theme/backend construction, QML engine load, the `activate` callback, and `app.exec()`. All tray icon drawing, menu construction and signal wiring moves into a new `TrayController`.
+### 3. Centralize configuration constants — ✅ Done (`db98d7b`, `bed92cf`)
 
-**Files**
-- New `src/traycontroller.h` — class declaration.
-- New `src/traycontroller.cpp` — icon painting (moved from `main.cpp:30-45`) plus implementation.
-- Edit `src/main.cpp` — remove `trayIcon()` and the whole `if (QSystemTrayIcon::isSystemTrayAvailable()) { ... }` block (`main.cpp:101-131`); instantiate the controller.
-- Edit `omacards.pro` — add both files to `HEADERS` / `SOURCES`.
-
-**API sketch** (`src/traycontroller.h`)
-
-```cpp
-#pragma once
-#include <QMenu>
-#include <QObject>
-#include <QSystemTrayIcon>
-#include <functional>
-#include <memory>
-
-class Backend;
-class Theme;
-
-class TrayController : public QObject {
-public:
-    TrayController(Backend &backend, const Theme &theme, std::function<void()> activate,
-                   QObject *parent = nullptr);
-
-private:
-    Backend &m_backend;
-    const Theme &m_theme;
-    std::function<void()> m_activate;
-    std::unique_ptr<QMenu> m_menu;   // declared BEFORE m_tray on purpose
-    QSystemTrayIcon m_tray;
-};
-```
-
-No `Q_OBJECT` macro is needed: the class only uses base-`QObject` `QObject::connect` with `this` as context. (If own signals are added later, add `Q_OBJECT`; qmake AUTOMOC picks it up from `HEADERS`.)
-
-As built, `<QMenu>` is included in the header rather than forward-declared: `std::unique_ptr<QMenu>`'s deleter is instantiated where `TrayController` is destroyed (`main.cpp`), so the type must be complete there.
-
-**Implementation steps**
-
-1. Move `trayIcon(const QString &accent)` verbatim into an anonymous namespace at the top of `traycontroller.cpp` (theme lookup, `QPixmap`/`QPainter` "C" fallback).
-2. Constructor initializer list, in member-declaration order: `m_backend(backend)`, `m_theme(theme)`, `m_activate(std::move(activate))`, `m_menu(std::make_unique<QMenu>())`, `m_tray(trayIcon(theme.accent()))`.
-   - **Destruction order matters:** members are destroyed in reverse declaration order, so `m_tray` dies before `m_menu`. This preserves the ownership fix from #6 (`main.cpp:102-104`) — `QSystemTrayIcon` does not own its context menu.
-3. Constructor body, reproducing today's behavior exactly:
-   - `m_tray.setToolTip(QObject::tr("omacards — %1 due").arg(m_backend.dueCount()));`
-   - Build menu in the current order: `Open` → `m_activate`; `Review` → `{ m_backend.setMode("review"); m_activate(); }`; `Cram` → `{ m_backend.setMode("cram"); m_activate(); }`; `addSeparator()`; `Quit` → `&QApplication::quit`. Keep `QObject::tr` for all labels. Functor-added actions are owned by the menu — no extra cleanup.
-   - `m_tray.setContextMenu(m_menu.get());`
-   - Connections, all with `this` as the context object so they auto-disconnect:
-     - `Backend::dueCountChanged` → lambda: refresh tooltip from `m_backend.dueCount()`.
-     - `Theme::changed` → lambda: `m_tray.setIcon(trayIcon(m_theme.accent()))`.
-     - `QSystemTrayIcon::activated` → lambda: ignore `QSystemTrayIcon::Context`, otherwise `m_backend.setMode("review")` and `m_activate()`.
-   - `m_tray.show();`
-4. In `main.cpp`, delete `trayIcon()` and the tray block, drop now-unused includes (`<QColor>`, `<QFont>`, `<QMenu>`, `<QPainter>`, `<QPixmap>`; keep `<QIcon>` for `app.setWindowIcon`, keep `<QSystemTrayIcon>` for the availability check). After the QML window/activate wiring (`main.cpp:93-99`), add:
-
-   ```cpp
-   std::unique_ptr<TrayController> tray;
-   if (QSystemTrayIcon::isSystemTrayAvailable())
-       tray = std::make_unique<TrayController>(backend, theme, activate);
-   return app.exec();
-   ```
-
-   **Trap:** a stack-local controller declared inside the `if` would be destroyed before `app.exec()`. Use the `unique_ptr` (or declare it before the `if`).
-5. Leave the offscreen CLI dispatch (`main.cpp:52-59`) untouched — it must still run before any `QApplication` exists.
-6. Keep the existing `"review"` / `"cram"` strings at the boundary; do not pull #4 into this item.
-
-**Verification**
-- `./bin/build` succeeds; `./bin/test` reported **54 passed, 0 failed, 0 skipped** (52 slots plus Qt Test's init/cleanup cases), unchanged from before the refactor.
-- `clang-format --dry-run --Werror` clean on all touched C++ files.
-- Diff review confirmed every removed line from `main.cpp` has an equivalent line in `traycontroller.cpp`.
-- Still manual, on a machine with a system tray: icon appears; theme switch recolors it; tooltip updates when the due count changes; Open/Review/Cram/Quit work; a right-click does not re-open the window.
-
-### 3. Centralize configuration constants — ✅ Done
-- Create `config.h` with named constants: `kDefaultNewPerDay`, `kDefaultRetention`, `kAgainDelayMs`, `kLeitnerBoxes`, `kMaxIntervalDays`.
-- Read env overrides (`OMACARDS_AGAIN_DELAY_MS`) in one place; expose via `Backend`/settings.
-- Remove scattered literals.
+`src/config.h` holds the named defaults and `Backend::fromEnvironment()` reads
+env overrides in one place; day-start-hour was layered in later.
 
 ### 4. Type safety at boundaries — deferred
 
@@ -254,14 +190,16 @@ int main(int argc, char **argv) {
 - Each moved slot's diff is only a qualification change; no assertion or setup is altered.
 - `qmake6` from a clean `build/tests` generates all `moc_test_*.cpp` files without manual `.moc` includes.
 
-### 6. Tooling & hygiene — ✅ Done
-- Add `.clang-format` (match existing style) and run it once.
-- Add a CI step: build + `./bin/test` offscreen.
-- Fix the `QMenu` parent (pass `&tray` or use `std::unique_ptr`).
-- Make `Backend` constructor require explicit paths (remove empty defaults) or provide a named factory `Backend::fromEnvironment()`.
+### 6. Tooling & hygiene — ✅ Done (`db98d7b`, `2ab7293`)
 
-### 7. Math renderer cleanup — ✅ Done
-- Make toolchain detection a single `MathRenderer::detect()` returning an enum (`None`, `Unicode`, `LatexSvg`) instead of ad hoc checks scattered in `mathEngine()`.
+`.clang-format` committed and applied, CI runs build + offscreen tests, the
+tray `QMenu` ownership bug fixed, and `Backend::fromEnvironment()` added as the
+named factory for injected paths.
+
+### 7. Math renderer cleanup — ✅ Done (`db98d7b`)
+
+Toolchain detection consolidated into `MathRenderer::detect()` returning an
+enum (`None`, `Unicode`, `LatexSvg`).
 
 ## Explicitly out of scope (do not bundle)
 
