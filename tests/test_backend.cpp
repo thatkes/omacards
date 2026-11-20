@@ -680,6 +680,7 @@ void TestBackend::setModeBoundarySemantics() {
     QVERIFY(backend.createDeck("Modes", &error));
     QVERIFY(backend.createCard("Modes", "Q1", "A1", "basic", {}, &error));
     QVERIFY(backend.createCard("Modes", "Q2", "A2", "basic", {}, &error));
+    QVERIFY(backend.createCard("Modes", "Q3", "A3", "basic", {}, &error));
     backend.selectDeck("Modes");
     QVERIFY(backend.hasCard());
     QCOMPARE(backend.mode(), QString("review"));
@@ -691,30 +692,44 @@ void TestBackend::setModeBoundarySemantics() {
     QObject::connect(&backend, &Backend::modeChanged, &backend, [&order] { order << QStringLiteral("mode"); });
     QObject::connect(&backend, &Backend::statsChanged, &backend, [&order] { order << QStringLiteral("stats"); });
 
-    // Unknown text normalizes to review; the raw argument still differs from
-    // the canonical mode, so the boundary runs and the queue is rebuilt.
+    // Unknown text normalizes to review, but the raw argument differs from the
+    // canonical mode, so both boundaries run: the session resets counters and
+    // emits modeChanged before statsChanged, then the facade rebuilds.
     backend.flip();
     QVERIFY(backend.showingAnswer());
-    order.clear();
-    backend.setMode("banana");
-    QCOMPARE(backend.mode(), QString("review"));
-    QVERIFY(statsChanged.count() >= 1);
-    QVERIFY(cardChanged.count() >= 1);
-    QVERIFY(!backend.showingAnswer()); // rebuild re-presented the card
-    // The rebuild re-presents the card, so statsChanged is observable. Note
-    // that the current facade forwards the normalized mode to the session,
-    // which dedupes it: no modeChanged is emitted for this input today.
-    QVERIFY(order.contains(QStringLiteral("stats")));
-
+    backend.rate(3);
+    QCOMPARE(backend.reviewed(), 1);
     modeChanged.clear();
     statsChanged.clear();
     cardChanged.clear();
+    order.clear();
+    backend.setMode("banana");
+    QCOMPARE(backend.mode(), QString("review"));
+    QCOMPARE(backend.reviewed(), 0);
+    QCOMPARE(backend.correct(), 0);
+    QCOMPARE(modeChanged.count(), 1);
+    QVERIFY(statsChanged.count() >= 1);
+    QVERIFY(cardChanged.count() >= 1);
+    QVERIFY(!backend.showingAnswer()); // rebuild re-presented the card
+    QCOMPARE(order.first(), QStringLiteral("mode"));
+    QVERIFY(order.contains(QStringLiteral("stats")));
+
     backend.flip();
+    backend.rate(3);
+    QCOMPARE(backend.reviewed(), 1);
+    modeChanged.clear();
+    statsChanged.clear();
+    cardChanged.clear();
+    order.clear();
     backend.setMode("CRAM");
     QCOMPARE(backend.mode(), QString("review"));
+    QCOMPARE(backend.reviewed(), 0);
+    QCOMPARE(backend.correct(), 0);
+    QCOMPARE(modeChanged.count(), 1);
     QVERIFY(statsChanged.count() >= 1);
     QVERIFY(cardChanged.count() >= 1);
     QVERIFY(!backend.showingAnswer());
+    QCOMPARE(order.first(), QStringLiteral("mode"));
 
     // Canonical input in the current mode is a complete no-op.
     modeChanged.clear();

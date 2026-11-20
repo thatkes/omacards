@@ -16,9 +16,9 @@ StudySession::StudySession(DeckRepository &decks, StudyPlanner &planner, QObject
 }
 
 void StudySession::setMode(const QString &mode) {
-    if (mode == m_mode)
+    if (mode == Domain::toString(m_mode))
         return;
-    m_mode = Domain::toString(Domain::modeFromString(mode));
+    m_mode = Domain::modeFromString(mode);
     m_reviewed = 0;
     m_correct = 0;
     emit modeChanged();
@@ -34,7 +34,7 @@ void StudySession::rebuild(const QString &deckName) {
     m_currentId.clear();
 
     const Deck *deck = m_decks.deckByName(deckName);
-    if (deck && Domain::modeFromString(m_mode) == StudyMode::Cram) {
+    if (deck && m_mode == StudyMode::Cram) {
         m_queue.buildCram(deck->cards);
     } else if (deck) {
         QStringList dueIds;
@@ -101,7 +101,7 @@ bool StudySession::rate(int rating, double desiredRetention) {
     ++m_reviewed;
     if (parsed == Rating::Good)
         ++m_correct;
-    if (Domain::modeFromString(m_mode) == StudyMode::Cram)
+    if (m_mode == StudyMode::Cram)
         answerCram(parsed);
     else
         answerReview(parsed, desiredRetention);
@@ -134,7 +134,7 @@ void StudySession::answerCram(Rating rating) {
 
 void StudySession::scheduleNextRepeat() {
     m_repeatTimer.stop();
-    if (Domain::modeFromString(m_mode) != StudyMode::Review)
+    if (m_mode != StudyMode::Review)
         return;
     const qint64 wait = m_queue.nextWait(QDateTime::currentMSecsSinceEpoch());
     if (wait > 0)
@@ -144,7 +144,7 @@ void StudySession::scheduleNextRepeat() {
 void StudySession::presentCard() {
     m_showingAnswer = false;
     m_waitingForRepeat = false;
-    const bool cram = Domain::modeFromString(m_mode) == StudyMode::Cram;
+    const bool cram = m_mode == StudyMode::Cram;
     QString nextId;
     int nextBox = 0;
     const StudyQueue::Next next = m_queue.next(QDateTime::currentMSecsSinceEpoch(), &nextId, nullptr, &nextBox);
@@ -185,7 +185,7 @@ void StudySession::presentCard() {
     m_question = m_math.render(DeckIO::displayQuestion(*card), m_questionInk, kQuestionMathScale);
     m_answer = m_math.render(DeckIO::displayAnswer(*card), m_answerInk, kAnswerMathScale);
 
-    if (Domain::modeFromString(m_mode) == StudyMode::Review) {
+    if (m_mode == StudyMode::Review) {
         const FsrsState state = m_planner.stateFor(*card);
         const double recall = state.reps > 0 ? Fsrs::retrievability(state, QDateTime::currentMSecsSinceEpoch()) : 1.0;
         setStatus(

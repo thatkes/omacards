@@ -32,7 +32,7 @@ public:
     bool rate(int rating, double desiredRetention);
     void showNext();
 
-    QString mode() const { return m_mode; }
+    StudyMode mode() const { return m_mode; }
     QString question() const { return m_question; }
     QString answer() const { return m_answer; }
     bool showingAnswer() const { return m_showingAnswer; }
@@ -73,7 +73,7 @@ private:
     int m_reviewed = 0;
     int m_correct = 0;
     int m_box = 0;
-    QString m_mode = "review";
+    StudyMode m_mode = StudyMode::Review;
     QString m_question;
     QString m_answer;
     QString m_questionInk = "#000000";

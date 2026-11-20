@@ -185,10 +185,12 @@ void Backend::selectDeck(const QString &name) {
 }
 
 void Backend::setMode(const QString &mode) {
-    if (mode == m_mode)
+    // Compare the raw argument, not the parsed enum: noncanonical text still
+    // reaches the session boundary and resets the sitting.
+    if (mode == Domain::toString(m_mode))
         return;
-    m_mode = Domain::toString(Domain::modeFromString(mode));
-    m_session.setMode(m_mode);
+    m_mode = Domain::modeFromString(mode);
+    m_session.setMode(mode);
     m_session.rebuild(m_currentDeck);
 }
 

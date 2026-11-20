@@ -64,7 +64,7 @@ public:
 
     QStringList decks() const { return m_deckRepo.deckNames(); }
     QString currentDeck() const { return m_currentDeck; }
-    QString mode() const { return m_mode; }
+    QString mode() const { return Domain::toString(m_mode); }
     QString question() const { return m_session.question(); }
     QString answer() const { return m_session.answer(); }
     bool showingAnswer() const { return m_session.showingAnswer(); }
@@ -176,6 +176,6 @@ private:
     double m_desiredRetention = Config::kDefaultRetention;
     int m_dayStartHour = Config::kDefaultDayStartHour;
     QString m_currentDeck;
-    QString m_mode = "review";
+    StudyMode m_mode = StudyMode::Review;
     QString m_cardFilter;
 };

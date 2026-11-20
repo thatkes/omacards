@@ -100,7 +100,7 @@ void TestStudySession::setModeNormalizesInvalidInput() {
                      [&order] { order << QStringLiteral("stats"); });
 
     fixture.session.setMode("banana");
-    QCOMPARE(fixture.session.mode(), QString("review"));
+    QCOMPARE(fixture.session.mode(), StudyMode::Review);
     QCOMPARE(fixture.session.reviewed(), 0);
     QCOMPARE(fixture.session.correct(), 0);
     QCOMPARE(modeSpy.count(), 1);
@@ -130,7 +130,7 @@ void TestStudySession::setModeUppercaseCramNormalizesToReview() {
                      [&order] { order << QStringLiteral("stats"); });
 
     fixture.session.setMode("CRAM");
-    QCOMPARE(fixture.session.mode(), QString("review"));
+    QCOMPARE(fixture.session.mode(), StudyMode::Review);
     QCOMPARE(fixture.session.reviewed(), 0);
     QCOMPARE(fixture.session.correct(), 0);
     QCOMPARE(modeSpy.count(), 1);
@@ -154,20 +154,20 @@ void TestStudySession::setModeCanonicalInputIsNoOp() {
     QSignalSpy statsSpy(&fixture.session, &StudySession::statsChanged);
 
     fixture.session.setMode("review");
-    QCOMPARE(fixture.session.mode(), QString("review"));
+    QCOMPARE(fixture.session.mode(), StudyMode::Review);
     QCOMPARE(fixture.session.reviewed(), 1);
     QCOMPARE(fixture.session.correct(), 1);
     QCOMPARE(modeSpy.count(), 0);
     QCOMPARE(statsSpy.count(), 0);
 
     fixture.session.setMode("cram");
-    QCOMPARE(fixture.session.mode(), QString("cram"));
+    QCOMPARE(fixture.session.mode(), StudyMode::Cram);
     QCOMPARE(modeSpy.count(), 1);
     modeSpy.clear();
     statsSpy.clear();
 
     fixture.session.setMode("cram"); // canonical cram is also a no-op
-    QCOMPARE(fixture.session.mode(), QString("cram"));
+    QCOMPARE(fixture.session.mode(), StudyMode::Cram);
     QCOMPARE(fixture.session.reviewed(), 0);
     QCOMPARE(modeSpy.count(), 0);
     QCOMPARE(statsSpy.count(), 0);
@@ -190,7 +190,7 @@ void TestStudySession::setModeCramSwitchesAndResets() {
                      [&order] { order << QStringLiteral("stats"); });
 
     fixture.session.setMode("cram");
-    QCOMPARE(fixture.session.mode(), QString("cram"));
+    QCOMPARE(fixture.session.mode(), StudyMode::Cram);
     QCOMPARE(fixture.session.reviewed(), 0);
     QCOMPARE(fixture.session.correct(), 0);
     QCOMPARE(modeSpy.count(), 1);
@@ -343,7 +343,7 @@ void TestStudySession::switchingToCramClearsPendingRepeat() {
 
     QVERIFY(fixture.session.rate(1, Config::kDefaultRetention)); // a pending Again in review mode
     fixture.session.setMode("cram");
-    QCOMPARE(fixture.session.mode(), QString("cram"));
+    QCOMPARE(fixture.session.mode(), StudyMode::Cram);
     fixture.session.rebuild("Switch"); // a cram queue is built from scratch
 
     QVERIFY(fixture.session.hasCard());
