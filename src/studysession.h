@@ -25,6 +25,7 @@ public:
     void rebuild(const QString &deckName);
     void updateDueCount();
     void setStatus(const QString &status);
+    void reportError(const QString &message);
     void setMathColors(const QString &questionColor, const QString &answerColor);
 
     void flip();

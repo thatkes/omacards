@@ -62,6 +62,11 @@ void StudySession::setStatus(const QString &status) {
     emit statusChanged();
 }
 
+void StudySession::reportError(const QString &message) {
+    setStatus(message);
+    emit errorOccurred(message);
+}
+
 void StudySession::setMathColors(const QString &questionColor, const QString &answerColor) {
     if (m_questionInk == questionColor && m_answerInk == answerColor)
         return;
@@ -112,7 +117,7 @@ void StudySession::answerReview(Rating rating, double desiredRetention) {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     QString storeError;
     if (!m_planner.recordReview(*card, rating, desiredRetention, now, &storeError))
-        emit errorOccurred(tr("Cannot save review: %1").arg(storeError));
+        reportError(tr("Cannot save review: %1").arg(storeError));
 
     m_queue.remove(card->id);
     if (rating == Rating::Again) {

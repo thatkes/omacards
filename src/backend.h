@@ -167,11 +167,6 @@ signals:
     void errorOccurred(const QString &message);
 
 private:
-    void load();
-    void setStatus(const QString &status);
-    void reportError(const QString &message);
-    void saveSetting(const QString &key, const QString &value);
-
     Store m_store;
     FileHistory m_history;
     DeckRepository m_deckRepo;

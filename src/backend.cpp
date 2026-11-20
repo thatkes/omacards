@@ -35,15 +35,15 @@ Backend::Backend(const QString &decksDirectory, const QString &databasePath, QOb
       m_deckRepo(decksDirectory.isEmpty() ? defaultDecksDirectory() : decksDirectory, m_store, m_history, this),
       m_planner(m_store), m_session(m_deckRepo, m_planner, this) {
     connect(&m_deckRepo, &DeckRepository::reloadRequested, this, &Backend::refresh);
-    connect(&m_deckRepo, &DeckRepository::errorOccurred, this, &Backend::reportError);
+    connect(&m_deckRepo, &DeckRepository::errorOccurred, &m_session, &StudySession::reportError);
     connect(&m_deckRepo, &DeckRepository::historyChanged, this, &Backend::historyChanged);
-    connect(&m_deckRepo, &DeckRepository::statusMessage, this, &Backend::setStatus);
+    connect(&m_deckRepo, &DeckRepository::statusMessage, &m_session, &StudySession::setStatus);
     connect(&m_session, &StudySession::modeChanged, this, &Backend::modeChanged);
     connect(&m_session, &StudySession::cardChanged, this, &Backend::cardChanged);
     connect(&m_session, &StudySession::dueCountChanged, this, &Backend::dueCountChanged);
     connect(&m_session, &StudySession::statsChanged, this, &Backend::statsChanged);
     connect(&m_session, &StudySession::statusChanged, this, &Backend::statusChanged);
-    connect(&m_session, &StudySession::errorOccurred, this, &Backend::reportError);
+    connect(&m_session, &StudySession::errorOccurred, this, &Backend::errorOccurred);
 }
 
 std::unique_ptr<Backend> Backend::fromEnvironment(QObject *parent) {
@@ -55,7 +55,7 @@ bool Backend::initialize(QString *error) {
         return false;
 
     if (!m_store.open(error)) {
-        reportError(tr("Cannot open state database: %1").arg(m_store.path()));
+        m_session.reportError(tr("Cannot open state database: %1").arg(m_store.path()));
         return false;
     }
     m_newPerDay = qBound(0, m_store.setting("new_per_day", QString::number(Config::kDefaultNewPerDay)).toInt(),
@@ -71,37 +71,24 @@ bool Backend::initialize(QString *error) {
     return true;
 }
 
-void Backend::load() {
+void Backend::refresh() {
     m_deckRepo.load(&m_currentDeck);
     m_planner.setDecks(m_deckRepo.deckData());
     m_planner.configure(m_newPerDay, m_dayStartHour);
     QString storeError;
     if (!m_planner.refresh(&storeError))
-        reportError(tr("Cannot read scheduling state: %1").arg(storeError));
+        m_session.reportError(tr("Cannot read scheduling state: %1").arg(storeError));
 
     emit decksChanged();
     emit currentDeckChanged();
     emit cardsChanged();
     m_session.updateDueCount();
-}
-
-void Backend::refresh() {
-    load();
     m_session.rebuild(m_currentDeck);
-}
-
-void Backend::setStatus(const QString &status) {
-    m_session.setStatus(status);
-}
-
-void Backend::reportError(const QString &message) {
-    setStatus(message);
-    emit errorOccurred(message);
 }
 
 void Backend::undo() {
     if (!m_history.canUndo()) {
-        setStatus(tr("Nothing to undo"));
+        m_session.setStatus(tr("Nothing to undo"));
         return;
     }
     QString error;
@@ -109,12 +96,12 @@ void Backend::undo() {
     if (!m_deckRepo.undo(&error, &description))
         return;
     refresh();
-    setStatus(tr("Undid %1").arg(description));
+    m_session.setStatus(tr("Undid %1").arg(description));
 }
 
 void Backend::redo() {
     if (!m_history.canRedo()) {
-        setStatus(tr("Nothing to redo"));
+        m_session.setStatus(tr("Nothing to redo"));
         return;
     }
     QString error;
@@ -122,7 +109,7 @@ void Backend::redo() {
     if (!m_deckRepo.redo(&error, &description))
         return;
     refresh();
-    setStatus(tr("Redid %1").arg(description));
+    m_session.setStatus(tr("Redid %1").arg(description));
 }
 
 void Backend::setCardFilter(const QString &filter) {
@@ -138,12 +125,14 @@ void Backend::setNewPerDay(int count) {
     if (m_newPerDay == clean)
         return;
     m_newPerDay = clean;
-    saveSetting(QStringLiteral("new_per_day"), QString::number(clean));
+    m_store.setSetting(QStringLiteral("new_per_day"), QString::number(clean));
+    if (!m_store.lastError().isEmpty())
+        m_session.reportError(tr("Cannot save settings: %1").arg(m_store.lastError()));
     m_planner.configure(clean, m_dayStartHour);
     QString storeError;
     m_planner.updateNewBudget(&storeError);
     if (!storeError.isEmpty())
-        reportError(tr("Cannot read scheduling state: %1").arg(storeError));
+        m_session.reportError(tr("Cannot read scheduling state: %1").arg(storeError));
     emit settingsChanged();
     m_session.rebuild(m_currentDeck);
 }
@@ -153,7 +142,9 @@ void Backend::setDesiredRetention(double retention) {
     if (qFuzzyCompare(m_desiredRetention, clean))
         return;
     m_desiredRetention = clean;
-    saveSetting(QStringLiteral("desired_retention"), QString::number(clean, 'f', 2));
+    m_store.setSetting(QStringLiteral("desired_retention"), QString::number(clean, 'f', 2));
+    if (!m_store.lastError().isEmpty())
+        m_session.reportError(tr("Cannot save settings: %1").arg(m_store.lastError()));
     emit settingsChanged();
 }
 
@@ -162,18 +153,14 @@ void Backend::setDayStartHour(int hour) {
     if (m_dayStartHour == clean)
         return;
     m_dayStartHour = clean;
-    saveSetting(QStringLiteral("day_start_hour"), QString::number(clean));
+    m_store.setSetting(QStringLiteral("day_start_hour"), QString::number(clean));
+    if (!m_store.lastError().isEmpty())
+        m_session.reportError(tr("Cannot save settings: %1").arg(m_store.lastError()));
     emit settingsChanged();
     // The rollover changes which cards are due and which reviews count toward
     // today, so rebuild the derived counts and the current card as well.
     refresh();
     emit cardsChanged();
-}
-
-void Backend::saveSetting(const QString &key, const QString &value) {
-    m_store.setSetting(key, value);
-    if (!m_store.lastError().isEmpty())
-        reportError(tr("Cannot save settings: %1").arg(m_store.lastError()));
 }
 
 QString Backend::mathEngine() const {
@@ -223,7 +210,7 @@ void Backend::showNext() {
 void Backend::newDeck(const QString &name) {
     QString error;
     if (!createDeck(name, &error))
-        reportError(error);
+        m_session.reportError(error);
 }
 
 bool Backend::createDeck(const QString &name, QString *error, const QString &description) {
@@ -288,26 +275,26 @@ bool Backend::removeDeck(const QString &name, QString *error) {
 void Backend::addCard(const QString &question, const QString &answer) {
     QString error;
     if (!createCard(m_currentDeck, question, answer, Domain::toString(CardType::Basic), {}, &error))
-        reportError(error);
+        m_session.reportError(error);
     else
-        setStatus(tr("Card added"));
+        m_session.setStatus(tr("Card added"));
 }
 
 void Backend::addCardDetails(const QString &question, const QString &answer, const QString &type, const QString &tags) {
     QString error;
     if (!createCard(m_currentDeck, question, answer, type, tags, &error))
-        reportError(error);
+        m_session.reportError(error);
     else
-        setStatus(tr("Card added"));
+        m_session.setStatus(tr("Card added"));
 }
 
 void Backend::updateCard(const QString &cardId, const QString &question, const QString &answer, const QString &type,
                          const QString &tags) {
     QString error;
     if (!modifyCard(m_currentDeck, cardId, question, answer, type, tags, &error))
-        reportError(error);
+        m_session.reportError(error);
     else
-        setStatus(tr("Card updated"));
+        m_session.setStatus(tr("Card updated"));
 }
 
 void Backend::removeCurrentCard() {
@@ -320,17 +307,17 @@ void Backend::removeCurrentCard() {
 void Backend::removeCard(const QString &cardId) {
     QString error;
     if (!deleteCard(m_currentDeck, cardId, &error))
-        reportError(error);
+        m_session.reportError(error);
     else
-        setStatus(tr("Card removed"));
+        m_session.setStatus(tr("Card removed"));
 }
 
 void Backend::deleteDeck(const QString &name) {
     QString error;
     if (!removeDeck(name, &error))
-        reportError(error);
+        m_session.reportError(error);
     else
-        setStatus(tr("Deck removed"));
+        m_session.setStatus(tr("Deck removed"));
 }
 
 void Backend::deleteCurrentDeck() {
@@ -342,9 +329,9 @@ void Backend::deleteCurrentDeck() {
 void Backend::importFrom(const QString &path, const QString &deckName) {
     QString error;
     if (!importFile(path, deckName.isEmpty() ? m_currentDeck : deckName, &error))
-        reportError(error);
+        m_session.reportError(error);
     else
-        setStatus(tr("Imported %1").arg(QFileInfo(path).fileName()));
+        m_session.setStatus(tr("Imported %1").arg(QFileInfo(path).fileName()));
 }
 
 bool Backend::importCsv(const QString &path, const QString &deckName, QString *error) {
