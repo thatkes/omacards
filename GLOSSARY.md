@@ -99,7 +99,7 @@ A card whose scheduled return falls on the current study day.
 _Avoid_: ready card, available card, due now
 
 **Available card**:
-A card that can be shown next: a due card or a new card within the daily allowance.
+A card that can be shown next: a due card, a new card within the daily allowance, or a pending repeat whose delay has elapsed.
 _Avoid_: due now, ready card
 
 **New-card allowance**:
