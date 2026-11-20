@@ -106,6 +106,54 @@ void TestDeck::deckContentHashPinsHashBytes() {
     QCOMPARE(DeckIO::contentHash(card).size(), 16);
 }
 
+void TestDeck::deckLoadPreservesUnknownTypeText() {
+    QTemporaryDir dir;
+    const QString path = dir.filePath("Types.txt");
+    QVERIFY(writeFile(path, "# Deck: Types\n"
+                            "---\n"
+                            "Q: The {{c1::cat}} sleeps.\n"
+                            "A: cat\n"
+                            "type: CLOZE\n"
+                            "---\n"
+                            "Q: Unknown\n"
+                            "A: answer\n"
+                            "type: FUTURE\n"));
+
+    QString error;
+    const Deck deck = DeckIO::load(path, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(deck.cards.size(), 2);
+
+    const Card &cloze = deck.cards.first();
+    QCOMPARE(cloze.type, QString("cloze"));
+    QVERIFY(DeckIO::displayQuestion(cloze).contains('['));
+    QCOMPARE(DeckIO::displayAnswer(cloze), QString("The cat sleeps."));
+
+    const Card &unknown = deck.cards.at(1);
+    QCOMPARE(unknown.type, QString("future"));
+    QCOMPARE(DeckIO::displayQuestion(unknown), QString("Unknown"));
+    QCOMPARE(DeckIO::displayAnswer(unknown), QString("answer"));
+    Card basic = unknown;
+    basic.type = "basic";
+    QCOMPARE(DeckIO::cardId(unknown), DeckIO::cardId(basic));
+
+    const QString text = DeckIO::serialize(deck);
+    QVERIFY(!text.contains("type: basic"));
+    QVERIFY(text.contains("type: cloze"));
+    QVERIFY(text.contains("type: future"));
+
+    const QString roundTripPath = dir.filePath("RoundTrip.txt");
+    QVERIFY(writeFile(roundTripPath, text.toUtf8()));
+    error.clear();
+    const Deck roundTrip = DeckIO::load(roundTripPath, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(roundTrip.cards.size(), 2);
+    QCOMPARE(roundTrip.cards.first().type, QString("cloze"));
+    QCOMPARE(roundTrip.cards.at(1).type, QString("future"));
+    QCOMPARE(roundTrip.cards.at(1).id, unknown.id);
+    QCOMPARE(DeckIO::contentHash(roundTrip.cards.at(1)), DeckIO::contentHash(unknown));
+}
+
 void TestDeck::deckLoadAcceptsCaseInsensitiveKeysAndContinuations() {
     QTemporaryDir dir;
     const QString path = dir.filePath("Mixed.txt");

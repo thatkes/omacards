@@ -10,6 +10,7 @@ private slots:
     void clozeCardsHideAndReveal();
     void deckCardIdIsStableAndIgnoresType();
     void deckContentHashPinsHashBytes();
+    void deckLoadPreservesUnknownTypeText();
     void deckLoadAcceptsCaseInsensitiveKeysAndContinuations();
     void deckLoadReportsBrokenCardsAndSkipsThem();
     void deckLoadAllFiltersSortsAndReportsErrors();

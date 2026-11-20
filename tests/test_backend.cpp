@@ -114,7 +114,7 @@ void TestBackend::createCardRejectsInvalidType() {
     QVERIFY(backend.initialize(&error));
     QVERIFY(backend.createDeck("Test", &error));
     QVERIFY(!backend.createCard("Test", "Q", "A", "nonsense", {}, &error));
-    QVERIFY(!error.isEmpty());
+    QCOMPARE(error, QString("cards[0] has an invalid type: nonsense"));
     QVERIFY(backend.allDecks().first().cards.isEmpty());
 }
 
