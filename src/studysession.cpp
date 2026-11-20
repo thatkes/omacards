@@ -92,19 +92,18 @@ void StudySession::showNext() {
         flip();
 }
 
-bool StudySession::rate(int rating, double desiredRetention) {
-    if (!hasCard())
-        return false;
-    const Rating parsed = Domain::ratingFromInt(rating);
-    if (parsed == Rating::Invalid)
+bool StudySession::rate(Rating rating, double desiredRetention) {
+    // Backend parses the int boundary; keep the sentinel guard so a direct
+    // caller cannot push an ungraded review into the scheduler.
+    if (rating == Rating::Invalid || !hasCard())
         return false;
     ++m_reviewed;
-    if (parsed == Rating::Good)
+    if (rating == Rating::Good)
         ++m_correct;
     if (m_mode == StudyMode::Cram)
-        answerCram(parsed);
+        answerCram(rating);
     else
-        answerReview(parsed, desiredRetention);
+        answerReview(rating, desiredRetention);
     emit statsChanged();
     presentCard();
     return true;

@@ -87,7 +87,7 @@ void TestStudySession::setModeNormalizesInvalidInput() {
     QVERIFY(error.isEmpty());
     QVERIFY(fixture.session.hasCard());
 
-    QVERIFY(fixture.session.rate(3, Config::kDefaultRetention));
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QCOMPARE(fixture.session.reviewed(), 1);
     QCOMPARE(fixture.session.correct(), 1);
 
@@ -118,7 +118,7 @@ void TestStudySession::setModeUppercaseCramNormalizesToReview() {
     SessionFixture fixture;
     QString error;
     QVERIFY(prepareSession(fixture, "Modes", {"Q1", "Q2"}, &error));
-    QVERIFY(fixture.session.rate(3, Config::kDefaultRetention));
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QCOMPARE(fixture.session.reviewed(), 1);
 
     QSignalSpy modeSpy(&fixture.session, &StudySession::modeChanged);
@@ -146,7 +146,7 @@ void TestStudySession::setModeCanonicalInputIsNoOp() {
     SessionFixture fixture;
     QString error;
     QVERIFY(prepareSession(fixture, "Modes", {"Q1", "Q2"}, &error));
-    QVERIFY(fixture.session.rate(3, Config::kDefaultRetention));
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QCOMPARE(fixture.session.reviewed(), 1);
     QCOMPARE(fixture.session.correct(), 1);
 
@@ -177,7 +177,7 @@ void TestStudySession::setModeCramSwitchesAndResets() {
     SessionFixture fixture;
     QString error;
     QVERIFY(prepareSession(fixture, "Modes", {"Q1", "Q2"}, &error));
-    QVERIFY(fixture.session.rate(3, Config::kDefaultRetention));
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QCOMPARE(fixture.session.reviewed(), 1);
     QCOMPARE(fixture.session.correct(), 1);
 
@@ -215,28 +215,28 @@ void TestStudySession::invalidRatingsAreNoOps() {
     const QString statusBefore = fixture.session.status();
     const QString idBefore = fixture.session.currentCardId();
 
-    for (int rating : {0, 2, 4}) {
-        QVERIFY(!fixture.session.rate(rating, Config::kDefaultRetention));
-        QCOMPARE(fixture.session.reviewed(), 0);
-        QCOMPARE(fixture.session.correct(), 0);
-        QCOMPARE(fixture.session.status(), statusBefore);
-        QCOMPARE(fixture.session.currentCardId(), idBefore);
-    }
+    // Raw ints are rejected at the Backend boundary; the session only has to
+    // refuse the Invalid sentinel it can still receive from a direct caller.
+    QVERIFY(!fixture.session.rate(Rating::Invalid, Config::kDefaultRetention));
+    QCOMPARE(fixture.session.reviewed(), 0);
+    QCOMPARE(fixture.session.correct(), 0);
+    QCOMPARE(fixture.session.status(), statusBefore);
+    QCOMPARE(fixture.session.currentCardId(), idBefore);
     QCOMPARE(statsSpy.count(), 0);
     QCOMPARE(cardSpy.count(), 0);
     QCOMPARE(statusSpy.count(), 0);
     QCOMPARE(errorSpy.count(), 0);
 
     // An empty queue rejects even a valid rating without emitting anything.
-    QVERIFY(fixture.session.rate(3, Config::kDefaultRetention));
-    QVERIFY(fixture.session.rate(3, Config::kDefaultRetention));
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QVERIFY(!fixture.session.hasCard());
     statsSpy.clear();
     cardSpy.clear();
     statusSpy.clear();
     errorSpy.clear();
 
-    QVERIFY(!fixture.session.rate(3, Config::kDefaultRetention));
+    QVERIFY(!fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QCOMPARE(fixture.session.reviewed(), 2);
     QCOMPARE(fixture.session.correct(), 2);
     QCOMPARE(statsSpy.count(), 0);
@@ -270,7 +270,7 @@ void TestStudySession::flipAndShowNextToggleAnswer() {
     QVERIFY(!fixture.session.showingAnswer());
     QCOMPARE(cardSpy.count(), 4);
 
-    QVERIFY(fixture.session.rate(3, Config::kDefaultRetention));
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QVERIFY(!fixture.session.hasCard());
     cardSpy.clear();
     fixture.session.flip();
@@ -319,7 +319,7 @@ void TestStudySession::rebuildKeepsPendingRepeatInReview() {
     QVERIFY(prepareSession(fixture, "Repeats", {"Q1", "Q2"}, &error));
     QVERIFY(fixture.session.question().contains("Q1"));
 
-    QVERIFY(fixture.session.rate(1, Config::kDefaultRetention)); // Again: Q1 waits, Q2 is shown
+    QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention)); // Again: Q1 waits, Q2 is shown
     QVERIFY(fixture.session.hasCard());
     QVERIFY(fixture.session.question().contains("Q2"));
 
@@ -327,7 +327,7 @@ void TestStudySession::rebuildKeepsPendingRepeatInReview() {
     QVERIFY(fixture.session.hasCard());
     QVERIFY(fixture.session.question().contains("Q2"));
 
-    QVERIFY(fixture.session.rate(3, Config::kDefaultRetention)); // Q2 done, Q1 still waiting
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention)); // Q2 done, Q1 still waiting
     QVERIFY(fixture.session.waitingForRepeat());
     QVERIFY(!fixture.session.hasCard());
     QTRY_VERIFY_WITH_TIMEOUT(fixture.session.question().contains("Q1"), 5000);
@@ -341,7 +341,7 @@ void TestStudySession::switchingToCramClearsPendingRepeat() {
     QString error;
     QVERIFY(prepareSession(fixture, "Switch", {"Q1", "Q2"}, &error));
 
-    QVERIFY(fixture.session.rate(1, Config::kDefaultRetention)); // a pending Again in review mode
+    QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention)); // a pending Again in review mode
     fixture.session.setMode("cram");
     QCOMPARE(fixture.session.mode(), StudyMode::Cram);
     fixture.session.rebuild("Switch"); // a cram queue is built from scratch
@@ -352,7 +352,7 @@ void TestStudySession::switchingToCramClearsPendingRepeat() {
     for (int i = 0; i < 4; ++i) {
         seen.insert(fixture.session.currentCardId());
         fixture.session.flip();
-        QVERIFY(fixture.session.rate(i == 0 ? 1 : 3, Config::kDefaultRetention));
+        QVERIFY(fixture.session.rate(i == 0 ? Rating::Again : Rating::Good, Config::kDefaultRetention));
         QVERIFY(fixture.session.hasCard());           // cram is endless
         QVERIFY(!fixture.session.waitingForRepeat()); // no review deadline survives
     }
@@ -371,11 +371,11 @@ void TestStudySession::statsTextAndMathEngine() {
     fixture.session.rebuild("Stats");
     QCOMPARE(fixture.session.box(), 1);
     fixture.session.flip();
-    QVERIFY(fixture.session.rate(3, Config::kDefaultRetention));
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QCOMPARE(fixture.session.statsText(), QString("1 reviewed · 100% correct · box 1"));
 
     fixture.session.flip();
-    QVERIFY(fixture.session.rate(1, Config::kDefaultRetention));
+    QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention));
     QCOMPARE(fixture.session.statsText(), QString("2 reviewed · 50% correct · box 2"));
 
     const MathRenderer::Engine engine = fixture.session.mathEngine();

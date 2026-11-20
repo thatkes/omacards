@@ -199,7 +199,10 @@ void Backend::flip() {
 }
 
 void Backend::rate(int rating) {
-    if (!m_session.rate(rating, m_desiredRetention))
+    const Rating parsed = Domain::ratingFromInt(rating);
+    if (parsed == Rating::Invalid)
+        return;
+    if (!m_session.rate(parsed, m_desiredRetention))
         return;
     emit cardsChanged();
     emit decksChanged();

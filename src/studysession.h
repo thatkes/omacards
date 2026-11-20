@@ -29,7 +29,7 @@ public:
     void setMathColors(const QString &questionColor, const QString &answerColor);
 
     void flip();
-    bool rate(int rating, double desiredRetention);
+    bool rate(Rating rating, double desiredRetention);
     void showNext();
 
     StudyMode mode() const { return m_mode; }
