@@ -77,3 +77,33 @@ void TestDomain::domainCardTypeRoundTrips() {
     QCOMPARE(Domain::cardTypeFromString(Domain::toString(CardType::Cloze)), CardType::Cloze);
     QCOMPARE(Domain::cardTypeFromString(Domain::toString(CardType::Invalid)), CardType::Basic);
 }
+
+void TestDomain::domainCardTypeValueRetainsBoundaryText() {
+    const CardTypeValue canonicalBasic = Domain::parseCardType(QStringLiteral("basic"));
+    QCOMPARE(canonicalBasic.kind, CardType::Basic);
+    QCOMPARE(Domain::toString(canonicalBasic), QString("basic"));
+
+    const CardTypeValue empty = Domain::parseCardType(QString());
+    QCOMPARE(empty.kind, CardType::Basic);
+    QCOMPARE(Domain::toString(empty), QString("basic"));
+
+    const CardTypeValue cloze = Domain::parseCardType(QStringLiteral("cloze"));
+    QCOMPARE(cloze.kind, CardType::Cloze);
+    QCOMPARE(Domain::toString(cloze), QString("cloze"));
+
+    // Unknown and noncanonical text is retained verbatim; only file parsing
+    // decides whether to trim or lowercase before reaching this parser.
+    const CardTypeValue unknown = Domain::parseCardType(QStringLiteral("future"));
+    QCOMPARE(unknown.kind, CardType::Invalid);
+    QCOMPARE(Domain::toString(unknown), QString("future"));
+    const CardTypeValue upper = Domain::parseCardType(QStringLiteral("CLOZE"));
+    QCOMPARE(upper.kind, CardType::Invalid);
+    QCOMPARE(Domain::toString(upper), QString("CLOZE"));
+
+    for (const QString &text : {QStringLiteral("basic"), QStringLiteral("cloze"), QStringLiteral("future"),
+                                QStringLiteral("CLOZE"), QStringLiteral(" cloze "), QString()}) {
+        const CardTypeValue value = Domain::parseCardType(text);
+        QCOMPARE(Domain::cardTypeFromString(text), value.kind);
+        QCOMPARE(Domain::toString(value), text.isEmpty() ? QStringLiteral("basic") : text);
+    }
+}

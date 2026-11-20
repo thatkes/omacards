@@ -12,4 +12,5 @@ private slots:
     void domainRatingConversionsAreExact();
     void domainCardTypeIsCaseSensitive();
     void domainCardTypeRoundTrips();
+    void domainCardTypeValueRetainsBoundaryText();
 };

@@ -25,12 +25,20 @@ int toInt(Rating rating) {
     return static_cast<int>(rating);
 }
 
-CardType cardTypeFromString(const QString &text) {
+CardTypeValue parseCardType(const QString &text) {
     if (text == QLatin1String("cloze"))
-        return CardType::Cloze;
+        return {CardType::Cloze, QStringLiteral("cloze")};
     if (text.isEmpty() || text == QLatin1String("basic"))
-        return CardType::Basic;
-    return CardType::Invalid;
+        return {CardType::Basic, QStringLiteral("basic")};
+    return {CardType::Invalid, text};
+}
+
+QString toString(const CardTypeValue &value) {
+    return value.text;
+}
+
+CardType cardTypeFromString(const QString &text) {
+    return parseCardType(text).kind;
 }
 
 QString toString(CardType type) {
