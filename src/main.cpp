@@ -2,15 +2,11 @@
 #include "backend.h"
 #include "cli.h"
 #include "theme.h"
+#include "traycontroller.h"
 #include "translator.h"
 
-#include <QColor>
-#include <QFont>
 #include <QApplication>
 #include <QIcon>
-#include <QMenu>
-#include <QPainter>
-#include <QPixmap>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -25,23 +21,6 @@ QStringList argumentsFrom(int argc, char *argv[]) {
     for (int i = 0; i < argc; ++i)
         arguments << QString::fromLocal8Bit(argv[i]);
     return arguments;
-}
-
-QIcon trayIcon(const QString &accent) {
-    QIcon themed = QIcon::fromTheme("omacards");
-    if (!themed.isNull())
-        return themed;
-    QPixmap pixmap(64, 64);
-    pixmap.fill(Qt::transparent);
-    QPainter painter(&pixmap);
-    painter.setRenderHint(QPainter::Antialiasing);
-    painter.setBrush(QColor(accent));
-    painter.setPen(Qt::NoPen);
-    painter.drawRoundedRect(4, 4, 56, 56, 12, 12);
-    painter.setPen(Qt::black);
-    painter.setFont(QFont("Sans", 24, QFont::Bold));
-    painter.drawText(pixmap.rect(), Qt::AlignCenter, "C");
-    return QIcon(pixmap);
 }
 } // namespace
 
@@ -98,38 +77,11 @@ int main(int argc, char *argv[]) {
     };
     QObject::connect(&backend, &Backend::showWindowRequested, window, activate);
 
-    if (QSystemTrayIcon::isSystemTrayAvailable()) {
-        // QSystemTrayIcon does not own its context menu; keep it alive for the
-        // tray's lifetime with an owner declared before the tray itself.
-        auto menu = std::make_unique<QMenu>();
-        QSystemTrayIcon tray(trayIcon(theme.accent()));
-        tray.setToolTip(QObject::tr("omacards — %1 due").arg(backend.dueCount()));
-        menu->addAction(QObject::tr("Open"), activate);
-        menu->addAction(QObject::tr("Review"), [&backend, activate] {
-            backend.setMode("review");
-            activate();
-        });
-        menu->addAction(QObject::tr("Cram"), [&backend, activate] {
-            backend.setMode("cram");
-            activate();
-        });
-        menu->addSeparator();
-        menu->addAction(QObject::tr("Quit"), &QApplication::quit);
-        tray.setContextMenu(menu.get());
-        QObject::connect(&backend, &Backend::dueCountChanged, &tray, [&tray, &backend] {
-            tray.setToolTip(QObject::tr("omacards — %1 due").arg(backend.dueCount()));
-        });
-        QObject::connect(&theme, &Theme::changed, &tray, [&tray, &theme] { tray.setIcon(trayIcon(theme.accent())); });
-        QObject::connect(&tray, &QSystemTrayIcon::activated, &tray,
-                         [activate, &backend](QSystemTrayIcon::ActivationReason reason) {
-                             if (reason == QSystemTrayIcon::Context)
-                                 return;
-                             backend.setMode("review");
-                             activate();
-                         });
-        tray.show();
-        return app.exec();
-    }
+    // Keep the controller alive for the whole event loop. A stack-local object
+    // declared inside the if would die before app.exec() returns.
+    std::unique_ptr<TrayController> tray;
+    if (QSystemTrayIcon::isSystemTrayAvailable())
+        tray = std::make_unique<TrayController>(backend, theme, activate);
 
     return app.exec();
 }

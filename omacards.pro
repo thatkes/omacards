@@ -17,6 +17,7 @@ HEADERS += \
     src/store.h \
     src/studyqueue.h \
     src/theme.h \
+    src/traycontroller.h \
     src/translator.h
 
 SOURCES += \
@@ -32,6 +33,7 @@ SOURCES += \
     src/store.cpp \
     src/studyqueue.cpp \
     src/theme.cpp \
+    src/traycontroller.cpp \
     src/translator.cpp
 
 RESOURCES += src/resources.qrc
