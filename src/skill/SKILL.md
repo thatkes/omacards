@@ -57,7 +57,7 @@ omacards review -c <card-id> -r 3 --json
 omacards cram --deck Spanish --steps 20 --json
 omacards stats --json
 omacards config --json
-omacards config --new-per-day 10 --retention 0.9 --json
+omacards config --new-per-day 10 --day-start-hour 3 --retention 0.9 --json
 omacards skill install
 ```
 
@@ -179,10 +179,14 @@ scripts. Fix line-numbered issues and re-run until the deck is clean.
 
 ## Scheduling settings
 
-`omacards config` reads the daily new-card limit and FSRS desired retention.
-Use `--new-per-day N` and `--retention R` (0.70–0.99) to change them. `due`,
-`check` and `stats` already account for the daily new-card limit. `totalDue`
-in their JSON is the unclamped count.
+`omacards config` reads the daily new-card limit, the study-day start hour and
+FSRS desired retention. Use `--new-per-day N`, `--day-start-hour H` (0–23,
+default 0) and `--retention R` (0.70–0.99) to change them. A card is due once
+the study day containing its FSRS due time has begun: with `--day-start-hour 3`,
+a card due at 22:00 waits until 03:00 the next calendar day. The same boundary
+governs "reviews today", streaks and the daily new-card budget. `due`, `check`
+and `stats` already account for the daily new-card limit. `totalDue` in their
+JSON is the unclamped count.
 
 Editing a card without an explicit `id:` line changes its id, so use the id
 returned by `edit-card` for any follow-up `review` or `delete-card`.

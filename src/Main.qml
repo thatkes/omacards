@@ -1198,6 +1198,53 @@ ApplicationWindow {
 
                             Panel {
                                 Layout.fillWidth: true
+                                implicitHeight: 72
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 16
+                                    spacing: 12
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 2
+                                        Label { text: qsTr("Day starts at"); color: win.text; font.pixelSize: 14 }
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: qsTr("Cards due today unlock at this time, not at midnight.")
+                                            color: win.muted
+                                            font.pixelSize: 11
+                                            wrapMode: Text.Wrap
+                                        }
+                                    }
+
+                                    ActionButton {
+                                        compact: true
+                                        label: "−"
+                                        implicitWidth: 38
+                                        onClicked: backend.setDayStartHour((backend.dayStartHour + 23) % 24)
+                                    }
+
+                                    Label {
+                                        text: ("0" + backend.dayStartHour).slice(-2) + ":00"
+                                        color: win.text
+                                        font.pixelSize: 17
+                                        font.family: "monospace"
+                                        Layout.preferredWidth: 46
+                                        horizontalAlignment: Text.AlignHCenter
+                                    }
+
+                                    ActionButton {
+                                        compact: true
+                                        label: "+"
+                                        implicitWidth: 38
+                                        onClicked: backend.setDayStartHour((backend.dayStartHour + 1) % 24)
+                                    }
+                                }
+                            }
+
+                            Panel {
+                                Layout.fillWidth: true
                                 implicitHeight: 104
 
                                 ColumnLayout {

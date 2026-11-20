@@ -40,6 +40,7 @@ struct Options {
     int rating = 0;
     int steps = 10;
     int newPerDay = -1;
+    int dayStartHour = -1;
     double retention = -1.0;
     bool json = false;
     bool math = false;
@@ -98,6 +99,8 @@ Options parse(const QStringList &arguments) {
             options.steps = value().toInt();
         else if (arg == "--new-per-day")
             options.newPerDay = value().toInt();
+        else if (arg == "--day-start-hour")
+            options.dayStartHour = value().toInt();
         else if (arg == "--retention")
             options.retention = value().toDouble();
         else if (arg.startsWith("--deck="))
@@ -375,6 +378,7 @@ int run(const QStringList &arguments) {
         object.insert("newToday", backend.reviewSummary().newToday);
         object.insert("newPerDay", backend.newPerDay());
         object.insert("retention", backend.desiredRetention());
+        object.insert("dayStartHour", backend.dayStartHour());
         object.insert("math", backend.mathEngine());
         object.insert("decksDir", backend.decksDirectory());
         object.insert("database", backend.databasePath());
@@ -451,6 +455,8 @@ int run(const QStringList &arguments) {
             return fail(QObject::tr("Retention must be between 0.70 and 0.99"), json);
         if (options.newPerDay > Config::kMaxNewPerDay)
             return fail(QObject::tr("New cards per day must be 9999 or less"), json);
+        if (options.dayStartHour < -1 || options.dayStartHour > Config::kMaxDayStartHour)
+            return fail(QObject::tr("Day start hour must be between 0 and 23"), json);
         // The QML setters report write failures as signals; the CLI must turn
         // them into a non-zero exit instead of claiming success.
         QString settingError;
@@ -461,6 +467,8 @@ int run(const QStringList &arguments) {
             });
         if (options.newPerDay >= 0)
             backend.setNewPerDay(options.newPerDay);
+        if (options.dayStartHour >= 0)
+            backend.setDayStartHour(options.dayStartHour);
         if (options.retention > 0)
             backend.setDesiredRetention(options.retention);
         QObject::disconnect(connection);
@@ -472,13 +480,15 @@ int run(const QStringList &arguments) {
         object.insert("ok", true);
         object.insert("newPerDay", backend.newPerDay());
         object.insert("retention", backend.desiredRetention());
+        object.insert("dayStartHour", backend.dayStartHour());
         object.insert("newToday", summary.newToday);
         object.insert("newRemaining", qMax(0, backend.newPerDay() - summary.newToday));
         write(object, json,
-              QObject::tr("New cards/day: %1 · reviewed new today: %2 · desired retention: %3%")
+              QObject::tr("New cards/day: %1 · reviewed new today: %2 · desired retention: %3% · day starts at %4")
                   .arg(backend.newPerDay())
                   .arg(summary.newToday)
-                  .arg(qRound(backend.desiredRetention() * 100)));
+                  .arg(qRound(backend.desiredRetention() * 100))
+                  .arg(QStringLiteral("%1:00").arg(backend.dayStartHour(), 2, 10, QLatin1Char('0'))));
         return 0;
     }
 

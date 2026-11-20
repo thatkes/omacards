@@ -95,6 +95,8 @@ bool Backend::initialize(QString *error) {
         qBound(Config::kMinRetention,
                m_store.setting("desired_retention", QString::number(Config::kDefaultRetention)).toDouble(),
                Config::kMaxRetention);
+    m_dayStartHour = qBound(0, m_store.setting("day_start_hour", QString::number(Config::kDefaultDayStartHour)).toInt(),
+                            Config::kMaxDayStartHour);
     m_watcher.addPath(m_decksDir);
     refresh();
     return true;
@@ -118,7 +120,7 @@ bool Backend::refreshSnapshot() {
     StudySnapshot next;
     next.states = m_store.states();
     next.hashes = m_store.hashes();
-    next.newBudget = qMax(0, m_newPerDay - m_store.newCardsToday());
+    next.newBudget = qMax(0, m_newPerDay - m_store.newCardsToday(m_dayStartHour));
     if (!m_store.lastError().isEmpty()) {
         // Never present a card with scheduling data we could not verify.
         m_snapshot = StudySnapshot{};
@@ -159,7 +161,11 @@ Backend::Availability Backend::availability(const QString &deckName) const {
             continue;
         for (const Card &card : deck.cards) {
             const FsrsState state = effectiveState(card);
-            if (state.due <= m_snapshot.now)
+            // "Due" means the study day containing the FSRS time has started,
+            // not that the exact millisecond has passed. The library uses the
+            // same rule, so a card labelled due today is always available.
+            const bool due = Config::isDueByDay(state.due, m_snapshot.now, m_dayStartHour);
+            if (due)
                 ++result.dueIncludingNewPerDeck[deckIndex];
             if (state.reps == 0) {
                 if (remainingNew > 0) {
@@ -167,7 +173,7 @@ Backend::Availability Backend::availability(const QString &deckName) const {
                     ++result.freshPerDeck[deckIndex];
                     --remainingNew;
                 }
-            } else if (state.due <= m_snapshot.now) {
+            } else if (due) {
                 dueEntries.append({state.due, deckIndex, card});
             }
         }
@@ -448,6 +454,7 @@ QVariantList Backend::cardList() const {
             if (!needle.isEmpty() && !haystack.contains(needle))
                 continue;
             const FsrsState state = effectiveState(card);
+            const bool due = Config::isDueByDay(state.due, now, m_dayStartHour);
 
             QVariantMap entry;
             entry.insert("id", card.id);
@@ -457,13 +464,12 @@ QVariantList Backend::cardList() const {
             entry.insert("type", card.type);
             entry.insert("tags", card.tags.join(", "));
             entry.insert("due", state.due);
-            entry.insert("isDue", state.due <= now);
+            entry.insert("isDue", due);
             entry.insert("new", state.reps == 0);
             entry.insert("reps", state.reps);
             entry.insert("dueText", state.reps == 0 ? tr("new")
-                                    : state.due <= now
-                                        ? tr("due now")
-                                        : QDateTime::fromMSecsSinceEpoch(state.due).toString("yyyy-MM-dd"));
+                                    : due ? tr("due now")
+                                          : QDateTime::fromMSecsSinceEpoch(state.due).toString("yyyy-MM-dd"));
             list << entry;
         }
     }
@@ -508,7 +514,7 @@ void Backend::setNewPerDay(int count) {
     saveSetting(QStringLiteral("new_per_day"), QString::number(clean));
     if (m_snapshotValid) {
         m_store.clearError();
-        m_snapshot.newBudget = qMax(0, clean - m_store.newCardsToday());
+        m_snapshot.newBudget = qMax(0, clean - m_store.newCardsToday(m_dayStartHour));
         if (!m_store.lastError().isEmpty())
             reportError(tr("Cannot read scheduling state: %1").arg(m_store.lastError()));
     }
@@ -523,6 +529,19 @@ void Backend::setDesiredRetention(double retention) {
     m_desiredRetention = clean;
     saveSetting(QStringLiteral("desired_retention"), QString::number(clean, 'f', 2));
     emit settingsChanged();
+}
+
+void Backend::setDayStartHour(int hour) {
+    const int clean = qBound(0, hour, Config::kMaxDayStartHour);
+    if (m_dayStartHour == clean)
+        return;
+    m_dayStartHour = clean;
+    saveSetting(QStringLiteral("day_start_hour"), QString::number(clean));
+    emit settingsChanged();
+    // The rollover changes which cards are due and which reviews count toward
+    // today, so rebuild the derived counts and the current card as well.
+    refresh();
+    emit cardsChanged();
 }
 
 void Backend::saveSetting(const QString &key, const QString &value) {
@@ -1018,7 +1037,7 @@ QString Backend::statsText() const {
 }
 
 QVariantMap Backend::statsSummary() const {
-    const ReviewSummary summary = m_store.summary();
+    const ReviewSummary summary = m_store.summary(m_dayStartHour);
     QVariantMap result;
     result.insert("totalReviews", summary.total);
     result.insert("today", summary.today);
@@ -1032,6 +1051,7 @@ QVariantMap Backend::statsSummary() const {
     result.insert("newAvailable", newCount());
     result.insert("newPerDay", m_newPerDay);
     result.insert("retention", qRound(m_desiredRetention * 100));
+    result.insert("dayStartHour", m_dayStartHour);
     result.insert("sessionReviewed", m_reviewed);
     result.insert("sessionCorrect", m_correct);
     return result;

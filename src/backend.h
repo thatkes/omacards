@@ -53,6 +53,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString currentCardId READ currentCardId NOTIFY cardChanged)
     Q_PROPERTY(int newPerDay READ newPerDay WRITE setNewPerDay NOTIFY settingsChanged)
     Q_PROPERTY(double desiredRetention READ desiredRetention WRITE setDesiredRetention NOTIFY settingsChanged)
+    Q_PROPERTY(int dayStartHour READ dayStartHour WRITE setDayStartHour NOTIFY settingsChanged)
     Q_PROPERTY(QString decksDirectory READ decksDirectory CONSTANT)
 
 public:
@@ -78,7 +79,7 @@ public:
     int newCount() const;
     int deckDue() const;
     int deckNew() const;
-    int streak() const { return m_store.summary().streakDays; }
+    int streak() const { return m_store.summary(m_dayStartHour).streakDays; }
     int reviewed() const { return m_reviewed; }
     int correct() const { return m_correct; }
     int box() const { return m_box; }
@@ -93,10 +94,11 @@ public:
     bool canRedo() const { return m_history.canRedo(); }
     int newPerDay() const { return m_newPerDay; }
     double desiredRetention() const { return m_desiredRetention; }
+    int dayStartHour() const { return m_dayStartHour; }
     int availableCount(const QString &deckName = {}) const;
     QVariantList deckSummaries() const;
     QVariantList cardList() const;
-    ReviewSummary reviewSummary() const { return m_store.summary(); }
+    ReviewSummary reviewSummary() const { return m_store.summary(m_dayStartHour); }
 
     QVector<Deck> allDecks() const { return m_decks; }
     int countDue(const QString &deckName = {}) const;
@@ -141,6 +143,7 @@ public slots:
     Q_INVOKABLE void setCardFilter(const QString &filter);
     Q_INVOKABLE void setNewPerDay(int count);
     Q_INVOKABLE void setDesiredRetention(double retention);
+    Q_INVOKABLE void setDayStartHour(int hour);
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
     Q_INVOKABLE void editDeckFile();
@@ -232,6 +235,7 @@ private:
     int m_box = 0;
     int m_newPerDay = Config::kDefaultNewPerDay;
     double m_desiredRetention = Config::kDefaultRetention;
+    int m_dayStartHour = Config::kDefaultDayStartHour;
     bool m_showingAnswer = false;
     bool m_waitingForRepeat = false;
 };

@@ -29,8 +29,8 @@ public:
     void logReview(const QString &cardId, int rating, qint64 at, const FsrsState &state, int intervalDays,
                    bool wasNew = false);
     void removeExcept(const QSet<QString> &ids);
-    ReviewSummary summary() const;
-    int newCardsToday() const;
+    ReviewSummary summary(int dayStartHour = 0) const;
+    int newCardsToday(int dayStartHour = 0) const;
 
     QString setting(const QString &key, const QString &fallback = {}) const;
     bool setSetting(const QString &key, const QString &value);
@@ -44,7 +44,7 @@ public:
     void clearError() { m_lastError.clear(); }
 
 private:
-    int countNewCardsToday() const;
+    int countNewCardsToday(int dayStartHour = 0) const;
 
     QString m_path;
     QString m_connection;

@@ -1,4 +1,5 @@
 #include "store.h"
+#include "config.h"
 
 #include <QDate>
 #include <QDateTime>
@@ -179,7 +180,7 @@ void Store::removeExcept(const QSet<QString> &ids) {
     }
 }
 
-ReviewSummary Store::summary() const {
+ReviewSummary Store::summary(int dayStartHour) const {
     ReviewSummary result;
     if (!m_db.isOpen())
         return result;
@@ -189,11 +190,11 @@ ReviewSummary Store::summary() const {
         return result;
     }
 
-    const QDate today = QDate::currentDate();
+    const QDate today = Config::studyDay(QDateTime::currentMSecsSinceEpoch(), dayStartHour);
     QSet<QDate> days;
     while (query.next()) {
-        const QDateTime at = QDateTime::fromMSecsSinceEpoch(query.value(0).toLongLong());
-        const QDate day = at.date();
+        const qint64 atMs = query.value(0).toLongLong();
+        const QDate day = Config::studyDay(atMs, dayStartHour);
         days.insert(day);
         ++result.total;
         if (day == today) {
@@ -202,10 +203,10 @@ ReviewSummary Store::summary() const {
                 ++result.todayCorrect;
         }
     }
-    result.newToday = countNewCardsToday();
+    result.newToday = countNewCardsToday(dayStartHour);
 
-    // A streak survives until midnight after a review day, so a user who has
-    // not reviewed yet today still sees yesterday's total.
+    // A streak survives until the next study day begins, so a user who has
+    // not reviewed yet still sees the previous day's total.
     QDate cursor = today;
     if (!days.contains(cursor))
         cursor = cursor.addDays(-1);
@@ -216,14 +217,14 @@ ReviewSummary Store::summary() const {
     return result;
 }
 
-int Store::newCardsToday() const {
-    const int count = countNewCardsToday();
+int Store::newCardsToday(int dayStartHour) const {
+    const int count = countNewCardsToday(dayStartHour);
     if (m_lastError.isEmpty() && !m_db.isOpen())
         m_lastError = QStringLiteral("State database is not open");
     return count;
 }
 
-int Store::countNewCardsToday() const {
+int Store::countNewCardsToday(int dayStartHour) const {
     if (!m_db.isOpen())
         return 0;
     QSqlQuery query(m_db);
@@ -232,7 +233,7 @@ int Store::countNewCardsToday() const {
         m_lastError = query.lastError().text();
         return 0;
     }
-    query.bindValue(":start", QDate::currentDate().startOfDay().toMSecsSinceEpoch());
+    query.bindValue(":start", Config::studyDayStartMs(QDateTime::currentMSecsSinceEpoch(), dayStartHour));
     if (!query.exec() || !query.next()) {
         m_lastError = query.lastError().text();
         return 0;

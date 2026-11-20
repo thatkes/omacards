@@ -49,7 +49,7 @@ The one-off `tectonic` run downloads the TeX bundle into `~/.cache/tectonic`; do
 | `Delete` / `Backspace` | Delete the selected card in the library |
 | `/` | Focus library search |
 | `S` | Stats for today and this session |
-| `,` | Settings: new cards per day and desired retention |
+| `,` | Settings: new cards per day, day start and desired retention |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo a card or deck edit |
 | `I` | Import a file |
 | `E` | Open the current deck file in your editor |
@@ -64,16 +64,17 @@ Closing the window quits the app. While omacards is open, the tray tooltip shows
 
 ## Settings
 
-Press `,` (or the gear button) to open settings. Both values are stored in the SQLite sidecar and apply immediately after saving.
+Press `,` (or the gear button) to open settings. All three values are stored in the SQLite sidecar and apply immediately after saving.
 
 ![omacards settings](docs/settings.png)
 
 - **New cards per day** (default 20) caps how many never-reviewed cards enter a review session. This keeps a large Anki import manageable. Set it to 0 to study only cards that are already in review.
+- **Day starts at** (default 00:00) sets when a study day rolls over. A card due at 22:00 is available from 22:00 on its due date with the default, but waits until 03:00 if you set the day to start at 3 AM. The library, the due counts and the daily new-card budget all use this boundary, so a card labelled "due now" is always in the study queue. A 3 AM rollover is handy if you often study just before midnight: the day does not reset until you have had a chance to finish.
 - **Desired retention** (default 90%) is the FSRS target used when intervals are calculated. Higher values shorten intervals and mean more reviews; lower values stretch intervals. The change affects future answers, not existing due dates.
 
 Again repeats come back after a 60-second break in the same session. Set `OMACARDS_AGAIN_DELAY_MS` (milliseconds) to adjust that break; `0` shows the card immediately.
 
-Due reviews are shown before new cards, and new cards follow deck-file order. The tray count and due badge reflect the cards actually available now, after the daily limit. `omacards config` exposes the same two settings to agents.
+Due reviews are shown before new cards, and new cards follow deck-file order. The tray count and due badge reflect the cards actually available now, after the daily limit. `omacards config` exposes the same three settings to agents.
 
 ## Deck format
 
@@ -117,7 +118,7 @@ omacards review -c <card-id> -r 3 --json
 omacards cram --deck Spanish --steps 20 --json
 omacards stats --json
 omacards config --json
-omacards config --new-per-day 10 --retention 0.9 --json
+omacards config --new-per-day 10 --day-start-hour 3 --retention 0.9 --json
 omacards skill install --json
 ```
 

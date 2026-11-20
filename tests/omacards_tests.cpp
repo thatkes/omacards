@@ -936,6 +936,95 @@ oops: not a key
         QCOMPARE(store.newCardsToday(), 2);
     }
 
+    void configDayStartHelpers() {
+        const qint64 dueNight = QDateTime(QDate(2026, 11, 19), QTime(22, 49)).toMSecsSinceEpoch();
+        const qint64 beforeRollover = QDateTime(QDate(2026, 11, 19), QTime(1, 0)).toMSecsSinceEpoch();
+        const qint64 atRollover = QDateTime(QDate(2026, 11, 19), QTime(3, 0)).toMSecsSinceEpoch();
+        const qint64 previousDay = QDateTime(QDate(2026, 11, 18), QTime(23, 59)).toMSecsSinceEpoch();
+
+        // Midnight rollover: due at any time on the 19th means due all day.
+        QVERIFY(Config::isDueByDay(dueNight, QDateTime(QDate(2026, 11, 19), QTime(0, 1)).toMSecsSinceEpoch(), 0));
+        QVERIFY(!Config::isDueByDay(dueNight, previousDay, 0));
+        // A 3 AM rollover holds that card until 3 AM on the 19th.
+        QVERIFY(!Config::isDueByDay(dueNight, beforeRollover, 3));
+        QVERIFY(Config::isDueByDay(dueNight, atRollover, 3));
+        // Unscheduled cards (due == 0) must stay due at any rollover.
+        QVERIFY(Config::isDueByDay(0, beforeRollover, 3));
+        QCOMPARE(Config::studyDayStartMs(beforeRollover, 3),
+                 QDateTime(QDate(2026, 11, 18), QTime(3, 0)).toMSecsSinceEpoch());
+        QCOMPARE(Config::studyDayStartMs(beforeRollover, 0),
+                 QDateTime(QDate(2026, 11, 19), QTime(0, 0)).toMSecsSinceEpoch());
+    }
+
+    void storeUsesConfiguredDayStart() {
+        QTemporaryDir dir;
+        Store store(dir.filePath("state.db"));
+        QString error;
+        QVERIFY(store.open(&error));
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        const qint64 start0 = Config::studyDayStartMs(now, 0);
+        const qint64 start3 = Config::studyDayStartMs(now, 3);
+        // This review lands in exactly one of the two study-day windows,
+        // whichever side of the 3 AM boundary the clock is currently on.
+        const qint64 probe = start3 > start0 ? start0 + 60000 : start0 - 60000;
+        const FsrsState state = Fsrs::review(Fsrs::initial(), 3, probe).state;
+        store.logReview("edge", 3, probe, state, 1, true);
+        const int midnight = store.newCardsToday(0);
+        const int atThree = store.newCardsToday(3);
+        QCOMPARE(midnight + atThree, 1);
+        QCOMPARE(store.summary(0).newToday, midnight);
+        QCOMPARE(store.summary(3).newToday, atThree);
+    }
+
+    void backendAppliesDayStartToDueCards() {
+        QTemporaryDir dir;
+        const QString database = dir.filePath("state.db");
+        {
+            Backend backend(dir.path(), database);
+            QString error;
+            QVERIFY(backend.initialize(&error));
+            QVERIFY(backend.createDeck("Timing", &error));
+            QVERIFY(backend.createCard("Timing", "Late due", "A", "basic", {}, &error));
+            backend.selectDeck("Timing");
+
+            const Card *target = nullptr;
+            for (const Deck &deck : backend.allDecks())
+                for (const Card &card : deck.cards)
+                    if (card.question == "Late due")
+                        target = &card;
+            QVERIFY(target);
+
+            // Due late today: available all today under a midnight rollover.
+            FsrsState state;
+            state.due = QDateTime(QDate::currentDate(), QTime(22, 0)).toMSecsSinceEpoch();
+            state.lastReview = QDateTime(QDate::currentDate().addDays(-1), QTime(22, 0)).toMSecsSinceEpoch();
+            state.reps = 1;
+            Store store(database);
+            QVERIFY(store.open(&error));
+            store.save(target->id, DeckIO::contentHash(*target), state);
+            backend.refresh();
+
+            const QVariantList midnightList = backend.cardList();
+            QCOMPARE(midnightList.size(), 1);
+            QVERIFY(Config::isDueByDay(state.due, QDateTime::currentMSecsSinceEpoch(), 0));
+            QVERIFY(midnightList.first().toMap().value("isDue").toBool());
+            QCOMPARE(midnightList.first().toMap().value("dueText").toString(), QString("due now"));
+            QCOMPARE(backend.availableCount(), 1);
+
+            backend.setDayStartHour(3);
+            QCOMPARE(backend.dayStartHour(), 3);
+            const bool dueAtThree = Config::isDueByDay(state.due, QDateTime::currentMSecsSinceEpoch(), 3);
+            const QVariantList shiftedList = backend.cardList();
+            QCOMPARE(shiftedList.size(), 1);
+            QCOMPARE(shiftedList.first().toMap().value("isDue").toBool(), dueAtThree);
+            QCOMPARE(backend.availableCount(), dueAtThree ? 1 : 0);
+        }
+        Backend reopened(dir.path(), database);
+        QString error;
+        QVERIFY(reopened.initialize(&error));
+        QCOMPARE(reopened.dayStartHour(), 3);
+    }
+
     void fsrsRetentionShapesIntervals() {
         QVERIFY(Fsrs::interval(10.0, 0.80) > Fsrs::interval(10.0, 0.90));
         QVERIFY(Fsrs::interval(10.0, 0.98) < Fsrs::interval(10.0, 0.90));
