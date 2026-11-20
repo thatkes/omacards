@@ -146,6 +146,8 @@ omacards skill install
 
 `omacards skill install` writes a short agent skill to `~/.agents/skills/omacards/SKILL.md`. Set `OMACARDS_DECKS_DIR` and `OMACARDS_STATE_DB` to isolate data for tests or scripts.
 
+Deck-writing commands (`add-deck`, `add-cards`, `add-card`, `import`, `edit-card` and `delete-card`) reload the file they just wrote and run the same deck checks as `check`. If a write would introduce a hard format error, the previous file is restored (or a newly created deck is removed), no history entry is recorded, and the command exits 1 with an error that includes a fix hint. Advisory warnings, such as duplicate questions or unsupported math macros, do not block a write, and decks that already contain issues can still be edited.
+
 ## Why Leitner for cram?
 
 Cram needs no persistent state, must never end, and should re-show weak cards quickly. A five-box Leitner queue gives exactly that: correct answers promote a card to a longer card-count interval, Again resets it to box 1, and the queue is refilled forever. FSRS remains the long-term scheduler where spaced intervals and retention targets matter.
@@ -183,7 +185,6 @@ Theme watching follows Omacut and Monologue (MIT, David Heinemeier Hansson).
 - Update layout in README.md
 - Ensure switching themes works properly
 - Easier deck switching
-- Validate decks after writing: `add-cards`, `add-card`, import and edit should reload the file they just wrote and run the deck issue checks. If issues exist, roll back and return an error with a fix hint instead of `ok: true`.
 - Improve `preview` diagnostics: if a deck file exists but parses to zero cards, report the format issue and point to `omacards check --deck NAME` rather than only saying “No cards to preview”.
 - Return deck metadata from `add-cards`: include the created deck path and post-write issue/warning count in the JSON response so agents can verify exactly what was created.
 - Investigate LaTeX rendered size discrepancy: `\sqrt{10}` in the local Taylor-Series-Worked-Problems (“Worked”) deck renders at a different size than the surrounding math. Check SVG root width/height scaling in `src/mathrender.cpp` (`scaleSvgRoot`, `svgPixelSize`) and the `<img>` sizing emitted for rich text; reproduce with `omacards preview --deck Taylor-Series-Worked-Problems --format html` and add a regression check for the fix.
