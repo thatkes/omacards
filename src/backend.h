@@ -5,17 +5,16 @@
 #include "deckrepository.h"
 #include "domain.h"
 #include "filehistory.h"
-#include "fsrs.h"
 #include "mathrender.h"
 #include "store.h"
+#include "studyplanner.h"
 #include "studyqueue.h"
 
-#include <QByteArray>
-#include <QHash>
 #include <QObject>
 #include <QStringList>
 #include <QTimer>
 #include <QVariantList>
+#include <QVariantMap>
 #include <QVector>
 
 #include <memory>
@@ -72,16 +71,16 @@ public:
     bool hasCard() const { return !m_currentId.isEmpty(); }
     bool waitingForRepeat() const { return m_waitingForRepeat; }
     int dueCount() const { return m_dueCount; }
-    int newCount() const;
-    int deckDue() const;
-    int deckNew() const;
+    int newCount() const { return m_planner.newCount(); }
+    int deckDue() const { return m_planner.deckDue(m_deckRepo.deckIndex(m_currentDeck)); }
+    int deckNew() const { return m_planner.deckNew(m_deckRepo.deckIndex(m_currentDeck)); }
     int streak() const { return m_store.summary(m_dayStartHour).streakDays; }
     int reviewed() const { return m_reviewed; }
     int correct() const { return m_correct; }
     int box() const { return m_box; }
     QString status() const { return m_status; }
     QString mathEngine() const;
-    int totalCards() const;
+    int totalCards() const { return m_deckRepo.totalCards(); }
     QString decksDirectory() const { return m_deckRepo.decksDirectory(); }
     QString databasePath() const { return m_store.path(); }
     QString cardFilter() const { return m_cardFilter; }
@@ -91,15 +90,17 @@ public:
     int newPerDay() const { return m_newPerDay; }
     double desiredRetention() const { return m_desiredRetention; }
     int dayStartHour() const { return m_dayStartHour; }
-    int availableCount(const QString &deckName = {}) const;
-    QVariantList deckSummaries() const;
-    QVariantList cardList() const;
+    int availableCount(const QString &deckName = {}) const { return m_planner.availableCount(deckName); }
+    QVariantList deckSummaries() const { return m_planner.deckSummaries(m_currentDeck); }
+    QVariantList cardList() const { return m_planner.cardList(m_currentDeck, m_cardFilter, tr("new"), tr("due now")); }
     ReviewSummary reviewSummary() const { return m_store.summary(m_dayStartHour); }
 
     QVector<Deck> allDecks() const { return m_deckRepo.decks(); }
-    int countDue(const QString &deckName = {}) const;
-    QVector<Card> dueCards(const QString &deckName = {}) const;
-    QVector<Card> searchCards(const QString &text, const QString &deckName = {}) const;
+    int countDue(const QString &deckName = {}) const { return m_planner.countDue(deckName); }
+    QVector<Card> dueCards(const QString &deckName = {}) const { return m_planner.dueCards(deckName); }
+    QVector<Card> searchCards(const QString &text, const QString &deckName = {}) const {
+        return m_deckRepo.searchCards(text, deckName);
+    }
 
     // Headless helpers used by the agent CLI.
     bool createDeck(const QString &name, QString *error = nullptr, const QString &description = {});
@@ -145,7 +146,10 @@ public slots:
     Q_INVOKABLE void editDeckFile();
     Q_INVOKABLE void requestShow();
     Q_INVOKABLE QString statsText() const;
-    Q_INVOKABLE QVariantMap statsSummary() const;
+    Q_INVOKABLE QVariantMap statsSummary() const {
+        return m_planner.statsSummary(m_dueCount, totalCards(), m_deckRepo.deckNames().size(), m_reviewed, m_correct,
+                                      m_desiredRetention);
+    }
 
 signals:
     void decksChanged();
@@ -163,28 +167,7 @@ signals:
     void errorOccurred(const QString &message);
 
 private:
-    // A single consistent read of the scheduling sidecar. Every availability
-    // query and every card view uses this snapshot instead of re-reading the
-    // database, so counts cannot disagree mid-action.
-    struct StudySnapshot {
-        QHash<QString, FsrsState> states;
-        QHash<QString, QString> hashes;
-        int newBudget = 0;
-        qint64 now = 0;
-    };
-
-    struct Availability {
-        QVector<Card> due;   // ordered by due date, then id
-        QVector<Card> fresh; // deck-file order, up to the daily cap
-        QVector<int> duePerDeck;
-        QVector<int> freshPerDeck;
-        QVector<int> dueIncludingNewPerDeck; // totalDue in CLI stats includes new cards
-    };
-
     void load();
-    bool refreshSnapshot();
-    FsrsState effectiveState(const Card &card) const;
-    Availability availability(const QString &deckName = {}) const;
     void scheduleNextRepeat();
     void rebuildQueue();
     void refreshDueCount();
@@ -198,11 +181,10 @@ private:
     Store m_store;
     FileHistory m_history;
     DeckRepository m_deckRepo;
+    StudyPlanner m_planner;
     StudyQueue m_queue;
     QTimer m_reviewAgainTimer;
     MathRenderer m_math;
-    StudySnapshot m_snapshot;
-    bool m_snapshotValid = false;
     qint64 m_reviewAgainDelayMs = Config::kAgainDelayMs;
     int m_dueCount = 0;
     int m_reviewed = 0;
