@@ -179,3 +179,10 @@ Theme watching follows Omacut and Monologue (MIT, David Heinemeier Hansson).
 - Redo deck format in README.md
 - Update layout in README.md
 - Ensure switching themes works properly
+- Easier deck switching
+- Fix multiline field serialization: `DeckIO::serialize()` in `src/deck.cpp` writes `Q:`/`A:` values verbatim, so JSON `\n` becomes bare lines the deck parser rejects. Indent every continuation line with exactly two spaces so bulk-added worked answers round-trip cleanly.
+- Validate decks after writing: `add-cards`, `add-card`, import and edit should reload the file they just wrote and run the deck issue checks. If issues exist, roll back and return an error with a fix hint instead of `ok: true`.
+- Add a multiline round-trip test: in `tests/test_deck.cpp`, load a card with `\n` in its question/answer, serialize it, assert `check` has no issues, reload it and assert the text is unchanged.
+- Improve `preview` diagnostics: if a deck file exists but parses to zero cards, report the format issue and point to `omacards check --deck NAME` rather than only saying “No cards to preview”.
+- Add `check --deck NAME`: scope `check` and `check --math` JSON issues to one deck while keeping the all-decks default unchanged.
+- Return deck metadata from `add-cards`: include the created deck path and post-write issue/warning count in the JSON response so agents can verify exactly what was created.
