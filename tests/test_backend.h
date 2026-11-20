@@ -25,4 +25,7 @@ private slots:
     void deckCountsMatchLibrarySummaries();
     void deckCreationRejectsSanitizedPathCollision();
     void refreshKeepsPendingAgainRepeat();
+    void deckSwitchKeepsPendingAgainRepeat();
+    void setMathColorsNotifiesColorChange();
+    void statsSummaryKeepsContract();
 };

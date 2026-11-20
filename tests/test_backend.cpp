@@ -590,3 +590,83 @@ void TestBackend::refreshKeepsPendingAgainRepeat() {
     else
         qputenv("OMACARDS_AGAIN_DELAY_MS", previousDelay);
 }
+
+void TestBackend::deckSwitchKeepsPendingAgainRepeat() {
+    QTemporaryDir dir;
+    const QByteArray previousDelay = qgetenv("OMACARDS_AGAIN_DELAY_MS");
+    qputenv("OMACARDS_AGAIN_DELAY_MS", "500");
+    {
+        Backend backend(dir.path(), dir.filePath("state.db"));
+        QString error;
+        QVERIFY(backend.initialize(&error));
+        QVERIFY(backend.createDeck("First", &error));
+        QVERIFY(backend.createCard("First", "Q1", "A1", "basic", {}, &error));
+        QVERIFY(backend.createCard("First", "Q2", "A2", "basic", {}, &error));
+        QVERIFY(backend.createDeck("Second", &error));
+        QVERIFY(backend.createCard("Second", "Q3", "A3", "basic", {}, &error));
+
+        backend.selectDeck("First");
+        backend.flip();
+        backend.rate(1); // Q1 waits; Q2 is current.
+        QVERIFY(backend.question().contains("Q2"));
+
+        backend.selectDeck("Second");
+        QVERIFY(backend.question().contains("Q3"));
+        backend.selectDeck("First");
+        QVERIFY(backend.question().contains("Q2"));
+
+        backend.flip();
+        backend.rate(3); // Q2 is done; Q1's pending repeat comes back.
+        QTRY_VERIFY_WITH_TIMEOUT(backend.question().contains("Q1"), 2000);
+    }
+    if (previousDelay.isNull())
+        qunsetenv("OMACARDS_AGAIN_DELAY_MS");
+    else
+        qputenv("OMACARDS_AGAIN_DELAY_MS", previousDelay);
+}
+
+void TestBackend::setMathColorsNotifiesColorChange() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Math", &error));
+    QVERIFY(backend.createCard("Math", "What is \\(x^2\\)?", "A", "basic", {}, &error));
+    backend.selectDeck("Math");
+    QVERIFY(backend.hasCard());
+    QVERIFY(!backend.question().isEmpty());
+
+    int cardChanges = 0;
+    QObject::connect(&backend, &Backend::cardChanged, &backend, [&cardChanges] { ++cardChanges; });
+    backend.setMathColors("#112233", "#445566");
+    QCOMPARE(cardChanges, 1);
+    backend.setMathColors("#112233", "#445566"); // unchanged colors are a no-op
+    QCOMPARE(cardChanges, 1);
+    backend.setMathColors("#000000", "#000000");
+    QCOMPARE(cardChanges, 2);
+}
+
+void TestBackend::statsSummaryKeepsContract() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Stats", &error));
+    QVERIFY(backend.createCard("Stats", "Q1", "A1", "basic", {}, &error));
+    backend.selectDeck("Stats");
+    backend.flip();
+    backend.rate(3);
+
+    const QVariantMap summary = backend.statsSummary();
+    QStringList keys = summary.keys();
+    keys.sort();
+    QStringList expected{"accuracy",        "cards",      "dayStartHour", "decks",        "due",
+                         "newAvailable",    "newPerDay",  "newToday",     "retention",    "sessionCorrect",
+                         "sessionReviewed", "streakDays", "today",        "todayCorrect", "totalReviews"};
+    expected.sort();
+    QCOMPARE(keys, expected);
+    QCOMPARE(summary.value("cards").toInt(), backend.totalCards());
+    QCOMPARE(summary.value("decks").toInt(), backend.decks().size());
+    QCOMPARE(summary.value("due").toInt(), backend.dueCount());
+    QCOMPARE(summary.value("sessionReviewed").toInt(), backend.reviewed());
+}
