@@ -116,6 +116,27 @@ void TestCli::addCardsRejectsInvalidInputWithoutWriting() {
     QVERIFY(!QFileInfo::exists(QDir(dir.filePath("decks")).filePath("Bad.txt")));
 }
 
+void TestCli::writeCommandsValidateSerializedDeck() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    EnvGuard env(decks, database);
+
+    const QString input = dir.filePath("cards.json");
+    QVERIFY(writeFile(input, R"([{"question":"Q","answer":"A"}])"));
+    const QString badDeck = QStringLiteral("Broken\n---\nA: orphan");
+
+    int code = -1;
+    const QJsonObject result = runCli({"add-cards", "-d", badDeck, "-i", input, "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QVERIFY(!result.value(QStringLiteral("ok")).toBool(true));
+    const QString error = result.value(QStringLiteral("error")).toString();
+    QVERIFY(error.contains(QStringLiteral("Deck would be invalid after write")));
+    QVERIFY(error.contains(QStringLiteral("Hint:")));
+    QVERIFY(!QFileInfo::exists(QDir(decks).filePath(DeckIO::safeFileName(badDeck) + ".txt")));
+}
+
 void TestCli::addDeckDescriptionAndJsonImport() {
     QTemporaryDir dir;
     EnvGuard env(dir.filePath("decks"), dir.filePath("state.db"));

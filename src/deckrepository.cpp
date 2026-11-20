@@ -3,9 +3,11 @@
 #include "importer.h"
 
 #include <QCoreApplication>
+#include <QChar>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QRegularExpression>
 #include <QSet>
 #include <algorithm>
 
@@ -14,6 +16,48 @@ namespace {
 // under "Backend" and QML clients expect their wording to stay identical.
 QString trBackend(const char *text) {
     return QCoreApplication::translate("Backend", text);
+}
+
+void setError(QString *error, const QString &message) {
+    if (error)
+        *error = message;
+}
+
+// Compare errors by meaning, not by line number: appending or editing a card
+// can legitimately move a pre-existing issue further down the file.
+QString errorSignature(const DeckIssue &issue) {
+    QString message = issue.message;
+    static const QRegularExpression lineNumber(R"re(\b(?:near )?line \d+\b)re");
+    message.replace(lineNumber, QStringLiteral("line N"));
+    return issue.severity + QChar(0x1f) + issue.card + QChar(0x1f) + message;
+}
+
+QSet<QString> errorSignatures(const QVector<DeckIssue> &issues) {
+    QSet<QString> signatures;
+    for (const DeckIssue &issue : issues) {
+        if (issue.severity == QLatin1String("error"))
+            signatures.insert(errorSignature(issue));
+    }
+    return signatures;
+}
+
+const DeckIssue *firstNewError(const QVector<DeckIssue> &issues, const QSet<QString> &baseline) {
+    for (const DeckIssue &issue : issues) {
+        if (issue.severity == QLatin1String("error") && !baseline.contains(errorSignature(issue)))
+            return &issue;
+    }
+    return nullptr;
+}
+
+QString validationError(const DeckIssue &issue) {
+    QString message = trBackend("Deck would be invalid after write: %1").arg(issue.message);
+    if (!issue.hint.isEmpty())
+        message += QStringLiteral(" ") + trBackend("Hint: %1").arg(issue.hint);
+    return message;
+}
+
+QSet<QString> baselineErrors(const QString &path) {
+    return QFileInfo::exists(path) ? errorSignatures(DeckIO::lintFile(path)) : QSet<QString>();
 }
 } // namespace
 
@@ -151,10 +195,25 @@ void DeckRepository::recordHistory(const QString &path, const QByteArray &before
 
 bool DeckRepository::commitDeckEdit(Deck *deck, const Deck &original, const QByteArray &before,
                                     const QString &description, QString *error) {
+    const QSet<QString> baseline = baselineErrors(deck->path);
     if (!DeckIO::save(*deck, error)) {
         *deck = original;
         return false;
     }
+
+    const QVector<DeckIssue> issues = DeckIO::lintFile(deck->path);
+    if (const DeckIssue *invalid = firstNewError(issues, baseline)) {
+        QString restoreError;
+        if (!FileHistory::restore(deck->path, before, true, &restoreError)) {
+            setError(error, trBackend("Deck write failed validation and could not be restored: %1").arg(restoreError));
+            *deck = original;
+            return false;
+        }
+        *deck = original;
+        setError(error, validationError(*invalid));
+        return false;
+    }
+
     recordHistory(deck->path, before, true, description);
     return true;
 }
@@ -210,6 +269,17 @@ bool DeckRepository::createDeck(const QString &name, QString *currentDeck, QStri
     const QByteArray before = existed ? FileHistory::readBytes(deck.path) : QByteArray();
     if (!DeckIO::save(deck, error))
         return false;
+
+    const QVector<DeckIssue> issues = DeckIO::lintFile(deck.path);
+    if (const DeckIssue *invalid = firstNewError(issues, QSet<QString>())) {
+        QString restoreError;
+        if (!FileHistory::restore(deck.path, before, existed, &restoreError))
+            setError(error, trBackend("Deck write failed validation and could not be restored: %1").arg(restoreError));
+        else
+            setError(error, validationError(*invalid));
+        return false;
+    }
+
     recordHistory(deck.path, before, existed, trBackend("creating deck %1").arg(clean));
     // The old Backend::createDeck() called refresh() here, so callers could
     // immediately look the new deck up (createCards(), imports, CLI). Reload

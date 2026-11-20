@@ -11,6 +11,7 @@ private slots:
     void createDeckRejectsEmptyAndDuplicateNames();
     void createDeckRejectsSanitizedPathCollision();
     void createDeckRejectsExistingUntrackedFile();
+    void createDeckRejectsInvalidSerializedDeck();
     void createDeckTrimsDescription();
     void createCardsRejectsEmptyTargetAndDrafts();
     void createCardsReportsInvalidDraftIndex();
@@ -27,6 +28,8 @@ private slots:
     void removeDeckClearsCurrentAndPrunesOnReload();
     void removeDeckKeepsUnrelatedCurrent();
     void setDeckDescriptionTrimsAndSkipsNoOp();
+    void setDeckDescriptionRejectsInvalidSerializedDeck();
+    void writeAllowsPreExistingWarnings();
     void loadPicksFirstDeckWhenCurrentIsInvalid();
     void loadPrunesStaleSidecarRows();
     void loadKeepsStateWhenDeckFileUnreadable();

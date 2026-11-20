@@ -11,6 +11,7 @@ private slots:
     void addCardsMultilineRoundTrips();
     void addCardsKeepsExistingDescription();
     void addCardsRejectsInvalidInputWithoutWriting();
+    void writeCommandsValidateSerializedDeck();
     void addDeckDescriptionAndJsonImport();
     void cliConfigReportsWriteFailure();
     void cliEditsAndDeletesCardsAcrossDecks();

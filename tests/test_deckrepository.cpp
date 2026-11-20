@@ -4,6 +4,7 @@
 #include <QFileInfo>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <algorithm>
 
 #include "test_deckrepository.h"
 #include "deck.h"
@@ -136,6 +137,22 @@ void TestDeckRepository::createDeckRejectsExistingUntrackedFile() {
     QFile file(path);
     QVERIFY(file.open(QIODevice::ReadOnly));
     QCOMPARE(file.readAll(), contents);
+}
+
+void TestDeckRepository::createDeckRejectsInvalidSerializedDeck() {
+    RepoFixture f;
+    QVERIFY(setup(f));
+    const QString badName = QStringLiteral("Broken\n---\nA: orphan");
+    const QString path = QDir(f.dir.filePath("decks")).filePath(DeckIO::safeFileName(badName) + ".txt");
+
+    QString error;
+    QVERIFY(!f.repo.createDeck(badName, &f.current, &error));
+    QVERIFY(error.contains(QStringLiteral("Deck would be invalid after write")));
+    QVERIFY(error.contains(QStringLiteral("Hint:")));
+    QVERIFY(error.contains(QStringLiteral("Fix the format")));
+    QVERIFY(!QFileInfo::exists(path));
+    QVERIFY(!f.repo.deckByName(badName));
+    QVERIFY(!f.history.canUndo());
 }
 
 void TestDeckRepository::createDeckTrimsDescription() {
@@ -460,6 +477,59 @@ void TestDeckRepository::setDeckDescriptionTrimsAndSkipsNoOp() {
     error.clear();
     QVERIFY(!f.repo.setDeckDescription("Ghost", "x", &error));
     QVERIFY(error.contains(QStringLiteral("No such deck: Ghost")));
+}
+
+void TestDeckRepository::setDeckDescriptionRejectsInvalidSerializedDeck() {
+    RepoFixture f;
+    QVERIFY(setup(f));
+    QString error;
+    QVERIFY(f.repo.createDeck("Desc", &f.current, &error, "Original"));
+    const QString path = f.repo.deckPath("Desc");
+    QVERIFY(!path.isEmpty());
+    const QByteArray before = FileHistory::readBytes(path);
+    QVERIFY(DeckIO::lintFile(path).isEmpty());
+
+    QSignalSpy historySpy(&f.repo, &DeckRepository::historyChanged);
+    QVERIFY(!f.repo.setDeckDescription("Desc", "Original\n---\nA: orphan", &error));
+    QVERIFY(error.contains(QStringLiteral("Deck would be invalid after write")));
+    QVERIFY(error.contains(QStringLiteral("Hint:")));
+    QVERIFY(error.contains(QStringLiteral("Fix the format")));
+    QCOMPARE(FileHistory::readBytes(path), before);
+    QCOMPARE(f.repo.deckByName("Desc")->description, QStringLiteral("Original"));
+    QVERIFY(DeckIO::lintFile(path).isEmpty());
+    QCOMPARE(historySpy.count(), 0);
+}
+
+void TestDeckRepository::writeAllowsPreExistingWarnings() {
+    RepoFixture f;
+    QVERIFY(setup(f));
+    QString error;
+    QVERIFY(f.repo.createDeck("Warnings", &f.current, &error));
+
+    CardDraft duplicate;
+    duplicate.question = "Same";
+    duplicate.answer = "A";
+    QVector<CardDraft> drafts{duplicate, duplicate};
+    QVERIFY(f.repo.createCards("Warnings", &f.current, drafts, nullptr, nullptr, &error));
+    const QString path = f.repo.deckPath("Warnings");
+    const QVector<DeckIssue> before = DeckIO::lintFile(path);
+    QVERIFY(!before.isEmpty());
+    QVERIFY(std::any_of(before.cbegin(), before.cend(), [](const DeckIssue &issue) {
+        return issue.message == QStringLiteral("Duplicate question in deck");
+    }));
+    const QByteArray bytesBefore = FileHistory::readBytes(path);
+
+    CardDraft distinct;
+    distinct.question = "Different";
+    distinct.answer = "B";
+    QVERIFY(f.repo.createCards("Warnings", &f.current, {distinct}, nullptr, nullptr, &error));
+    QVERIFY(error.isEmpty());
+    QCOMPARE(f.repo.deckByName("Warnings")->cards.size(), 3);
+    QVERIFY(FileHistory::readBytes(path) != bytesBefore);
+    const QVector<DeckIssue> after = DeckIO::lintFile(path);
+    QVERIFY(std::any_of(after.cbegin(), after.cend(), [](const DeckIssue &issue) {
+        return issue.message == QStringLiteral("Duplicate question in deck");
+    }));
 }
 
 void TestDeckRepository::loadPicksFirstDeckWhenCurrentIsInvalid() {
