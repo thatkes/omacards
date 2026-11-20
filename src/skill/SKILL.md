@@ -36,6 +36,7 @@ command -v omacards
 
 ```sh
 omacards check --json
+omacards check --deck Spanish --json         # scope decks, cards and issues to one deck
 omacards check --math --json                 # advisory math warnings
 omacards check --strict --json               # exit 1 if any issues exist
 omacards decks --json

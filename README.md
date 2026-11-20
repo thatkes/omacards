@@ -124,6 +124,7 @@ Every command accepts `--json`, prints errors to stderr and exits 0 or 1.
 
 ```sh
 omacards check
+omacards check --deck Spanish
 omacards decks
 omacards cards --deck Spanish
 omacards search gato --deck Spanish

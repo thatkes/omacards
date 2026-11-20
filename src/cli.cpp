@@ -263,7 +263,7 @@ QString usage() {
     return QStringLiteral("omacards — keyboard flashcards for Omarchy\n\n"
                           "Usage:\n"
                           "  omacards [open]                  Start the GUI\n"
-                          "  omacards check [--math] [--strict] [--json]\n"
+                          "  omacards check [--deck NAME] [--math] [--strict] [--json]\n"
                           "                                   Show decks, cards, due count, math and issues\n"
                           "  omacards decks [--json]          List decks\n"
                           "  omacards cards [--deck D] [--json]\n"
@@ -317,10 +317,49 @@ int run(const QStringList &arguments) {
     const bool json = options.json;
 
     if (options.command == "check") {
-        const int total = allCards(decks, {}).size();
-        const int due = backend.availableCount();
+        QString targetPath;
+        if (!options.deck.isEmpty()) {
+            for (const Deck &deck : decks) {
+                if (deck.name == options.deck) {
+                    targetPath = deck.path;
+                    break;
+                }
+            }
+            if (targetPath.isEmpty()) {
+                // A deck with parse errors is skipped by loadAll(), but its
+                // issues are exactly what --deck is for: resolve its file.
+                const QDir dir(backend.decksDirectory());
+                const QString base = DeckIO::safeFileName(options.deck);
+                for (const QString &suffix : {QStringLiteral(".txt"), QStringLiteral(".deck")}) {
+                    const QString candidate = dir.filePath(base + suffix);
+                    if (QFileInfo::exists(candidate)) {
+                        targetPath = candidate;
+                        break;
+                    }
+                }
+            }
+            if (targetPath.isEmpty())
+                return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
+        }
+
+        QVector<Deck> checkedDecks;
+        if (targetPath.isEmpty()) {
+            checkedDecks = decks;
+        } else {
+            for (const Deck &deck : decks) {
+                if (deck.path == targetPath)
+                    checkedDecks << deck;
+            }
+            if (checkedDecks.isEmpty()) {
+                QString loadError;
+                checkedDecks << DeckIO::load(targetPath, &loadError);
+            }
+        }
+
+        const int total = allCards(checkedDecks, {}).size();
+        const int due = backend.availableCount(options.deck);
         QJsonArray deckArray;
-        for (const Deck &deck : decks) {
+        for (const Deck &deck : checkedDecks) {
             QJsonObject object;
             object.insert("name", deck.name);
             object.insert("cards", deck.cards.size());
@@ -330,7 +369,7 @@ int run(const QStringList &arguments) {
         QStringList warningLines;
         if (options.math) {
             MathRenderer renderer;
-            for (const Deck &deck : decks) {
+            for (const Deck &deck : checkedDecks) {
                 for (const Card &card : deck.cards) {
                     const auto checkField = [&](const QString &field, const QString &text) {
                         for (const QString &message : renderer.warnings(text)) {
@@ -349,7 +388,11 @@ int run(const QStringList &arguments) {
             }
         }
 
-        const QVector<DeckIssue> issues = DeckIO::lint(backend.decksDirectory());
+        QVector<DeckIssue> issues;
+        for (const DeckIssue &issue : DeckIO::lint(backend.decksDirectory())) {
+            if (targetPath.isEmpty() || issue.path == targetPath)
+                issues << issue;
+        }
         QJsonArray issueArray;
         QStringList issueLines;
         int errors = 0;
@@ -378,10 +421,12 @@ int run(const QStringList &arguments) {
         QJsonObject object;
         object.insert("ok", errors == 0);
         object.insert("version", QString("0.1.0"));
+        if (!options.deck.isEmpty())
+            object.insert("deck", options.deck);
         object.insert("decks", deckArray);
         object.insert("cards", total);
         object.insert("due", due);
-        object.insert("totalDue", backend.countDue());
+        object.insert("totalDue", backend.countDue(options.deck));
         object.insert("newToday", backend.reviewSummary().newToday);
         object.insert("newPerDay", backend.newPerDay());
         object.insert("retention", backend.desiredRetention());
@@ -397,7 +442,7 @@ int run(const QStringList &arguments) {
         if (options.math)
             object.insert("mathWarnings", mathWarnings);
         QString human = QObject::tr("%1 decks · %2 cards · %3 due · math: %4")
-                            .arg(decks.size())
+                            .arg(checkedDecks.size())
                             .arg(total)
                             .arg(due)
                             .arg(backend.mathEngine());

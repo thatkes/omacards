@@ -384,6 +384,66 @@ A: two
     QCOMPARE(code, 1);
 }
 
+void TestCli::checkDeckScoping() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    EnvGuard env(decks, database);
+
+    QVERIFY(writeFile(QDir(decks).filePath("Clean.txt"), "# Deck: Clean\n---\nQ: Clean question\nA: ok\n"));
+    QVERIFY(writeFile(QDir(decks).filePath("Broken.txt"),
+                      "# Deck: Broken\n---\nQ: Same\nA: ok\n---\nQ: Same\nA: \\(\\foobar{x}\\)\n"));
+
+    int code = -1;
+    const QJsonObject clean = runCli({"check", "--deck", "Clean", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY(clean.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(clean.value(QStringLiteral("deck")).toString(), QString("Clean"));
+    const QJsonArray cleanDecks = clean.value(QStringLiteral("decks")).toArray();
+    QCOMPARE(cleanDecks.size(), 1);
+    QCOMPARE(cleanDecks.at(0).toObject().value(QStringLiteral("name")).toString(), QString("Clean"));
+    QCOMPARE(clean.value(QStringLiteral("cards")).toInt(), 1);
+    QVERIFY(clean.value(QStringLiteral("issues")).toArray().isEmpty());
+    const QJsonObject cleanCounts = clean.value(QStringLiteral("issueCounts")).toObject();
+    QCOMPARE(cleanCounts.value(QStringLiteral("error")).toInt(), 0);
+    QCOMPARE(cleanCounts.value(QStringLiteral("warning")).toInt(), 0);
+
+    const QJsonObject broken = runCli({"check", "--deck", "Broken", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    const QJsonArray issues = broken.value(QStringLiteral("issues")).toArray();
+    QVERIFY(issues.size() >= 2);
+    bool sawDuplicate = false;
+    bool sawMath = false;
+    for (const QJsonValue &value : issues) {
+        const QJsonObject issue = value.toObject();
+        QVERIFY2(issue.value(QStringLiteral("path")).toString().endsWith(QStringLiteral("Broken.txt")),
+                 qPrintable(issue.value(QStringLiteral("path")).toString()));
+        sawDuplicate |=
+            issue.value(QStringLiteral("message")).toString() == QStringLiteral("Duplicate question in deck");
+        sawMath |=
+            issue.value(QStringLiteral("message")).toString().startsWith(QStringLiteral("Math warning in answer"));
+    }
+    QVERIFY(sawDuplicate);
+    QVERIFY(sawMath);
+
+    const QJsonObject math = runCli({"check", "--deck", "Broken", "--math", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    const QJsonArray warnings = math.value(QStringLiteral("mathWarnings")).toArray();
+    QCOMPARE(warnings.size(), 1);
+    QCOMPARE(warnings.at(0).toObject().value(QStringLiteral("deck")).toString(), QString("Broken"));
+
+    const QJsonObject missing = runCli({"check", "--deck", "Unknown", "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QCOMPARE(missing.value(QStringLiteral("error")).toString(), QString("No such deck: Unknown"));
+
+    const QJsonObject all = runCli({"check", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(all.value(QStringLiteral("decks")).toArray().size(), 2);
+    QVERIFY(!all.contains(QStringLiteral("deck")));
+    QVERIFY(all.value(QStringLiteral("issues")).toArray().size() >= 2);
+}
+
 void TestCli::readCommandJsonContracts() {
     QTemporaryDir dir;
     const QString decks = dir.filePath("decks");

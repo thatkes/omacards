@@ -20,6 +20,7 @@ private slots:
     void headlessCommandDetectionIsComplete();
     void unknownCommandJsonError();
     void checkJsonKeyContract();
+    void checkDeckScoping();
     void readCommandJsonContracts();
     void reviewCommandContract();
     void cramCommandDeterminism();
