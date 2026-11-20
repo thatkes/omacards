@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QDir>
+#include <QFile>
 #include <QTemporaryDir>
 
 #include "test_deck.h"
@@ -43,6 +44,56 @@ void TestDeck::deckParsesAndSerializes() {
 
     // Generated ids stay implicit so edited files remain readable.
     QVERIFY(!roundTrip.contains("id: " + deck.cards.first().id));
+}
+
+void TestDeck::multilineFieldsRoundTrip() {
+    QTemporaryDir dir;
+    const QString decksDir = dir.filePath("decks");
+    QVERIFY(QDir().mkpath(decksDir));
+    const QString path = QDir(decksDir).filePath("Multi.txt");
+
+    Deck deck;
+    deck.name = "Multi";
+    deck.path = path;
+
+    Card worked;
+    worked.deck = deck.name;
+    worked.question = "First line\nSecond line";
+    worked.answer = "Step 1\nStep 2\n\nStep 4";
+    worked.type = Domain::parseCardType("basic");
+    deck.cards << worked;
+
+    Card windows;
+    windows.deck = deck.name;
+    windows.question = "Windows\r\nline";
+    windows.answer = "ok";
+    windows.type = Domain::parseCardType("basic");
+    deck.cards << windows;
+
+    QString error;
+    QVERIFY(DeckIO::save(deck, &error));
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QString written = QString::fromUtf8(file.readAll());
+    file.close();
+    QVERIFY(written.contains(QStringLiteral("Q: First line\n  Second line")));
+    QVERIFY(written.contains(QStringLiteral("A: Step 1\n  Step 2\n  \n  Step 4")));
+    QVERIFY(written.contains(QStringLiteral("Q: Windows\n  line")));
+    QVERIFY(!written.contains('\r'));
+
+    // The written file must be clean according to the same linter used by check.
+    QVERIFY2(DeckIO::lint(decksDir).isEmpty(), "serialized continuations should be lint-clean");
+
+    error.clear();
+    const Deck loaded = DeckIO::load(path, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(loaded.cards.size(), 2);
+    QCOMPARE(loaded.cards.at(0).question, worked.question);
+    QCOMPARE(loaded.cards.at(0).answer, worked.answer);
+    QCOMPARE(loaded.cards.at(1).question, QStringLiteral("Windows\nline"));
+    QCOMPARE(loaded.cards.at(1).answer, windows.answer);
 }
 
 void TestDeck::clozeCardsHideAndReveal() {

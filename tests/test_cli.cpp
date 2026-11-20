@@ -62,6 +62,35 @@ void TestCli::addCardsCreatesDeckBulk() {
     QCOMPARE(deck.cards.at(1).tags, QStringList({"z", "w"}));
 }
 
+void TestCli::addCardsMultilineRoundTrips() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    EnvGuard env(decks, database);
+
+    const QString input = dir.filePath("worked.json");
+    QVERIFY(writeFile(input, R"({"cards":[{"question":"Work this out",
+                                          "answer":"First step\nSecond step"}]})"));
+
+    int code = -1;
+    const QJsonObject added = runCli({"add-cards", "-d", "Worked", "-i", input, "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY(added.value(QStringLiteral("ok")).toBool());
+
+    QFile file(QDir(decks).filePath("Worked.txt"));
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QString written = QString::fromUtf8(file.readAll());
+    file.close();
+    QVERIFY(written.contains(QStringLiteral("A: First step\n  Second step")));
+
+    const QJsonObject check = runCli({"check", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    const QJsonObject counts = check.value(QStringLiteral("issueCounts")).toObject();
+    QCOMPARE(counts.value(QStringLiteral("error")).toInt(), 0);
+    QCOMPARE(counts.value(QStringLiteral("warning")).toInt(), 0);
+}
+
 void TestCli::addCardsKeepsExistingDescription() {
     QTemporaryDir dir;
     EnvGuard env(dir.filePath("decks"), dir.filePath("state.db"));

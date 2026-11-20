@@ -7,6 +7,7 @@ class TestDeck : public QObject {
 
 private slots:
     void deckParsesAndSerializes();
+    void multilineFieldsRoundTrip();
     void clozeCardsHideAndReveal();
     void deckCardIdIsStableAndIgnoresType();
     void deckContentHashPinsHashBytes();

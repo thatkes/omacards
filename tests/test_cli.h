@@ -8,6 +8,7 @@ class TestCli : public QObject {
 private slots:
     void helpIsHeadless();
     void addCardsCreatesDeckBulk();
+    void addCardsMultilineRoundTrips();
     void addCardsKeepsExistingDescription();
     void addCardsRejectsInvalidInputWithoutWriting();
     void addDeckDescriptionAndJsonImport();

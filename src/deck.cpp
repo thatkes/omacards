@@ -39,6 +39,17 @@ static void appendLine(QString &field, const QString &line) {
         field += "\n" + line;
 }
 
+// Deck files use exactly two leading spaces to continue a Q:/A: value. Write
+// multiline fields that way so load() and lint() see the same structure.
+static void appendField(QStringList &out, const QString &key, const QString &value) {
+    QString normalized = value;
+    normalized.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    const QStringList lines = normalized.split('\n');
+    out << key + QStringLiteral(": ") + lines.first();
+    for (int i = 1; i < lines.size(); ++i)
+        out << QStringLiteral("  ") + lines.at(i);
+}
+
 QString cardId(const Card &card) {
     const QString source = card.deck + "\x1f" + card.question + "\x1f" + card.answer;
     return QString::fromLatin1(QCryptographicHash::hash(source.toUtf8(), QCryptographicHash::Sha1).toHex().left(12));
@@ -68,7 +79,8 @@ Deck load(const QString &path, QString *error) {
         QString currentKey;
         for (int i = 0; i < body.size(); ++i) {
             const QString raw = body.at(i);
-            if (raw.trimmed().isEmpty())
+            const bool continuation = raw.startsWith(QLatin1String("  ")) && !currentKey.isEmpty();
+            if (!continuation && raw.trimmed().isEmpty())
                 continue;
             const auto match = keyLine.match(raw);
             if (match.hasMatch()) {
@@ -91,7 +103,7 @@ Deck load(const QString &path, QString *error) {
                     card.explicitId = !value.isEmpty();
                     currentKey.clear();
                 }
-            } else if (raw.startsWith(QLatin1String("  ")) && !currentKey.isEmpty()) {
+            } else if (continuation) {
                 const QString continued = raw.trimmed();
                 if (currentKey == "tags") {
                     // Tags continue as a comma-separated line.
@@ -300,8 +312,8 @@ QString serialize(const Deck &deck) {
         out << "# Description: " + deck.description;
     for (const Card &card : deck.cards) {
         out << "---";
-        out << "Q: " + card.question;
-        out << "A: " + card.answer;
+        appendField(out, QStringLiteral("Q"), card.question);
+        appendField(out, QStringLiteral("A"), card.answer);
         const QString typeText = Domain::toString(card.type);
         if (typeText != QLatin1String("basic"))
             out << "type: " + typeText;
