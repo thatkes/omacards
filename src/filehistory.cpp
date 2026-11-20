@@ -25,30 +25,35 @@ bool FileHistory::record(const QString &path, const QByteArray &before, bool exi
     return true;
 }
 
-bool FileHistory::apply(const Snapshot &snapshot, bool restoreBefore, QString *error) {
-    const bool exists = restoreBefore ? snapshot.existedBefore : snapshot.existsAfter;
-    if (!exists) {
-        if (QFileInfo::exists(snapshot.path) && !QFile::remove(snapshot.path)) {
+bool FileHistory::restore(const QString &path, const QByteArray &bytes, bool existed, QString *error) {
+    if (!existed) {
+        if (QFileInfo::exists(path) && !QFile::remove(path)) {
             if (error)
-                *error = QCoreApplication::translate("FileHistory", "Cannot remove %1").arg(snapshot.path);
+                *error = QCoreApplication::translate("FileHistory", "Cannot remove %1").arg(path);
             return false;
         }
         return true;
     }
 
-    QSaveFile file(snapshot.path);
+    QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
         if (error)
-            *error = QCoreApplication::translate("FileHistory", "Cannot write %1").arg(snapshot.path);
+            *error = QCoreApplication::translate("FileHistory", "Cannot write %1").arg(path);
         return false;
     }
-    file.write(restoreBefore ? snapshot.before : snapshot.after);
+    file.write(bytes);
     if (!file.commit()) {
         if (error)
-            *error = QCoreApplication::translate("FileHistory", "Cannot write %1").arg(snapshot.path);
+            *error = QCoreApplication::translate("FileHistory", "Cannot write %1").arg(path);
         return false;
     }
     return true;
+}
+
+bool FileHistory::apply(const Snapshot &snapshot, bool restoreBefore, QString *error) {
+    const bool exists = restoreBefore ? snapshot.existedBefore : snapshot.existsAfter;
+    const QByteArray &bytes = restoreBefore ? snapshot.before : snapshot.after;
+    return restore(snapshot.path, bytes, exists, error);
 }
 
 bool FileHistory::undo(QString *error, QString *description) {

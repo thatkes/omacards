@@ -33,6 +33,24 @@ void TestFileHistory::fileHistoryUndoRedoText() {
     QVERIFY(!history.canRedo());
 }
 
+void TestFileHistory::fileHistoryRestorePreWriteState() {
+    QTemporaryDir dir;
+    const QString existing = dir.filePath("existing.txt");
+    QVERIFY(writeFile(existing, "before"));
+    const QByteArray before = FileHistory::readBytes(existing);
+    QVERIFY(writeFile(existing, "after"));
+
+    QString error;
+    QVERIFY(FileHistory::restore(existing, before, true, &error));
+    QVERIFY(error.isEmpty());
+    QCOMPARE(FileHistory::readBytes(existing), QByteArray("before"));
+
+    const QString created = dir.filePath("created.txt");
+    QVERIFY(writeFile(created, "new"));
+    QVERIFY(FileHistory::restore(created, {}, false, &error));
+    QVERIFY(!QFileInfo::exists(created));
+}
+
 void TestFileHistory::fileHistoryUndoRemovesCreatedFile() {
     QTemporaryDir dir;
     const QString path = dir.filePath("created.txt");

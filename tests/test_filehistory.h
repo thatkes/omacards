@@ -7,6 +7,7 @@ class TestFileHistory : public QObject {
 
 private slots:
     void fileHistoryUndoRedoText();
+    void fileHistoryRestorePreWriteState();
     void fileHistoryUndoRemovesCreatedFile();
     void fileHistoryUnchangedRecordIsNoop();
     void fileHistoryUndoRedoDeletedFile();

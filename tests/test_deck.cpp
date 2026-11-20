@@ -390,6 +390,30 @@ void TestDeck::deckLintReportsIssues() {
     QCOMPARE(issues.first().severity, QString("warning"));
 }
 
+void TestDeck::deckLintFileMatchesDirectoryLint() {
+    QTemporaryDir dir;
+    const QString cleanPath = dir.filePath("Clean.txt");
+    const QString brokenPath = dir.filePath("Broken.txt");
+    QVERIFY(writeFile(cleanPath, "# Deck: Clean\n---\nQ: Fine\nA: ok\n"));
+    QVERIFY(writeFile(brokenPath, "# Deck: Broken\n---\nA: orphan\n"));
+
+    QVERIFY(DeckIO::lintFile(cleanPath).isEmpty());
+
+    const QVector<DeckIssue> single = DeckIO::lintFile(brokenPath);
+    QCOMPARE(single.size(), 1);
+    QCOMPARE(single.first().path, brokenPath);
+    QCOMPARE(single.first().severity, QStringLiteral("error"));
+    QVERIFY(single.first().message.contains(QStringLiteral("Card without a question")));
+    QVERIFY(single.first().hint.contains(QStringLiteral("Fix the format")));
+
+    const QVector<DeckIssue> directory = DeckIO::lint(dir.path());
+    QCOMPARE(directory.size(), single.size());
+    QCOMPARE(directory.first().path, single.first().path);
+    QCOMPARE(directory.first().severity, single.first().severity);
+    QCOMPARE(directory.first().message, single.first().message);
+    QCOMPARE(directory.first().hint, single.first().hint);
+}
+
 void TestDeck::deckClozeEdgeCases() {
     Card card;
     card.type = Domain::parseCardType("cloze");

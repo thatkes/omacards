@@ -46,6 +46,7 @@ Q_DECLARE_METATYPE(Deck)
 namespace DeckIO {
 QVector<Deck> loadAll(const QString &directory, QString *error = nullptr);
 QVector<DeckIssue> lint(const QString &directory);
+QVector<DeckIssue> lintFile(const QString &path);
 Deck load(const QString &path, QString *error = nullptr);
 QString serialize(const Deck &deck);
 bool save(const Deck &deck, QString *error = nullptr);

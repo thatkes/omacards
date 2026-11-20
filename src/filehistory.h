@@ -18,6 +18,7 @@ public:
     };
 
     static QByteArray readBytes(const QString &path);
+    static bool restore(const QString &path, const QByteArray &bytes, bool existed, QString *error = nullptr);
 
     // Returns false when the file did not actually change.
     bool record(const QString &path, const QByteArray &before, bool existedBefore, const QString &description);
