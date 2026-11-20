@@ -1,0 +1,12 @@
+#pragma once
+
+#include <QObject>
+
+class TestFsrs : public QObject {
+    Q_OBJECT
+
+private slots:
+    void fsrsInitialState();
+    void fsrsReviewMovesDueForward();
+    void fsrsRetentionShapesIntervals();
+};
