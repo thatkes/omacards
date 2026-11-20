@@ -188,3 +188,5 @@ Theme watching follows Omacut and Monologue (MIT, David Heinemeier Hansson).
 - Return deck metadata from `add-cards`: include the created deck path and post-write issue/warning count in the JSON response so agents can verify exactly what was created.
 - Investigate LaTeX rendered size discrepancy: `\sqrt{10}` in the local Taylor-Series-Worked-Problems (“Worked”) deck renders at a different size than the surrounding math. Check SVG root width/height scaling in `src/mathrender.cpp` (`scaleSvgRoot`, `svgPixelSize`) and the `<img>` sizing emitted for rich text; reproduce with `omacards preview --deck Taylor-Series-Worked-Problems --format html` and add a regression check for the fix.
 - Keep all card text on the card: the study panel's question and answer `Label`s in `src/Main.qml` wrap without a viewport, so long worked answers can extend past the card. Put them in a `Flickable`/`ScrollView` bounded by the card so every line stays reachable by scrolling, including in small windows.
+- Make latex svg caching faster (or, feel faster)
+- In cram mode, show distribution
