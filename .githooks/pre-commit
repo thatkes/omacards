@@ -10,3 +10,14 @@ while IFS= read -r -d '' file; do
         exit 1
     fi
 done < <(git diff --cached --name-only --diff-filter=ACMR -z -- '*.h' '*.cpp')
+
+# Check the staged CLI and CLI test snapshots against the frozen wrappers.
+# CI runs the same script over the committed tree via ./bin/lint.
+if [[ -n "$(git diff --cached --name-only --diff-filter=ACMR -- src/cli.cpp tests/test_cli.cpp)" ]]; then
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+    mkdir -p "$tmp/src" "$tmp/tests"
+    git show :src/cli.cpp > "$tmp/src/cli.cpp"
+    git show :tests/test_cli.cpp > "$tmp/tests/test_cli.cpp"
+    ./bin/check-cli-contract "$tmp"
+fi

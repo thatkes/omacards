@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+ROOT="$(CDPATH= cd -- "${1:-$(dirname -- "$0")/..}" && pwd)"
+cd "$ROOT"
+
+# The CLI formats the full wrapper; tests pin the prefix before the Store
+# error is appended. See docs/agents/wiki/subsystem-cli-contracts.md.
+status=0
+check_literal() {
+    file=$1
+    literal=$2
+    if ! grep -Fq -- "$literal" "$file"; then
+        printf 'Missing frozen CLI literal in %s: %s\n' "$file" "$literal" >&2
+        status=1
+    fi
+}
+
+check_literal src/cli.cpp 'Cannot read scheduling state: %1'
+check_literal src/cli.cpp 'Cannot save review: %1'
+check_literal tests/test_cli.cpp 'Cannot read scheduling state: '
+check_literal tests/test_cli.cpp 'Cannot save review: '
+
+exit "$status"
