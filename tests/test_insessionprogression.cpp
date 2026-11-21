@@ -23,7 +23,7 @@ QVector<Card> cardsWithIds(const QStringList &ids) {
 
 } // namespace
 
-void TestInSessionProgression::nextResultCarriesKindCardWaitAndBox() {
+void TestInSessionProgression::nextResultCarriesKindCardWaitAndLeitnerBox() {
     InSessionProgression progression;
     progression.buildCram(cardsWithIds({"c1", "c2"}));
 
@@ -271,7 +271,7 @@ void TestInSessionProgression::removeDropsReviewAndCramCards() {
     QCOMPARE(cram.next(0).kind, InSessionProgression::Next::Finished);
 }
 
-void TestInSessionProgression::clearDropsRepeatsAndBox() {
+void TestInSessionProgression::clearDropsRepeatsAndLeitnerBox() {
     InSessionProgression progression;
     progression.buildCram(cardsWithIds({"c1"}));
     QCOMPARE(progression.next(0).box, 1);

@@ -6,7 +6,7 @@ class TestInSessionProgression : public QObject {
     Q_OBJECT
 
 private slots:
-    void nextResultCarriesKindCardWaitAndBox();
+    void nextResultCarriesKindCardWaitAndLeitnerBox();
     void reviewOrderComesFromNextResults();
     void pendingRepeatWaitComesFromNextResult();
     void nextResultUsesSmallestPendingDeadline();
@@ -20,6 +20,6 @@ private slots:
     void cramQueueNeverEndsForOneCard();
     void emptyCramHasNoCurrentBox();
     void removeDropsReviewAndCramCards();
-    void clearDropsRepeatsAndBox();
+    void clearDropsRepeatsAndLeitnerBox();
     void switchingToCramDropsPendingRepeats();
 };

@@ -39,8 +39,8 @@ inline QString appBinary() {
     return QDir(QString(OMACARDS_SOURCE_DIR)).filePath("../build/omacards");
 }
 
-inline QJsonObject runCli(const QStringList &arguments, const QString &decksDir, const QString &stateDb,
-                          int *exitCode = nullptr) {
+inline QByteArray runCliRaw(const QStringList &arguments, const QString &decksDir, const QString &stateDb,
+                            int *exitCode = nullptr) {
     QProcess process;
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("OMACARDS_DECKS_DIR"), decksDir);
@@ -54,7 +54,17 @@ inline QJsonObject runCli(const QStringList &arguments, const QString &decksDir,
     }
     if (exitCode)
         *exitCode = process.exitCode();
-    return QJsonDocument::fromJson(process.readAllStandardOutput()).object();
+    return process.readAllStandardOutput();
+}
+
+inline QJsonObject runCli(const QStringList &arguments, const QString &decksDir, const QString &stateDb,
+                          int *exitCode = nullptr) {
+    return QJsonDocument::fromJson(runCliRaw(arguments, decksDir, stateDb, exitCode)).object();
+}
+
+inline QString runCliText(const QStringList &arguments, const QString &decksDir, const QString &stateDb,
+                          int *exitCode = nullptr) {
+    return QString::fromUtf8(runCliRaw(arguments, decksDir, stateDb, exitCode));
 }
 
 inline bool writeFile(const QString &path, const QByteArray &contents) {

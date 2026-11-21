@@ -10,8 +10,8 @@
 
 struct CramEntry {
     QString cardId;
-    int box = 0; // 0..Config::kLeitnerBoxes-1, delays in Config::kLeitnerIntervals
-    int next = 0;
+    int box = 0;            // 0..Config::kLeitnerBoxes-1, delays in Config::kLeitnerIntervals
+    int nextShowReview = 0; // review count at which this Card is shown again
 };
 
 // Owns the in-session order of cards, Cram Leitner boxes and Review Pending
@@ -56,4 +56,3 @@ private:
 };
 
 Q_DECLARE_METATYPE(InSessionProgression::Next)
-Q_DECLARE_METATYPE(InSessionProgression::NextResult)
