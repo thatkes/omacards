@@ -11,7 +11,7 @@ private slots:
     void refreshBrokenStoreInvalidatesSnapshot();
     void configureLimitsAndCounts();
     void futureReviewsAreNotAvailable();
-    void recordReviewUpdatesStoreAndSnapshot();
+    void refreshRecomputesNewAllowanceFromReviewHistory();
     void updateNewBudgetTracksLoggedReviews();
     void reviewIdsFollowAvailabilityOrder();
     void cardListFiltersAndFormats();

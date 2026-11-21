@@ -373,49 +373,40 @@ void TestStudyPlanner::futureReviewsAreNotAvailable() {
     }
 }
 
-void TestStudyPlanner::recordReviewUpdatesStoreAndSnapshot() {
+void TestStudyPlanner::refreshRecomputesNewAllowanceFromReviewHistory() {
     QTemporaryDir dir;
     Store store(dir.filePath("state.db"));
     QString error;
     QVERIFY(store.open(&error));
 
-    const Card newA = makeCard("new-a", "New A", "a", "Reviews");
-    const Card newB = makeCard("new-b", "New B", "b", "Reviews");
-    const Card old = makeCard("old", "Old", "o", "Reviews");
     Deck deck;
-    deck.name = "Reviews";
-    deck.cards << newA << newB << old;
+    deck.name = "Allowance";
+    const Card first = makeCard("first", "First", "f", "Allowance");
+    const Card second = makeCard("second", "Second", "s", "Allowance");
+    const Card third = makeCard("third", "Third", "t", "Allowance");
+    deck.cards << first << second << third;
     const QVector<Deck> decks{deck};
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    saveState(store, old, now - 86400000LL, 1);
 
     StudyPlanner planner(store);
     planner.setDecks(decks);
-    planner.configure(2, 0);
+    planner.configure(3, 0);
+    QVERIFY(planner.refresh(&error));
+    QCOMPARE(planner.newCount(), 3);
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const FsrsState reviewed = Fsrs::review(Fsrs::initial(), 3, now).state;
+    store.logReview(first.id, 3, now, reviewed, 3, true);
     QVERIFY(planner.refresh(&error));
     QCOMPARE(planner.newCount(), 2);
 
-    QVERIFY(planner.recordReview(newA, Rating::Good, Config::kDefaultRetention, now, &error));
-    QVERIFY(error.isEmpty());
-    const FsrsState written = planner.stateFor(newA);
-    QCOMPARE(written.reps, 1);
-    QVERIFY(written.due > now);
-    QVERIFY(written.stability > 0.0);
-    QCOMPARE(store.states().value(newA.id).reps, 1);
-    QCOMPARE(store.hashes().value(newA.id), DeckIO::contentHash(newA));
-    QCOMPARE(planner.newCount(), 1); // new budget went 2 -> 1 in memory too
+    store.logReview(second.id, 3, now, reviewed, 3, true);
+    QVERIFY(planner.refresh(&error));
+    QCOMPARE(planner.newCount(), 1);
 
-    QVERIFY(planner.recordReview(old, Rating::Good, Config::kDefaultRetention, now, &error));
-    QCOMPARE(planner.stateFor(old).reps, 2);
-    QCOMPARE(store.hashes().value(old.id), DeckIO::contentHash(old));
-    QCOMPARE(planner.newCount(), 1); // a review with reps > 0 must not spend the new budget
-
-    QVERIFY(runSql(store.path(), QStringLiteral("planner-drop-for-review"), QStringLiteral("DROP TABLE cards")));
-    error.clear();
-    QVERIFY(!planner.recordReview(newB, Rating::Good, Config::kDefaultRetention, now, &error));
-    QVERIFY(!error.isEmpty());
-    verifyEmptyState(planner.stateFor(newB)); // failed write leaves the snapshot alone
-    QCOMPARE(planner.stateFor(newA).reps, 1);
+    // A later review of an already rated Card does not spend the allowance.
+    store.logReview(first.id, 3, now + 1000, reviewed, 3, false);
+    QVERIFY(planner.refresh(&error));
+    QCOMPARE(planner.newCount(), 1);
 }
 
 void TestStudyPlanner::updateNewBudgetTracksLoggedReviews() {

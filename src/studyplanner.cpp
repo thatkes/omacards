@@ -1,5 +1,6 @@
 #include "studyplanner.h"
 #include "config.h"
+#include "domain.h"
 
 #include <QDateTime>
 #include <QVariantMap>
@@ -44,32 +45,6 @@ void StudyPlanner::updateNewBudget(QString *storeError) {
     m_snapshot.newBudget = qMax(0, m_newPerDay - m_store.newCardsToday(m_dayStartHour));
     if (!m_store.lastError().isEmpty() && storeError)
         *storeError = m_store.lastError();
-}
-
-bool StudyPlanner::recordReview(const Card &card, Rating rating, double desiredRetention, qint64 now,
-                                QString *storeError) {
-    const QString hash = DeckIO::contentHash(card);
-    const FsrsState state = stateFor(card);
-    const bool wasNew = state.reps == 0;
-    const ReviewResult result = Fsrs::review(state, Domain::toInt(rating), now, desiredRetention);
-
-    m_store.clearError();
-    m_store.save(card.id, hash, result.state);
-    m_store.logReview(card.id, Domain::toInt(rating), now, result.state, result.intervalDays, wasNew);
-    if (!m_store.lastError().isEmpty()) {
-        if (storeError)
-            *storeError = m_store.lastError();
-        return false;
-    }
-    if (m_snapshotValid) {
-        // Keep the in-memory snapshot in step with the write so later counts
-        // do not have to re-read the whole database.
-        m_snapshot.states.insert(card.id, result.state);
-        m_snapshot.hashes.insert(card.id, hash);
-        m_snapshot.newBudget = qMax(0, m_snapshot.newBudget - (wasNew ? 1 : 0));
-        m_snapshot.now = now;
-    }
-    return true;
 }
 
 FsrsState StudyPlanner::stateFor(const Card &card) const {

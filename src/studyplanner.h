@@ -1,7 +1,6 @@
 #pragma once
 
 #include "deck.h"
-#include "domain.h"
 #include "fsrs.h"
 #include "store.h"
 
@@ -31,8 +30,6 @@ public:
 
     bool refresh(QString *storeError = nullptr);
     void updateNewBudget(QString *storeError = nullptr);
-    bool recordReview(const Card &card, Rating rating, double desiredRetention, qint64 now,
-                      QString *storeError = nullptr);
 
     FsrsState stateFor(const Card &card) const;
     Availability availability(const QString &deckName = {}) const;
