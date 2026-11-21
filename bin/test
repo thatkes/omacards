@@ -5,4 +5,20 @@ mkdir -p "$ROOT/build/tests"
 cd "$ROOT/build/tests"
 qmake6 "$ROOT/tests/omacards_tests.pro"
 make -j"$(nproc)"
-QT_QPA_PLATFORM=offscreen ./omacards_tests
+LOG="$ROOT/build/tests/last-run.log"
+status=0
+QT_QPA_PLATFORM=offscreen ./omacards_tests > "$LOG" 2>&1 || status=$?
+cat "$LOG"
+awk '
+  /^Totals:/ {
+    passed += $2
+    failed += $4
+    skipped += $6
+    blacklisted += $8
+    suites++
+  }
+  END {
+    printf "ALL: %d passed, %d failed, %d skipped, %d blacklisted across %d suites\n", passed, failed, skipped, blacklisted, suites
+  }
+' "$LOG"
+exit "$status"
