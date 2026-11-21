@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reference — Startup &amp; layering</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+
+  <div class="lesson-label">Reference 0001 · quick reference</div>
+  <h1>Startup &amp; layering</h1>
+  <p class="lede">Compressed map of how omacards boots and who owns what. Print it; return to it whenever you lose your bearings in the code.</p>
+
+  <h2>Boot sequence</h2>
+
+  <table>
+    <tr><th>#</th><th>What happens</th><th>Where</th></tr>
+    <tr><td>1</td><td>argv → <code>QStringList</code></td><td><a href="../src/main.cpp#L27">main.cpp:27–29</a></td></tr>
+    <tr><td>2</td><td><code>Cli::needsOffscreen(arguments)</code></td><td><a href="../src/main.cpp#L33">main.cpp:33</a></td></tr>
+    <tr><td>3a</td><td>CLI path: set platform <code>offscreen</code>, <code>Cli::run()</code>, return. No QML.</td><td><a href="../src/main.cpp#L34">main.cpp:34–38</a></td></tr>
+    <tr><td>3b</td><td>GUI path: <code>QApplication</code>, style, translator, theme, backend, engine, tray, <code>app.exec()</code></td><td><a href="../src/main.cpp#L40">main.cpp:40–86</a></td></tr>
+  </table>
+
+  <p>Context properties injected at <a href="../src/main.cpp#L65">main.cpp:65–67</a>: <code>translator</code>, <code>theme</code>, <code>backend</code>. QML root: <code>qrc:/Main.qml</code>, embedded by <a href="../src/resources.qrc">resources.qrc</a>.</p>
+
+  <h2>Ownership graph</h2>
+
+  <pre><code>main.cpp
+ ├─ Cli::run()                 headless frontend
+ └─ GUI: Translator, Theme, QQmlApplicationEngine
+          │ context properties
+          ▼
+     Backend                   only QML-facing object
+          ├─ Store                    SQLite sidecar
+          ├─ FileHistory              whole-file undo/redo
+          ├─ DeckRepository ──► DeckIO, DeckImport   plain-text decks
+          ├─ StudyPlanner             availability snapshot, counts
+          └─ StudySession ────► StudyQueue, QTimer, MathRenderer</code></pre>
+
+  <p>Injections are by reference in constructors; lower layers never mention QML (<a href="../src/studyqueue.h#L17">studyqueue.h:17–18</a>).</p>
+
+  <h2>Qt vocabulary</h2>
+
+  <table>
+    <tr><th>Term</th><th>Meaning in this repo</th></tr>
+    <tr><td><code>QObject</code></td><td>Base class whose properties, methods and signals Qt can introspect and expose to QML.</td></tr>
+    <tr><td><code>Q_PROPERTY</code></td><td>A C++ member readable/writable from QML as a property; changes can emit a notify signal.</td></tr>
+    <tr><td><code>Q_INVOKABLE</code></td><td>A C++ method callable from QML/JS.</td></tr>
+    <tr><td>Context property</td><td>An existing C++ object made visible by name in the QML root context.</td></tr>
+    <tr><td><code>qrc:/</code></td><td>Qt resource path — files compiled into the binary.</td></tr>
+    <tr><td><code>offscreen</code></td><td>Qt platform plugin with no window; used by the CLI and the test suite.</td></tr>
+    <tr><td><code>qmake6</code></td><td>Qt's build-file generator; reads <a href="../omacards.pro">omacards.pro</a>.</td></tr>
+  </table>
+
+  <h2>Build &amp; verify</h2>
+
+  <pre><code>./bin/build    # qmake6 omacards.pro &amp;&amp; make -j$(nproc)
+./bin/test     # qmake6 tests.pro &amp;&amp; make &amp;&amp; QT_QPA_PLATFORM=offscreen ./omacards_tests</code></pre>
+
+  <p>Tests compile the real <code>src/*.cpp</code> (except <code>main.cpp</code> and <code>traycontroller.cpp</code>) into the test binary — see <a href="../tests/omacards_tests.pro">tests/omacards_tests.pro</a>. CLI integration tests skip unless <code>build/omacards</code> exists, so build first. CI does exactly build → test: <a href="../.github/workflows/ci.yml">ci.yml</a>.</p>
+
+  <h2>Isolation variables</h2>
+
+  <pre><code>OMACARDS_DECKS_DIR=/tmp/...     # deck files live here
+OMACARDS_STATE_DB=/tmp/...      # SQLite sidecar lives here</code></pre>
+
+  <p>Resolved once in <a href="../src/backend.cpp#L21">backend.cpp:21–29</a>. Both GUI and CLI use them so agents and tests never touch real study data.</p>
+
+  <div class="lesson-nav">
+    <a href="../lessons/0001-one-binary-two-frontends.html">← Lesson 0001</a>
+    <a href="../README.md">→ README</a>
+    <a href="../GLOSSARY.md">→ Glossary</a>
+  </div>
+
+</body>
+</html>
