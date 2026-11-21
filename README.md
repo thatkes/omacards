@@ -21,6 +21,8 @@ Deck content lives in plain text files under `~/.local/share/omacards/decks/`, s
 ./bin/install   # makepkg -fsi, adds the binary, launcher entry and icon
 ```
 
+Enable the local pre-commit format check with `git config core.hooksPath .githooks`. It checks staged C++ files; CI checks the whole tree.
+
 Requirements: Qt 6 (base, declarative, wayland, SQL), qmake6, gcc/make.
 Optional: `unzip` for Anki `.apkg` imports, `tectonic`/`pdftocairo` or `latex`/`dvisvgm` for LaTeX math. (Without a TeX toolchain, math is rendered as Unicode.)
 

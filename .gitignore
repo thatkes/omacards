@@ -6,6 +6,7 @@
 # Local-only agent instructions; keep out of the remote.
 /AGENTS.md
 /docs/agents/
+/docs/adr/
 # src/skill/SKILL.md is product code: it is bundled and installed by the CLI.
 
 # Local-only maintainer teaching workspace; keep out of the remote.
