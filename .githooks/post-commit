@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Remind the committer to finish the issue lifecycle when a commit says it
+# closes a GitHub Issue. Git ignores this hook's exit status.
+command -v gh >/dev/null 2>&1 || exit 0
+
+message=$(git log -1 --pretty=%B)
+refs=$(printf '%s\n' "$message" \
+    | grep -Eio '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' \
+    | grep -Eo '#[0-9]+' \
+    | sort -u || true)
+
+while IFS= read -r ref; do
+    [ -n "$ref" ] || continue
+    number=${ref#\#}
+    state=$(gh issue view "$number" --json state --jq .state 2>/dev/null || true)
+    if [ "$state" = OPEN ]; then
+        printf 'Issue #%s is still open for this commit.\n' "$number" >&2
+        printf 'Comment and close it before finishing:\n' >&2
+        printf '  gh issue comment %s --body "..."\n' "$number" >&2
+        printf '  gh issue close %s\n' "$number" >&2
+        printf 'See docs/agents/issue-tracker.md.\n' >&2
+    fi
+done <<< "$refs"
