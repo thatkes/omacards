@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Check the staged version of each C++ file, leaving the working tree alone.
+# CI still runs ./bin/lint over the whole tree.
+while IFS= read -r -d '' file; do
+    if ! git show ":$file" | clang-format --dry-run --Werror --assume-filename="$file"; then
+        printf 'Staged file needs clang-format: %s\n' "$file" >&2
+        printf 'Run: clang-format -i %s && git add %s\n' "$file" "$file" >&2
+        exit 1
+    fi
+done < <(git diff --cached --name-only --diff-filter=ACMR -z -- '*.h' '*.cpp')
