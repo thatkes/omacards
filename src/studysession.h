@@ -41,7 +41,7 @@ public:
     bool waitingForRepeat() const { return m_waitingForRepeat; }
     int dueCount() const { return m_dueCount; }
     int reviewed() const { return m_reviewed; }
-    int correct() const { return m_correct; }
+    int good() const { return m_good; }
     int currentBox() const { return m_progression.currentBox(); }
     QString status() const { return m_status; }
     QString currentCardId() const { return m_currentId; }
@@ -72,7 +72,7 @@ private:
     qint64 m_repeatDelayMs;
     int m_dueCount = 0;
     int m_reviewed = 0;
-    int m_correct = 0;
+    int m_good = 0;
     StudyMode m_mode = StudyMode::Review;
     QString m_question;
     QString m_answer;

@@ -150,7 +150,7 @@ Deck-writing commands (`add-deck`, `add-cards`, `add-card`, `import`, `edit-card
 
 ## Why Leitner for cram?
 
-Cram needs no persistent state, must never end, and should re-show weak cards quickly. A five-box Leitner queue gives exactly that: correct answers promote a card to a longer card-count interval, Again resets it to box 1, and the queue is refilled forever. FSRS remains the long-term scheduler where spaced intervals and retention targets matter.
+Cram needs no persistent state, must never end, and should re-show weak cards quickly. A five-box Leitner queue gives exactly that: Good ratings promote a card to a longer card-count interval, Again resets it to box 1, and the queue is refilled forever. FSRS remains the long-term scheduler where spaced intervals and retention targets matter.
 
 ## Layout
 

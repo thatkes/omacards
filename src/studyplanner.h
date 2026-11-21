@@ -46,7 +46,7 @@ public:
     QVariantList deckSummaries(const QString &currentDeck) const;
     QVariantList cardList(const QString &currentDeck, const QString &filter, const QString &newText,
                           const QString &dueText) const;
-    QVariantMap statsSummary(int dueCount, int totalCards, int deckCount, int sessionReviewed, int sessionCorrect,
+    QVariantMap statsSummary(int dueCount, int totalCards, int deckCount, int sessionReviewed, int sessionGood,
                              double desiredRetention) const;
 
 private:

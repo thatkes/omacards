@@ -229,14 +229,14 @@ QVariantList StudyPlanner::cardList(const QString &currentDeck, const QString &f
 }
 
 QVariantMap StudyPlanner::statsSummary(int dueCount, int totalCards, int deckCount, int sessionReviewed,
-                                       int sessionCorrect, double desiredRetention) const {
+                                       int sessionGood, double desiredRetention) const {
     const ReviewSummary summary = m_store.summary(m_dayStartHour);
     QVariantMap result;
     result.insert("totalReviews", summary.total);
     result.insert("today", summary.today);
-    result.insert("todayCorrect", summary.todayCorrect);
+    result.insert("todayGood", summary.todayGood);
     result.insert("streakDays", summary.streakDays);
-    result.insert("accuracy", summary.today > 0 ? qRound(100.0 * summary.todayCorrect / summary.today) : 0);
+    result.insert("accuracy", summary.today > 0 ? qRound(100.0 * summary.todayGood / summary.today) : 0);
     result.insert("due", dueCount);
     result.insert("cards", totalCards);
     result.insert("decks", deckCount);
@@ -246,6 +246,6 @@ QVariantMap StudyPlanner::statsSummary(int dueCount, int totalCards, int deckCou
     result.insert("retention", qRound(desiredRetention * 100));
     result.insert("dayStartHour", m_dayStartHour);
     result.insert("sessionReviewed", sessionReviewed);
-    result.insert("sessionCorrect", sessionCorrect);
+    result.insert("sessionGood", sessionGood);
     return result;
 }

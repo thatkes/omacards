@@ -543,12 +543,16 @@ void TestCli::readCommandJsonContracts() {
 
     const QJsonObject stats = runCli({"stats", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
-    QStringList expectedStats{"ok",        "totalReviews", "today",    "todayCorrect", "streakDays", "newToday",
-                              "newPerDay", "due",          "totalDue", "cards",        "decks"};
+    QStringList expectedStats{"ok",        "totalReviews", "today",    "todayGood", "streakDays", "newToday",
+                              "newPerDay", "due",          "totalDue", "cards",     "decks"};
     expectedStats.sort();
     QCOMPARE(sortedKeys(stats), expectedStats);
     QCOMPARE(stats.value(QStringLiteral("today")).toInt(), 1);
-    QCOMPARE(stats.value(QStringLiteral("todayCorrect")).toInt(), 1);
+    QCOMPARE(stats.value(QStringLiteral("todayGood")).toInt(), 1);
+    const QString statsHuman = runCliText({"stats"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY2(statsHuman.contains(QStringLiteral("100% Good")), qPrintable(statsHuman));
+    QVERIFY2(!statsHuman.contains(QStringLiteral("correct")), qPrintable(statsHuman));
     QCOMPARE(stats.value(QStringLiteral("cards")).toInt(), 3);
     QCOMPARE(stats.value(QStringLiteral("decks")).toInt(), 2);
 

@@ -88,7 +88,7 @@ void TestStudySession::setModeNormalizesInvalidInput() {
 
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QCOMPARE(fixture.session.reviewed(), 1);
-    QCOMPARE(fixture.session.correct(), 1);
+    QCOMPARE(fixture.session.good(), 1);
 
     QSignalSpy modeSpy(&fixture.session, &StudySession::modeChanged);
     QSignalSpy statsSpy(&fixture.session, &StudySession::statsChanged);
@@ -101,7 +101,7 @@ void TestStudySession::setModeNormalizesInvalidInput() {
     fixture.session.setMode("banana");
     QCOMPARE(fixture.session.mode(), StudyMode::Review);
     QCOMPARE(fixture.session.reviewed(), 0);
-    QCOMPARE(fixture.session.correct(), 0);
+    QCOMPARE(fixture.session.good(), 0);
     QCOMPARE(modeSpy.count(), 1);
     QCOMPARE(statsSpy.count(), 1);
     QCOMPARE(order, QStringList({"mode", "stats"}));
@@ -131,7 +131,7 @@ void TestStudySession::setModeUppercaseCramNormalizesToReview() {
     fixture.session.setMode("CRAM");
     QCOMPARE(fixture.session.mode(), StudyMode::Review);
     QCOMPARE(fixture.session.reviewed(), 0);
-    QCOMPARE(fixture.session.correct(), 0);
+    QCOMPARE(fixture.session.good(), 0);
     QCOMPARE(modeSpy.count(), 1);
     QCOMPARE(statsSpy.count(), 1);
     QCOMPARE(order, QStringList({"mode", "stats"}));
@@ -147,7 +147,7 @@ void TestStudySession::setModeCanonicalInputIsNoOp() {
     QVERIFY(prepareSession(fixture, "Modes", {"Q1", "Q2"}, &error));
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QCOMPARE(fixture.session.reviewed(), 1);
-    QCOMPARE(fixture.session.correct(), 1);
+    QCOMPARE(fixture.session.good(), 1);
 
     QSignalSpy modeSpy(&fixture.session, &StudySession::modeChanged);
     QSignalSpy statsSpy(&fixture.session, &StudySession::statsChanged);
@@ -155,7 +155,7 @@ void TestStudySession::setModeCanonicalInputIsNoOp() {
     fixture.session.setMode("review");
     QCOMPARE(fixture.session.mode(), StudyMode::Review);
     QCOMPARE(fixture.session.reviewed(), 1);
-    QCOMPARE(fixture.session.correct(), 1);
+    QCOMPARE(fixture.session.good(), 1);
     QCOMPARE(modeSpy.count(), 0);
     QCOMPARE(statsSpy.count(), 0);
 
@@ -178,7 +178,7 @@ void TestStudySession::setModeCramSwitchesAndResets() {
     QVERIFY(prepareSession(fixture, "Modes", {"Q1", "Q2"}, &error));
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QCOMPARE(fixture.session.reviewed(), 1);
-    QCOMPARE(fixture.session.correct(), 1);
+    QCOMPARE(fixture.session.good(), 1);
 
     QSignalSpy modeSpy(&fixture.session, &StudySession::modeChanged);
     QSignalSpy statsSpy(&fixture.session, &StudySession::statsChanged);
@@ -191,7 +191,7 @@ void TestStudySession::setModeCramSwitchesAndResets() {
     fixture.session.setMode("cram");
     QCOMPARE(fixture.session.mode(), StudyMode::Cram);
     QCOMPARE(fixture.session.reviewed(), 0);
-    QCOMPARE(fixture.session.correct(), 0);
+    QCOMPARE(fixture.session.good(), 0);
     QCOMPARE(modeSpy.count(), 1);
     QCOMPARE(statsSpy.count(), 1);
     QCOMPARE(order, QStringList({"mode", "stats"}));
@@ -218,7 +218,7 @@ void TestStudySession::invalidRatingsAreNoOps() {
     // refuse the Invalid sentinel it can still receive from a direct caller.
     QVERIFY(!fixture.session.rate(Rating::Invalid, Config::kDefaultRetention));
     QCOMPARE(fixture.session.reviewed(), 0);
-    QCOMPARE(fixture.session.correct(), 0);
+    QCOMPARE(fixture.session.good(), 0);
     QCOMPARE(fixture.session.status(), statusBefore);
     QCOMPARE(fixture.session.currentCardId(), idBefore);
     QCOMPARE(statsSpy.count(), 0);
@@ -237,7 +237,7 @@ void TestStudySession::invalidRatingsAreNoOps() {
 
     QVERIFY(!fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QCOMPARE(fixture.session.reviewed(), 2);
-    QCOMPARE(fixture.session.correct(), 2);
+    QCOMPARE(fixture.session.good(), 2);
     QCOMPARE(statsSpy.count(), 0);
     QCOMPARE(cardSpy.count(), 0);
     QCOMPARE(statusSpy.count(), 0);
@@ -370,18 +370,18 @@ void TestStudySession::statsTextAndMathEngine() {
     QString error;
     QVERIFY(prepareSession(fixture, "Stats", {"Q1", "Q2"}, &error));
 
-    QCOMPARE(fixture.session.statsText(), QString("0 reviewed · 0% correct · box 0"));
+    QCOMPARE(fixture.session.statsText(), QString("0 reviewed · 0% Good · box 0"));
 
     fixture.session.setMode("cram");
     fixture.session.rebuild("Stats");
     QCOMPARE(fixture.session.currentBox(), 1);
     fixture.session.flip();
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
-    QCOMPARE(fixture.session.statsText(), QString("1 reviewed · 100% correct · box 1"));
+    QCOMPARE(fixture.session.statsText(), QString("1 reviewed · 100% Good · box 1"));
 
     fixture.session.flip();
     QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention));
-    QCOMPARE(fixture.session.statsText(), QString("2 reviewed · 50% correct · box 2"));
+    QCOMPARE(fixture.session.statsText(), QString("2 reviewed · 50% Good · box 2"));
 
     const MathRenderer::Engine engine = fixture.session.mathEngine();
     QVERIFY(engine == MathRenderer::Engine::Unicode || engine == MathRenderer::Engine::LatexSvg);

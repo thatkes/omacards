@@ -801,7 +801,8 @@ ApplicationWindow {
                                 Item { Layout.fillWidth: true }
 
                                 Label {
-                                    text: qsTr("%1 reviewed · %2 correct").arg(backend.reviewed).arg(backend.correct)
+                                    objectName: "reviewGoodLabel"
+                                    text: qsTr("%1 reviewed · %2 Good").arg(backend.reviewed).arg(backend.good)
                                     color: win.muted
                                     font.pixelSize: 12
                                 }
@@ -1538,7 +1539,7 @@ ApplicationWindow {
                         [qsTr("Total reviews"), (statsData.totalReviews || 0)],
                         [qsTr("Cards"), (statsData.cards || 0)],
                         [qsTr("Decks"), (statsData.decks || 0)],
-                        [qsTr("This session"), qsTr("%1 reviews · %2 correct").arg(statsData.sessionReviewed || 0).arg(statsData.sessionCorrect || 0)]
+                        [qsTr("This session"), qsTr("%1 reviews · %2 Good").arg(statsData.sessionReviewed || 0).arg(statsData.sessionGood || 0)]
                     ]
 
                     RowLayout {

@@ -10,7 +10,7 @@
 struct ReviewSummary {
     int total = 0;
     int today = 0;
-    int todayCorrect = 0;
+    int todayGood = 0;
     int streakDays = 0;
     int newToday = 0;
 };

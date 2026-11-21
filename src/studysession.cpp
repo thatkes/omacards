@@ -23,7 +23,7 @@ void StudySession::setMode(const QString &mode) {
         return;
     m_mode = Domain::modeFromString(mode);
     m_reviewed = 0;
-    m_correct = 0;
+    m_good = 0;
     emit modeChanged();
     emit statsChanged();
 }
@@ -106,7 +106,7 @@ bool StudySession::rate(Rating rating, double desiredRetention) {
         return false;
     ++m_reviewed;
     if (rating == Rating::Good)
-        ++m_correct;
+        ++m_good;
     if (m_mode == StudyMode::Cram)
         answerCram(rating);
     else
@@ -208,6 +208,6 @@ MathRenderer::Engine StudySession::mathEngine() const {
 }
 
 QString StudySession::statsText() const {
-    const double accuracy = m_reviewed > 0 ? 100.0 * m_correct / m_reviewed : 0.0;
-    return tr("%1 reviewed · %2% correct · box %3").arg(m_reviewed).arg(qRound(accuracy)).arg(currentBox());
+    const double accuracy = m_reviewed > 0 ? 100.0 * m_good / m_reviewed : 0.0;
+    return tr("%1 reviewed · %2% Good · box %3").arg(m_reviewed).arg(qRound(accuracy)).arg(currentBox());
 }

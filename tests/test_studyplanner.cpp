@@ -648,7 +648,7 @@ void TestStudyPlanner::statsSummaryNumericContract() {
 
     const qint64 todayStart = QDateTime(QDate::currentDate(), QTime(0, 0)).toMSecsSinceEpoch() + 3600000;
     const FsrsState state = Fsrs::review(Fsrs::initial(), 3, todayStart).state;
-    store.logReview("today-correct", 3, todayStart, state, 3);
+    store.logReview("today-good", 3, todayStart, state, 3);
     store.logReview("today-wrong", 1, todayStart + 1000, state, 1);
     store.logReview("yesterday", 3, todayStart - 86400000LL, state, 3);
     store.logReview("logged-new", 3, todayStart + 2000, state, 1, true);
@@ -660,16 +660,16 @@ void TestStudyPlanner::statsSummaryNumericContract() {
 
     const QVariantMap summary = planner.statsSummary(7, 3, 1, 4, 3, 0.85);
     QStringList keys = summary.keys();
-    QStringList expected{"accuracy",        "cards",      "dayStartHour", "decks",        "due",
-                         "newAvailable",    "newPerDay",  "newToday",     "retention",    "sessionCorrect",
-                         "sessionReviewed", "streakDays", "today",        "todayCorrect", "totalReviews"};
+    QStringList expected{"accuracy",        "cards",      "dayStartHour", "decks",     "due",
+                         "newAvailable",    "newPerDay",  "newToday",     "retention", "sessionGood",
+                         "sessionReviewed", "streakDays", "today",        "todayGood", "totalReviews"};
     keys.sort();
     expected.sort();
     QCOMPARE(keys, expected);
 
     QCOMPARE(summary.value("totalReviews").toInt(), 4);
     QCOMPARE(summary.value("today").toInt(), 3);
-    QCOMPARE(summary.value("todayCorrect").toInt(), 2);
+    QCOMPARE(summary.value("todayGood").toInt(), 2);
     QCOMPARE(summary.value("streakDays").toInt(), 2);
     QCOMPARE(summary.value("accuracy").toInt(), 67); // round(2/3 * 100)
     QCOMPARE(summary.value("due").toInt(), 7);
@@ -681,7 +681,7 @@ void TestStudyPlanner::statsSummaryNumericContract() {
     QCOMPARE(summary.value("retention").toInt(), 85);
     QCOMPARE(summary.value("dayStartHour").toInt(), 0);
     QCOMPARE(summary.value("sessionReviewed").toInt(), 4);
-    QCOMPARE(summary.value("sessionCorrect").toInt(), 3);
+    QCOMPARE(summary.value("sessionGood").toInt(), 3);
 
     // No reviews at all: accuracy falls back to zero instead of dividing by zero.
     QTemporaryDir emptyDir;

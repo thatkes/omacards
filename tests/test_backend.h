@@ -18,6 +18,7 @@ private slots:
     void backendReportsNewCountAndDeckSummaries();
     void qmlCanNavigateLibraryCards();
     void qmlCramLabelUsesCurrentBox();
+    void qmlGoodLabelUsesGoodCount();
     void backendAppliesNewCardLimit();
     void backendRequeuesAgainInSameSession();
     void unreadableDeckKeepsSchedulingState();
