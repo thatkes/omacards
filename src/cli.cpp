@@ -8,6 +8,7 @@
 #include "deck.h"
 #include "domain.h"
 #include "fsrs.h"
+#include "insessionprogression.h"
 #include "mathrender.h"
 #include "store.h"
 
@@ -855,30 +856,27 @@ int run(const QStringList &arguments) {
         const QVector<Card> cards = allCards(decks, options.deck);
         if (cards.isEmpty())
             return fail(QObject::tr("No cards in this deck"), json);
-        int box = 0, correct = 0, reviews = 0, next = 0;
-        QVector<QPair<int, int>> queue; // {next show, card index}
-        for (int i = 0; i < cards.size(); ++i)
-            queue.append({i, i});
-        std::sort(queue.begin(), queue.end());
+        QVector<Card> ordered = cards;
+        std::sort(ordered.begin(), ordered.end(), [](const Card &a, const Card &b) { return a.id < b.id; });
+        InSessionProgression progression;
+        progression.buildCram(ordered);
+
         const int steps = qMax(1, options.steps);
+        int good = 0;
         for (int step = 0; step < steps; ++step) {
-            queue.first() = {next, queue.first().second};
-            std::sort(queue.begin(), queue.end());
-            const int index = queue.takeFirst().second;
+            const InSessionProgression::NextResult current = progression.next(0);
             const Rating rating = (step % 4 == 3) ? Rating::Again : Rating::Good;
-            box = rating == Rating::Again ? 0 : qMin(Config::kLeitnerBoxes - 1, box + 1);
+            progression.advanceCram(current.cardId, rating);
             if (rating == Rating::Good)
-                ++correct;
-            next = ++reviews + Config::kLeitnerIntervals[box];
-            queue.append({next, index});
-            std::sort(queue.begin(), queue.end());
+                ++good;
         }
         QJsonObject object;
         object.insert("ok", true);
-        object.insert("reviews", reviews);
-        object.insert("correct", correct);
-        object.insert("box", box + 1);
-        write(object, json, QObject::tr("%1 reviews · %2 correct · box %3").arg(reviews).arg(correct).arg(box + 1));
+        object.insert("reviews", steps);
+        object.insert("good", good);
+        object.insert("box", progression.currentBox()); // already 1-based
+        write(object, json,
+              QObject::tr("%1 reviews · %2 Good · box %3").arg(steps).arg(good).arg(progression.currentBox()));
         return 0;
     }
 

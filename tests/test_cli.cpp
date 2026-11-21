@@ -7,6 +7,7 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QTemporaryDir>
 
 #include "test_cli.h"
@@ -25,6 +26,24 @@ QStringList sortedKeys(const QJsonObject &object) {
     QStringList keys = object.keys();
     keys.sort();
     return keys;
+}
+
+QString runCliText(const QStringList &arguments, const QString &decksDir, const QString &stateDb,
+                   int *exitCode = nullptr) {
+    QProcess process;
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("OMACARDS_DECKS_DIR"), decksDir);
+    environment.insert(QStringLiteral("OMACARDS_STATE_DB"), stateDb);
+    process.setProcessEnvironment(environment);
+    process.start(appBinary(), arguments);
+    if (!process.waitForFinished(10000)) {
+        if (exitCode)
+            *exitCode = -1;
+        return {};
+    }
+    if (exitCode)
+        *exitCode = process.exitCode();
+    return QString::fromUtf8(process.readAllStandardOutput());
 }
 } // namespace
 
@@ -643,9 +662,10 @@ void TestCli::cramCommandContract() {
     int code = -1;
     const QJsonObject four = runCli({"cram", "--deck", "Cram", "--steps", "4", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
-    QCOMPARE(sortedKeys(four), QStringList({"box", "correct", "ok", "reviews"}));
+    QCOMPARE(sortedKeys(four), QStringList({"box", "good", "ok", "reviews"}));
     QCOMPARE(four.value(QStringLiteral("reviews")).toInt(), 4);
-    QCOMPARE(four.value(QStringLiteral("correct")).toInt(), 3);
+    QCOMPARE(four.value(QStringLiteral("good")).toInt(), 3);
+    QVERIFY(!four.contains(QStringLiteral("correct")));
     // The Leitner box progression itself lives in the InSessionProgression
     // suite; the CLI contract only promises a 1-based box in range.
     QVERIFY(four.value(QStringLiteral("box")).toInt() >= 1);
@@ -654,7 +674,25 @@ void TestCli::cramCommandContract() {
     const QJsonObject two = runCli({"cram", "--deck", "Cram", "--steps", "2", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
     QCOMPARE(two.value(QStringLiteral("reviews")).toInt(), 2);
-    QCOMPARE(two.value(QStringLiteral("correct")).toInt(), 2);
+    QCOMPARE(two.value(QStringLiteral("good")).toInt(), 2);
+
+    const QJsonObject eight = runCli({"cram", "--deck", "Cram", "--steps", "8", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(eight.value(QStringLiteral("reviews")).toInt(), 8);
+    QCOMPARE(eight.value(QStringLiteral("good")).toInt(), 6);
+
+    // Repeating step counts in a different order must reproduce each result.
+    const QJsonObject repeatedEight =
+        runCli({"cram", "--deck", "Cram", "--steps", "8", "--json"}, decks, database, &code);
+    const QJsonObject repeatedFour =
+        runCli({"cram", "--deck", "Cram", "--steps", "4", "--json"}, decks, database, &code);
+    QCOMPARE(QJsonDocument(repeatedEight).toJson(), QJsonDocument(eight).toJson());
+    QCOMPARE(QJsonDocument(repeatedFour).toJson(), QJsonDocument(four).toJson());
+
+    const QString human = runCliText({"cram", "--deck", "Cram", "--steps", "4"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY2(human.startsWith(QStringLiteral("4 reviews · 3 Good · box ")), qPrintable(human));
+    QVERIFY2(!human.contains(QStringLiteral("correct")), qPrintable(human));
 
     const QJsonObject clamped = runCli({"cram", "--deck", "Cram", "--steps", "0", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
