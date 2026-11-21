@@ -3,6 +3,13 @@ import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
 
+// Main.qml map. Names, not line numbers, so this stays true after edits.
+// keyHandler - one Keys.onPressed for every screen
+// study - study Panel with Question and Answer labels, and the flip MouseArea
+// library - deckList and cardView ListViews
+// settings - ScrollView
+// help overlay - keyboard Repeater
+
 ApplicationWindow {
     id: win
     width: 960
