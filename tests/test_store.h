@@ -19,7 +19,7 @@ private slots:
     void migratesLegacyReviewsSchema();
     void summaryStreakBreaksOnMissingDay();
     void summaryStreakSurvivesDayWithoutReviews();
-    void summaryCountsOnlyGoodAsCorrect();
+    void summaryCountsOnlyGood();
     void summaryUsesStudyDayForReviewDates();
     void settingFallbackAndUpsert();
 };

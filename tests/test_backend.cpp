@@ -76,7 +76,7 @@ void TestBackend::backendCreatesCardsAndCramsForever() {
         QVERIFY(backend.hasCard()); // endless: the card comes back on every box interval
     }
     QCOMPARE(backend.reviewed(), 12);
-    QVERIFY(backend.correct() > 0);
+    QVERIFY(backend.good() > 0);
 }
 
 void TestBackend::qmlCanRateCards() {
@@ -106,7 +106,7 @@ void TestBackend::qmlCanRateCards() {
     delete object;
 
     QCOMPARE(backend.reviewed(), 1);
-    QCOMPARE(backend.correct(), 1);
+    QCOMPARE(backend.good(), 1);
 }
 
 void TestBackend::createCardRejectsInvalidType() {
@@ -393,6 +393,44 @@ void TestBackend::qmlCramLabelUsesCurrentBox() {
     backend.flip();
     backend.rate(3);
     QVERIFY(label->property("text").toString().contains(QStringLiteral("BOX 2 OF 5")));
+    delete window;
+}
+
+void TestBackend::qmlGoodLabelUsesGoodCount() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Test", &error));
+    QVERIFY(backend.createCard("Test", "Question?", "Answer", "basic", {}, &error));
+    backend.selectDeck("Test");
+    backend.refresh();
+
+    QQmlEngine engine;
+    Theme theme;
+    engine.rootContext()->setContextProperty("backend", &backend);
+    engine.rootContext()->setContextProperty("theme", &theme);
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(OMACARDS_SOURCE_DIR) + "/Main.qml"));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    QObject *window = component.create();
+    QVERIFY2(window, qPrintable(component.errorString()));
+
+    // The facade exposes only the Good property; the label forwards it.
+    QVERIFY(!backend.property("correct").isValid());
+    QCOMPARE(backend.property("good").toInt(), 0);
+    QQuickItem *label = window->findChild<QQuickItem *>(QStringLiteral("reviewGoodLabel"));
+    QVERIFY(label);
+    QCOMPARE(label->property("text").toString(), QString("0 reviewed · 0 Good"));
+
+    backend.flip();
+    backend.rate(3);
+    QCOMPARE(backend.property("good").toInt(), 1);
+    QCOMPARE(label->property("text").toString(), QString("1 reviewed · 1 Good"));
+
+    QVERIFY(QMetaObject::invokeMethod(window, "openStats"));
+    const QVariantMap stats = window->property("statsData").toMap();
+    QCOMPARE(stats.value("sessionGood").toInt(), 1);
+    QVERIFY(!stats.contains("sessionCorrect"));
     delete window;
 }
 
@@ -693,15 +731,17 @@ void TestBackend::statsSummaryKeepsContract() {
     const QVariantMap summary = backend.statsSummary();
     QStringList keys = summary.keys();
     keys.sort();
-    QStringList expected{"accuracy",        "cards",      "dayStartHour", "decks",        "due",
-                         "newAvailable",    "newPerDay",  "newToday",     "retention",    "sessionCorrect",
-                         "sessionReviewed", "streakDays", "today",        "todayCorrect", "totalReviews"};
+    QStringList expected{"accuracy",        "cards",      "dayStartHour", "decks",     "due",
+                         "newAvailable",    "newPerDay",  "newToday",     "retention", "sessionGood",
+                         "sessionReviewed", "streakDays", "today",        "todayGood", "totalReviews"};
     expected.sort();
     QCOMPARE(keys, expected);
     QCOMPARE(summary.value("cards").toInt(), backend.totalCards());
     QCOMPARE(summary.value("decks").toInt(), backend.decks().size());
     QCOMPARE(summary.value("due").toInt(), backend.dueCount());
     QCOMPARE(summary.value("sessionReviewed").toInt(), backend.reviewed());
+    QCOMPARE(summary.value("sessionGood").toInt(), backend.good());
+    QCOMPARE(summary.value("todayGood").toInt(), 1);
 }
 
 void TestBackend::setModeBoundarySemantics() {
@@ -738,7 +778,7 @@ void TestBackend::setModeBoundarySemantics() {
     backend.setMode("banana");
     QCOMPARE(backend.mode(), QString("review"));
     QCOMPARE(backend.reviewed(), 0);
-    QCOMPARE(backend.correct(), 0);
+    QCOMPARE(backend.good(), 0);
     QCOMPARE(modeChanged.count(), 1);
     QVERIFY(statsChanged.count() >= 1);
     QVERIFY(cardChanged.count() >= 1);
@@ -756,7 +796,7 @@ void TestBackend::setModeBoundarySemantics() {
     backend.setMode("CRAM");
     QCOMPARE(backend.mode(), QString("review"));
     QCOMPARE(backend.reviewed(), 0);
-    QCOMPARE(backend.correct(), 0);
+    QCOMPARE(backend.good(), 0);
     QCOMPARE(modeChanged.count(), 1);
     QVERIFY(statsChanged.count() >= 1);
     QVERIFY(cardChanged.count() >= 1);
@@ -778,14 +818,14 @@ void TestBackend::setModeBoundarySemantics() {
     backend.flip();
     backend.rate(3);
     QCOMPARE(backend.reviewed(), 1);
-    QCOMPARE(backend.correct(), 1);
+    QCOMPARE(backend.good(), 1);
     modeChanged.clear();
     statsChanged.clear();
     order.clear();
     backend.setMode("cram");
     QCOMPARE(backend.mode(), QString("cram"));
     QCOMPARE(backend.reviewed(), 0);
-    QCOMPARE(backend.correct(), 0);
+    QCOMPARE(backend.good(), 0);
     QCOMPARE(modeChanged.count(), 1);
     QVERIFY(statsChanged.count() >= 1);
     QVERIFY(order.size() >= 2);
@@ -811,7 +851,7 @@ void TestBackend::invalidRatingsAreNoOps() {
     for (int rating : {0, 2, 4}) {
         backend.rate(rating);
         QCOMPARE(backend.reviewed(), 0);
-        QCOMPARE(backend.correct(), 0);
+        QCOMPARE(backend.good(), 0);
         QCOMPARE(backend.status(), status);
     }
     QCOMPARE(statsChanged.count(), 0);
@@ -1016,9 +1056,9 @@ void TestBackend::emptySessionHelpersAndStatsText() {
     backend.flip();
     backend.rate(3);
     QCOMPARE(backend.reviewed(), 1);
-    QCOMPARE(backend.correct(), 1);
+    QCOMPARE(backend.good(), 1);
     QCOMPARE(backend.currentBox(), 2);
-    QCOMPARE(backend.statsText(), QString("1 reviewed · 100% correct · box 2"));
+    QCOMPARE(backend.statsText(), QString("1 reviewed · 100% Good · box 2"));
 }
 
 void TestBackend::setDeckDescriptionAndQmlErrorSignals() {

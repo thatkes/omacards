@@ -38,7 +38,7 @@ void TestStore::storeRoundTripsState() {
     const ReviewSummary summary = store.summary();
     QCOMPARE(summary.total, 3);
     QCOMPARE(summary.today, 2);
-    QCOMPARE(summary.todayCorrect, 2);
+    QCOMPARE(summary.todayGood, 2);
     QCOMPARE(summary.streakDays, 2);
 }
 
@@ -175,7 +175,7 @@ void TestStore::unopenedStoreIsInert() {
     const ReviewSummary summary = store.summary();
     QCOMPARE(summary.total, 0);
     QCOMPARE(summary.today, 0);
-    QCOMPARE(summary.todayCorrect, 0);
+    QCOMPARE(summary.todayGood, 0);
     QCOMPARE(summary.streakDays, 0);
     QCOMPARE(summary.newToday, 0);
     QVERIFY(store.lastError().isEmpty());
@@ -270,7 +270,7 @@ void TestStore::removeExceptKeepsReviewsLog() {
     const ReviewSummary summary = store.summary();
     QCOMPARE(summary.total, 3);
     QCOMPARE(summary.today, 3);
-    QCOMPARE(summary.todayCorrect, 2);
+    QCOMPARE(summary.todayGood, 2);
 }
 
 void TestStore::migratesLegacyReviewsSchema() {
@@ -348,7 +348,7 @@ void TestStore::summaryStreakBreaksOnMissingDay() {
     const ReviewSummary summary = store.summary();
     QCOMPARE(summary.total, 3);
     QCOMPARE(summary.today, 1);
-    QCOMPARE(summary.todayCorrect, 1);
+    QCOMPARE(summary.todayGood, 1);
     // The two-day-old gap stops the streak before the third review.
     QCOMPARE(summary.streakDays, 2);
 }
@@ -368,11 +368,11 @@ void TestStore::summaryStreakSurvivesDayWithoutReviews() {
     const ReviewSummary summary = store.summary();
     QCOMPARE(summary.total, 1);
     QCOMPARE(summary.today, 0);
-    QCOMPARE(summary.todayCorrect, 0);
+    QCOMPARE(summary.todayGood, 0);
     QCOMPARE(summary.streakDays, 1);
 }
 
-void TestStore::summaryCountsOnlyGoodAsCorrect() {
+void TestStore::summaryCountsOnlyGood() {
     QTemporaryDir dir;
     Store store(dir.filePath("state.db"));
     QString error;
@@ -388,7 +388,7 @@ void TestStore::summaryCountsOnlyGoodAsCorrect() {
     const ReviewSummary summary = store.summary();
     QCOMPARE(summary.total, 4);
     QCOMPARE(summary.today, 4);
-    QCOMPARE(summary.todayCorrect, 1);
+    QCOMPARE(summary.todayGood, 1);
 }
 
 void TestStore::summaryUsesStudyDayForReviewDates() {
@@ -410,7 +410,7 @@ void TestStore::summaryUsesStudyDayForReviewDates() {
     const ReviewSummary summary = store.summary(dayStart);
     QCOMPARE(summary.total, 2);
     QCOMPARE(summary.today, 1);
-    QCOMPARE(summary.todayCorrect, 1);
+    QCOMPARE(summary.todayGood, 1);
     QCOMPARE(summary.streakDays, 2);
 }
 

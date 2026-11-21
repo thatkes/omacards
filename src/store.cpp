@@ -200,7 +200,7 @@ ReviewSummary Store::summary(int dayStartHour) const {
         if (day == today) {
             ++result.today;
             if (query.value(1).toInt() == 3)
-                ++result.todayCorrect;
+                ++result.todayGood;
         }
     }
     result.newToday = countNewCardsToday(dayStartHour);

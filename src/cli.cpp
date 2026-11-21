@@ -551,7 +551,7 @@ int run(const QStringList &arguments) {
         object.insert("ok", true);
         object.insert("totalReviews", summary.total);
         object.insert("today", summary.today);
-        object.insert("todayCorrect", summary.todayCorrect);
+        object.insert("todayGood", summary.todayGood);
         object.insert("streakDays", summary.streakDays);
         object.insert("newToday", summary.newToday);
         object.insert("newPerDay", backend.newPerDay());
@@ -559,9 +559,9 @@ int run(const QStringList &arguments) {
         object.insert("totalDue", backend.countDue());
         object.insert("cards", allCards(decks, {}).size());
         object.insert("decks", decks.size());
-        const int accuracy = summary.today > 0 ? qRound(100.0 * summary.todayCorrect / summary.today) : 0;
+        const int accuracy = summary.today > 0 ? qRound(100.0 * summary.todayGood / summary.today) : 0;
         write(object, json,
-              QObject::tr("%1 reviews today · %2% correct · %3 day streak · %4 due")
+              QObject::tr("%1 reviews today · %2% Good · %3 day streak · %4 due")
                   .arg(summary.today)
                   .arg(accuracy)
                   .arg(summary.streakDays)

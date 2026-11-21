@@ -34,7 +34,7 @@ class Backend : public QObject {
     Q_PROPERTY(int streak READ streak NOTIFY dueCountChanged)
     Q_PROPERTY(QVariantList deckList READ deckSummaries NOTIFY decksChanged)
     Q_PROPERTY(int reviewed READ reviewed NOTIFY statsChanged)
-    Q_PROPERTY(int correct READ correct NOTIFY statsChanged)
+    Q_PROPERTY(int good READ good NOTIFY statsChanged)
     Q_PROPERTY(int currentBox READ currentBox NOTIFY statsChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(QString mathEngine READ mathEngine CONSTANT)
@@ -76,7 +76,7 @@ public:
     int deckNew() const { return m_planner.deckNew(m_deckRepo.deckIndex(m_currentDeck)); }
     int streak() const { return m_store.summary(m_dayStartHour).streakDays; }
     int reviewed() const { return m_session.reviewed(); }
-    int correct() const { return m_session.correct(); }
+    int good() const { return m_session.good(); }
     int currentBox() const { return m_session.currentBox(); }
     QString status() const { return m_session.status(); }
     QString mathEngine() const;
@@ -147,7 +147,7 @@ public slots:
     Q_INVOKABLE void requestShow();
     Q_INVOKABLE QString statsText() const;
     Q_INVOKABLE QVariantMap statsSummary() const {
-        return m_planner.statsSummary(dueCount(), totalCards(), m_deckRepo.deckNames().size(), reviewed(), correct(),
+        return m_planner.statsSummary(dueCount(), totalCards(), m_deckRepo.deckNames().size(), reviewed(), good(),
                                       m_desiredRetention);
     }
 
