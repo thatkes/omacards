@@ -7,9 +7,9 @@
 #include "config.h"
 #include "deck.h"
 #include "domain.h"
-#include "fsrs.h"
 #include "insessionprogression.h"
 #include "mathrender.h"
+#include "ratingrecording.h"
 #include "store.h"
 
 #include <QDateTime>
@@ -825,25 +825,17 @@ int run(const QStringList &arguments) {
         Store store(backend.databasePath());
         if (!store.open(&error))
             return fail(error, json);
-        store.clearError();
-        FsrsState state = store.states().value(target->id);
-        if (store.hashes().value(target->id) != DeckIO::contentHash(*target))
-            state = FsrsState{};
-        if (!store.lastError().isEmpty())
-            return fail(QObject::tr("Cannot read scheduling state: %1").arg(store.lastError()), json);
-        const qint64 now = QDateTime::currentMSecsSinceEpoch();
-        const bool wasNew = state.reps == 0;
-        store.clearError();
-        const ReviewResult result = Fsrs::review(state, Domain::toInt(rating), now, backend.desiredRetention());
-        store.save(target->id, DeckIO::contentHash(*target), result.state);
-        store.logReview(target->id, Domain::toInt(rating), now, result.state, result.intervalDays, wasNew);
-        if (!store.lastError().isEmpty())
-            return fail(QObject::tr("Cannot save review: %1").arg(store.lastError()), json);
+        StoreRatingAdapter storeAdapter(store);
+        RatingRecording recording(storeAdapter);
+        const RatingRecording::Result result =
+            recording.record(*target, rating, backend.desiredRetention(), QDateTime::currentMSecsSinceEpoch());
+        if (!result.ok)
+            return fail(QObject::tr("Cannot save review: %1").arg(result.storeError), json);
 
         QJsonObject object;
         object.insert("ok", true);
         object.insert("id", target->id);
-        object.insert("rating", options.rating);
+        object.insert("rating", Domain::toInt(rating));
         object.insert("intervalDays", result.intervalDays);
         object.insert("due", result.state.due);
         object.insert("stability", result.state.stability);

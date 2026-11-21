@@ -24,6 +24,7 @@ private slots:
     void checkDeckScoping();
     void readCommandJsonContracts();
     void reviewCommandContract();
+    void reviewWrapsStoreErrors();
     void cramCommandContract();
     void addCardJsonContracts();
     void cardsJsonPreservesUnknownFileType();

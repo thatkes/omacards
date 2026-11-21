@@ -7,6 +7,8 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QProcess>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 
 #include "test_cli.h"
@@ -16,7 +18,6 @@
 #include "config.h"
 #include "deck.h"
 #include "domain.h"
-#include "store.h"
 
 using namespace TestSupport;
 
@@ -566,43 +567,34 @@ void TestCli::reviewCommandContract() {
     }
     QVERIFY(!cardId.isEmpty());
 
+    const QStringList expected{"difficulty", "due", "id", "intervalDays", "ok", "rating", "stability"};
+
     int code = -1;
     const QJsonObject good = runCli({"review", "-c", cardId, "-r", "3", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
-    QStringList expected{"ok", "id", "rating", "intervalDays", "due", "stability", "difficulty"};
-    expected.sort();
     QCOMPARE(sortedKeys(good), expected);
+    QVERIFY(good.value(QStringLiteral("ok")).toBool());
     QCOMPARE(good.value(QStringLiteral("id")).toString(), cardId);
     QCOMPARE(good.value(QStringLiteral("rating")).toInt(), 3);
     QVERIFY(good.value(QStringLiteral("intervalDays")).toInt() >= 0);
 
-    QString error;
-    qint64 firstDue = 0;
-    {
-        Store state(database);
-        QVERIFY(state.open(&error));
-        QCOMPARE(state.states().value(cardId).reps, 1);
-        firstDue = state.states().value(cardId).due;
-    }
-
     const QJsonObject second = runCli({"review", "-c", cardId, "-r", "3", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
-    {
-        Store state(database);
-        QVERIFY(state.open(&error));
-        QCOMPARE(state.states().value(cardId).reps, 2);
-        QVERIFY(state.states().value(cardId).due > firstDue);
-    }
+    QCOMPARE(sortedKeys(second), expected);
+    QCOMPARE(second.value(QStringLiteral("id")).toString(), cardId);
+    QCOMPARE(second.value(QStringLiteral("rating")).toInt(), 3);
 
     const QJsonObject again = runCli({"review", "-c", cardId, "-r", "1", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
+    QCOMPARE(sortedKeys(again), expected);
     QCOMPARE(again.value(QStringLiteral("rating")).toInt(), 1);
 
     auto expectBadRating = [&](const QStringList &args) {
         const QJsonObject bad = runCli(args, decks, database, &code);
         QCOMPARE(code, 1);
+        QCOMPARE(sortedKeys(bad), QStringList({"error", "ok"}));
         QVERIFY(!bad.value(QStringLiteral("ok")).toBool());
-        QCOMPARE(bad.value(QStringLiteral("error")).toString(), QString("Rating must be 1 (Again) or 3 (Good)"));
+        QCOMPARE(bad.value(QStringLiteral("error")).toString(), QStringLiteral("Rating must be 1 (Again) or 3 (Good)"));
     };
     expectBadRating({"review", "-c", cardId, "-r", "0", "--json"});
     expectBadRating({"review", "-c", cardId, "-r", "2", "--json"});
@@ -610,7 +602,8 @@ void TestCli::reviewCommandContract() {
 
     const QJsonObject missing = runCli({"review", "-c", "missing", "-r", "3", "--json"}, decks, database, &code);
     QCOMPARE(code, 1);
-    QCOMPARE(missing.value(QStringLiteral("error")).toString(), QString("No such card: missing"));
+    QCOMPARE(sortedKeys(missing), QStringList({"error", "ok"}));
+    QCOMPARE(missing.value(QStringLiteral("error")).toString(), QStringLiteral("No such card: missing"));
 
     runCli({"edit-card", "-c", cardId, "-a", "changed", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
@@ -626,9 +619,60 @@ void TestCli::reviewCommandContract() {
     }
     QVERIFY(!editedId.isEmpty());
     QVERIFY(editedId != cardId);
-    Store after(database);
-    QVERIFY(after.open(&error));
-    QVERIFY(!after.states().contains(editedId));
+
+    // The edited Answer is a different Card: its id resolves for review and
+    // the old id no longer does. Scheduling is proved in TestRatingRecording.
+    const QJsonObject stale = runCli({"review", "-c", cardId, "-r", "3", "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QCOMPARE(sortedKeys(stale), QStringList({"error", "ok"}));
+    QCOMPARE(stale.value(QStringLiteral("error")).toString(), QStringLiteral("No such card: ") + cardId);
+
+    const QJsonObject edited = runCli({"review", "-c", editedId, "-r", "3", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(sortedKeys(edited), expected);
+    QCOMPARE(edited.value(QStringLiteral("id")).toString(), editedId);
+    QCOMPARE(edited.value(QStringLiteral("rating")).toInt(), 3);
+}
+
+void TestCli::reviewWrapsStoreErrors() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    EnvGuard env(decks, database);
+
+    QString cardId;
+    {
+        auto owned = Backend::fromEnvironment();
+        QString error;
+        QVERIFY(owned->initialize(&error));
+        QVERIFY(owned->createDeck("Failure", &error));
+        QVERIFY(owned->createCard("Failure", "Q", "A", "basic", {}, &error));
+        cardId = owned->allDecks().first().cards.first().id;
+    }
+    QVERIFY(!cardId.isEmpty());
+
+    // Leave the database openable but make the scheduling read fail, so the
+    // raw Store error has to travel back through the CLI's translated message.
+    const QString connection = QStringLiteral("cli-broken-state");
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
+        db.setDatabaseName(database);
+        QVERIFY(db.open());
+        QSqlQuery query(db);
+        QVERIFY(query.exec(QStringLiteral("DROP TABLE cards")));
+        QVERIFY(query.exec(QStringLiteral("CREATE TABLE cards (id TEXT)")));
+    }
+    QSqlDatabase::removeDatabase(connection);
+
+    int code = -1;
+    const QJsonObject failure = runCli({"review", "-c", cardId, "-r", "3", "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QCOMPARE(sortedKeys(failure), QStringList({"error", "ok"}));
+    QVERIFY(!failure.value(QStringLiteral("ok")).toBool());
+    const QString message = failure.value(QStringLiteral("error")).toString();
+    QVERIFY2(message.startsWith(QStringLiteral("Cannot save review: ")), qPrintable(message));
+    QVERIFY(message.size() > QStringLiteral("Cannot save review: ").size());
 }
 
 void TestCli::cramCommandContract() {
