@@ -20,9 +20,7 @@ void InSessionProgression::buildReview(const QStringList &dueIds, const QStringL
         // A repeat's FSRS due date is in the future, so it is not part of the
         // database-derived queue; keep it as session-only work with its
         // absolute deadline intact.
-        if (!m_reviewQueue.contains(it.key()))
-            m_reviewQueue << it.key();
-        m_reviewAgainNotBefore.insert(it.key(), it.value());
+        repeatAfter(it.key(), it.value());
     }
 }
 
@@ -37,7 +35,7 @@ InSessionProgression::NextResult InSessionProgression::next(qint64 now) {
     if (!m_cramQueue.isEmpty()) {
         int best = 0;
         for (int i = 1; i < m_cramQueue.size(); ++i)
-            if (m_cramQueue.at(i).next < m_cramQueue.at(best).next)
+            if (m_cramQueue.at(i).nextShowReview < m_cramQueue.at(best).nextShowReview)
                 best = i;
         result.kind = Next::Ready;
         result.cardId = m_cramQueue.at(best).cardId;
@@ -103,7 +101,7 @@ void InSessionProgression::advanceCram(const QString &id, Rating rating) {
             continue;
         CramEntry entry = m_cramQueue.takeAt(i);
         entry.box = rating == Rating::Again ? 0 : qMin(Config::kLeitnerBoxes - 1, entry.box + 1);
-        entry.next = ++m_cramReviews + Config::kLeitnerIntervals[entry.box];
+        entry.nextShowReview = ++m_cramReviews + Config::kLeitnerIntervals[entry.box];
         m_cramQueue.append(entry);
         m_currentBox = entry.box + 1;
         return;

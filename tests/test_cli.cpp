@@ -7,7 +7,6 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QProcess>
-#include <QProcessEnvironment>
 #include <QTemporaryDir>
 
 #include "test_cli.h"
@@ -28,23 +27,6 @@ QStringList sortedKeys(const QJsonObject &object) {
     return keys;
 }
 
-QString runCliText(const QStringList &arguments, const QString &decksDir, const QString &stateDb,
-                   int *exitCode = nullptr) {
-    QProcess process;
-    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
-    environment.insert(QStringLiteral("OMACARDS_DECKS_DIR"), decksDir);
-    environment.insert(QStringLiteral("OMACARDS_STATE_DB"), stateDb);
-    process.setProcessEnvironment(environment);
-    process.start(appBinary(), arguments);
-    if (!process.waitForFinished(10000)) {
-        if (exitCode)
-            *exitCode = -1;
-        return {};
-    }
-    if (exitCode)
-        *exitCode = process.exitCode();
-    return QString::fromUtf8(process.readAllStandardOutput());
-}
 } // namespace
 
 void TestCli::helpIsHeadless() {

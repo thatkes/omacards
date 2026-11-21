@@ -7,7 +7,7 @@ class TestBackend : public QObject {
 
 private slots:
     void defaultPathsIgnoreOrganizationName();
-    void backendCreatesCardsAndCramsForever();
+    void backendCreatesCardAndRatesInCram();
     void qmlCanRateCards();
     void createCardRejectsInvalidType();
     void backendEditsCardsWithUndo();
