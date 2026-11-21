@@ -12,8 +12,8 @@ constexpr double kQuestionMathScale = 2.0;
 constexpr double kAnswerMathScale = 1.6;
 } // namespace
 
-StudySession::StudySession(DeckRepository &decks, StudyPlanner &planner, QObject *parent)
-    : QObject(parent), m_decks(decks), m_planner(planner), m_repeatDelayMs(Config::againDelayMs()) {
+StudySession::StudySession(DeckRepository &decks, StudyPlanner &planner, RatingRecording &ratings, QObject *parent)
+    : QObject(parent), m_decks(decks), m_planner(planner), m_ratings(ratings), m_repeatDelayMs(Config::againDelayMs()) {
     m_repeatTimer.setSingleShot(true);
     connect(&m_repeatTimer, &QTimer::timeout, this, &StudySession::presentCard);
 }
@@ -121,9 +121,20 @@ void StudySession::answerReview(Rating rating, double desiredRetention) {
     if (!card)
         return;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    QString storeError;
-    if (!m_planner.recordReview(*card, rating, desiredRetention, now, &storeError))
-        reportError(tr("Cannot save review: %1").arg(storeError));
+    const RatingRecording::Result result = m_ratings.record(*card, rating, desiredRetention, now);
+    if (result.ok) {
+        // The module writes straight to the Store; planning must re-read it so
+        // counts, allowance and predicted recall see the new Scheduling state.
+        QString storeError;
+        if (!m_planner.refresh(&storeError))
+            reportError(tr("Cannot read scheduling state: %1").arg(storeError));
+    } else {
+        // The raw Store error stays intact; each phase has its frozen text.
+        const QString message = result.failurePhase == RatingRecording::FailurePhase::SchedulingRead
+                                    ? tr("Cannot read scheduling state: %1").arg(result.storeError)
+                                    : tr("Cannot save review: %1").arg(result.storeError);
+        reportError(message);
+    }
 
     m_progression.remove(card->id);
     if (rating == Rating::Again) {

@@ -5,6 +5,7 @@
 #include "deckrepository.h"
 #include "domain.h"
 #include "filehistory.h"
+#include "ratingrecording.h"
 #include "store.h"
 #include "studyplanner.h"
 #include "studysession.h"
@@ -169,6 +170,8 @@ signals:
 private:
     Store m_store;
     FileHistory m_history;
+    StoreRatingAdapter m_ratingStore;
+    RatingRecording m_ratings;
     DeckRepository m_deckRepo;
     StudyPlanner m_planner;
     StudySession m_session;

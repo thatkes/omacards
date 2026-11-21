@@ -5,6 +5,7 @@
 #include "domain.h"
 #include "mathrender.h"
 #include "insessionprogression.h"
+#include "ratingrecording.h"
 #include "studyplanner.h"
 
 #include <QObject>
@@ -14,13 +15,15 @@
 // Owns one study sitting: card presentation, ratings, status and the live
 // counters. InSessionProgression owns card order, Cram Leitner boxes and
 // Pending repeat deadlines; the Study session supplies shuffling and Ratings.
-// Deck files and scheduling state stay in DeckRepository and StudyPlanner;
-// Backend remains the QML/CLI facade and forwards this object's signals.
+// Deck files stay in DeckRepository, Rating recording writes Scheduling state
+// and Review history, and StudyPlanner reads them for planning. Backend remains
+// the QML facade and forwards this object's signals.
 class StudySession : public QObject {
     Q_OBJECT
 
 public:
-    explicit StudySession(DeckRepository &decks, StudyPlanner &planner, QObject *parent = nullptr);
+    explicit StudySession(DeckRepository &decks, StudyPlanner &planner, RatingRecording &ratings,
+                          QObject *parent = nullptr);
 
     void setMode(const QString &mode);
     void rebuild(const QString &deckName);
@@ -66,6 +69,7 @@ private:
 
     DeckRepository &m_decks;
     StudyPlanner &m_planner;
+    RatingRecording &m_ratings;
     InSessionProgression m_progression;
     QTimer m_repeatTimer;
     MathRenderer m_math;

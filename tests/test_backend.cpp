@@ -107,6 +107,7 @@ void TestBackend::backendCreatesCardAndRatesInCram() {
     backend.rate(3);
     QCOMPARE(backend.reviewed(), 1);
     QCOMPARE(backend.good(), 1);
+    QCOMPARE(backend.reviewSummary().total, 0); // Cram keeps its Leitner-only path
 }
 
 void TestBackend::qmlCanRateCards() {
@@ -929,6 +930,7 @@ void TestBackend::statsSummaryKeepsContract() {
     QCOMPARE(summary.value("due").toInt(), backend.dueCount());
     QCOMPARE(summary.value("sessionReviewed").toInt(), backend.reviewed());
     QCOMPARE(summary.value("sessionGood").toInt(), backend.good());
+    QCOMPARE(backend.reviewSummary().total, 1); // one GUI rating appends one review
     QCOMPARE(summary.value("todayGood").toInt(), 1);
 }
 

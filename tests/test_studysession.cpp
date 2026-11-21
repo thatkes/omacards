@@ -4,6 +4,7 @@
 #include <QSignalSpy>
 #include <QStringList>
 #include <QTemporaryDir>
+#include <QVariantMap>
 
 #include "test_studysession.h"
 #include "config.h"
@@ -12,6 +13,7 @@
 #include "domain.h"
 #include "filehistory.h"
 #include "mathrender.h"
+#include "ratingrecording.h"
 #include "store.h"
 #include "studyplanner.h"
 #include "studysession.h"
@@ -24,15 +26,51 @@ struct SessionFixture {
     FileHistory history;
     DeckRepository repo;
     StudyPlanner planner;
+    StoreRatingAdapter ratingStore;
+    RatingRecording ratings;
     StudySession session;
     QString current;
 
     SessionFixture()
         : store(dir.filePath("state.db")), repo(dir.filePath("decks"), store, history), planner(store),
-          session(repo, planner) {}
+          ratingStore(store), ratings(ratingStore), session(repo, planner, ratings) {}
 };
 
-bool prepareSession(SessionFixture &fixture, const QString &deckName, const QStringList &questions, QString *error) {
+// Counts what the session hands to Rating recording; scheduling semantics stay
+// in TestRatingRecording.
+class RecordingStoreStub : public RatingRecording::StoreAdapter {
+public:
+    void clearError() override { m_error.clear(); }
+    QHash<QString, FsrsState> states() const override {
+        if (!m_readError.isEmpty())
+            m_error = m_readError;
+        return {};
+    }
+    QHash<QString, QString> hashes() const override { return {}; }
+    void save(const QString &, const QString &, const FsrsState &) override {}
+    void logReview(const QString &, int rating, qint64, const FsrsState &, int, bool) override {
+        ++m_logCount;
+        m_lastRating = rating;
+        if (!m_writeError.isEmpty())
+            m_error = m_writeError;
+    }
+    QString lastError() const override { return m_error; }
+
+    void failReads(const QString &error) { m_readError = error; }
+    void failWrites(const QString &error) { m_writeError = error; }
+    int logCount() const { return m_logCount; }
+    int lastRating() const { return m_lastRating; }
+
+private:
+    QString m_readError;
+    QString m_writeError;
+    mutable QString m_error;
+    int m_logCount = 0;
+    int m_lastRating = 0;
+};
+
+bool prepareSessionWith(SessionFixture &fixture, StudySession &session, const QString &deckName,
+                        const QStringList &questions, QString *error) {
     if (!fixture.repo.initialize(error))
         return false;
     if (!fixture.store.open(error))
@@ -57,8 +95,12 @@ bool prepareSession(SessionFixture &fixture, const QString &deckName, const QStr
             *error = storeError;
         return false;
     }
-    fixture.session.rebuild(deckName);
+    session.rebuild(deckName);
     return true;
+}
+
+bool prepareSession(SessionFixture &fixture, const QString &deckName, const QStringList &questions, QString *error) {
+    return prepareSessionWith(fixture, fixture.session, deckName, questions, error);
 }
 
 // StudySession reads the delay in its constructor, so the variable must be set
@@ -242,6 +284,70 @@ void TestStudySession::invalidRatingsAreNoOps() {
     QCOMPARE(cardSpy.count(), 0);
     QCOMPARE(statusSpy.count(), 0);
     QCOMPARE(errorSpy.count(), 0);
+}
+
+void TestStudySession::reviewPassesTypedRatingToRecording() {
+    SessionFixture fixture;
+    RecordingStoreStub stub;
+    RatingRecording recording(stub);
+    StudySession session(fixture.repo, fixture.planner, recording);
+    QString error;
+    QVERIFY(prepareSessionWith(fixture, session, "Ratings", {"Q1", "Q2", "Q3"}, &error));
+    QVERIFY(error.isEmpty());
+
+    QVERIFY(session.rate(Rating::Again, Config::kDefaultRetention));
+    QCOMPARE(stub.logCount(), 1);
+    QCOMPARE(stub.lastRating(), 1); // Again is the typed 1 at the module seam
+    QVERIFY(session.question().contains("Q2"));
+
+    QVERIFY(session.rate(Rating::Good, Config::kDefaultRetention));
+    QCOMPARE(stub.logCount(), 2);
+    QCOMPARE(stub.lastRating(), 3); // Good is the typed 3 at the module seam
+    QCOMPARE(session.reviewed(), 2);
+    QCOMPARE(session.good(), 1);
+}
+
+void TestStudySession::reviewFailuresKeepTranslatedText() {
+    SessionFixture fixture;
+    RecordingStoreStub stub;
+    RatingRecording recording(stub);
+    StudySession session(fixture.repo, fixture.planner, recording);
+    QString error;
+    QVERIFY(prepareSessionWith(fixture, session, "Errors", {"Q1", "Q2"}, &error));
+    QSignalSpy errorSpy(&session, &StudySession::errorOccurred);
+
+    // presentCard() replaces the transient status after a rating, so the
+    // frozen text is asserted on the forwarded error signal.
+    stub.failReads(QStringLiteral("read boom"));
+    QVERIFY(session.rate(Rating::Good, Config::kDefaultRetention));
+    QCOMPARE(errorSpy.count(), 1);
+    QCOMPARE(errorSpy.first().at(0).toString(), QString("Cannot read scheduling state: read boom"));
+
+    stub.failReads({});
+    stub.failWrites(QStringLiteral("write boom"));
+    QVERIFY(session.rate(Rating::Good, Config::kDefaultRetention));
+    QCOMPARE(errorSpy.count(), 2);
+    QCOMPARE(errorSpy.at(1).at(0).toString(), QString("Cannot save review: write boom"));
+}
+
+void TestStudySession::successfulReviewRefreshesPlanner() {
+    SessionFixture fixture;
+    QString error;
+    QVERIFY(prepareSession(fixture, "Refresh", {"Q1", "Q2", "Q3"}, &error));
+    const Card card = fixture.repo.deckByName("Refresh")->cards.first();
+    QCOMPARE(fixture.planner.stateFor(card).reps, 0);
+    QCOMPARE(fixture.planner.newCount(), 3);
+
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
+
+    // The module wrote straight to the Store; only a refresh can make the
+    // planner's snapshot see the new Scheduling state and its New-card budget.
+    QCOMPARE(fixture.planner.stateFor(card).reps, 1);
+    QCOMPARE(fixture.planner.newCount(), 2);
+    QCOMPARE(fixture.session.dueCount(), 2);
+    const QVariantMap row = fixture.planner.cardList("Refresh", "Q1", "new", "due").first().toMap();
+    QCOMPARE(row.value("reps").toInt(), 1);
+    QVERIFY(!row.value("isDue").toBool());
 }
 
 void TestStudySession::reviewStatusOmitsSessionPositionBox() {

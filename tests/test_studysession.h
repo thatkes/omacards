@@ -11,6 +11,9 @@ private slots:
     void setModeCanonicalInputIsNoOp();
     void setModeCramSwitchesAndResets();
     void invalidRatingsAreNoOps();
+    void reviewPassesTypedRatingToRecording();
+    void reviewFailuresKeepTranslatedText();
+    void successfulReviewRefreshesPlanner();
     void reviewStatusOmitsSessionPositionBox();
     void flipAndShowNextToggleAnswer();
     void setStatusDedupesAndReportErrorSignals();
