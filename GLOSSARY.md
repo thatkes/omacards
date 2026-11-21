@@ -56,6 +56,10 @@ _Avoid_: sitting, run
 The learner's judgement of a presented card: Again or Good.
 _Avoid_: grade, score, answer
 
+**Rating recording**:
+The act of recording a Rating for a Card, producing an updated Scheduling state and an entry in Review history.
+_Avoid_: applying a Rating, saving a review, rating write
+
 **Again**:
 A rating that means recall failed and creates a pending repeat later in the same session.
 _Avoid_: fail, retry
