@@ -109,3 +109,23 @@ _Avoid_: new cards per day, daily cap, new budget
 **Desired retention**:
 The probability of recall that Review scheduling aims to maintain.
 _Avoid_: retention target, target recall
+
+### Validation
+
+**Deck issue**:
+A problem detected in a Deck's content or file. An Error blocks a write; a Warning does not.
+_Avoid_: problem, diagnostic, lint finding
+
+**Error**:
+A Deck issue that blocks a write and rolls the change back.
+_Avoid_: failure, hard issue
+
+**Warning**:
+A Deck issue that does not block a write.
+_Avoid_: advisory, soft issue
+
+### Workflow
+
+**GitHub Issue**:
+A ticket in the project's GitHub issue tracker; a bare "issue" in project conversation means this, not a Deck issue.
+_Avoid_: ticket, tracker item
