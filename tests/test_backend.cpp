@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QProcess>
+#include <QQuickItem>
 #include <QSignalSpy>
 #include <QQmlComponent>
 #include <QQmlContext>
@@ -362,6 +363,36 @@ void TestBackend::qmlCanNavigateLibraryCards() {
     QVERIFY(QMetaObject::invokeMethod(window, "removeSelectedCard"));
     QCOMPARE(backend.totalCards(), 2);
     QCOMPARE(backend.cardList().size(), 2);
+    delete window;
+}
+
+void TestBackend::qmlCramLabelUsesCurrentBox() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Test", &error));
+    QVERIFY(backend.createCard("Test", "Question?", "Answer", "basic", {}, &error));
+    backend.selectDeck("Test");
+    backend.setMode("cram");
+    backend.refresh(); // startStudy() in Main.qml sets the mode, then refreshes
+
+    QQmlEngine engine;
+    Theme theme;
+    engine.rootContext()->setContextProperty("backend", &backend);
+    engine.rootContext()->setContextProperty("theme", &theme);
+    QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(OMACARDS_SOURCE_DIR) + "/Main.qml"));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    QObject *window = component.create();
+    QVERIFY2(window, qPrintable(component.errorString()));
+
+    QVERIFY(!backend.property("box").isValid());
+    QQuickItem *label = window->findChild<QQuickItem *>(QStringLiteral("cramBoxLabel"));
+    QVERIFY(label);
+    QVERIFY(label->property("text").toString().contains(QStringLiteral("BOX 1 OF 5")));
+    backend.flip();
+    backend.rate(3);
+    QVERIFY(label->property("text").toString().contains(QStringLiteral("BOX 2 OF 5")));
     delete window;
 }
 
@@ -986,7 +1017,7 @@ void TestBackend::emptySessionHelpersAndStatsText() {
     backend.rate(3);
     QCOMPARE(backend.reviewed(), 1);
     QCOMPARE(backend.correct(), 1);
-    QCOMPARE(backend.box(), 2);
+    QCOMPARE(backend.currentBox(), 2);
     QCOMPARE(backend.statsText(), QString("1 reviewed · 100% correct · box 2"));
 }
 

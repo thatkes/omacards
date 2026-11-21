@@ -4,17 +4,18 @@
 #include "deckrepository.h"
 #include "domain.h"
 #include "mathrender.h"
+#include "insessionprogression.h"
 #include "studyplanner.h"
-#include "studyqueue.h"
 
 #include <QObject>
 #include <QString>
 #include <QTimer>
 
-// Owns one study sitting: queue order, the Again timer, card presentation,
-// ratings, status and the live session counters. Deck files and scheduling
-// state stay in DeckRepository and StudyPlanner; Backend remains the QML/CLI
-// facade and only forwards this object's signals.
+// Owns one study sitting: card presentation, ratings, status and the live
+// counters. InSessionProgression owns card order, Cram Leitner boxes and
+// Pending repeat deadlines; the Study session supplies shuffling and Ratings.
+// Deck files and scheduling state stay in DeckRepository and StudyPlanner;
+// Backend remains the QML/CLI facade and forwards this object's signals.
 class StudySession : public QObject {
     Q_OBJECT
 
@@ -41,7 +42,7 @@ public:
     int dueCount() const { return m_dueCount; }
     int reviewed() const { return m_reviewed; }
     int correct() const { return m_correct; }
-    int box() const { return m_box; }
+    int currentBox() const { return m_progression.currentBox(); }
     QString status() const { return m_status; }
     QString currentCardId() const { return m_currentId; }
 
@@ -57,7 +58,7 @@ signals:
     void errorOccurred(const QString &message);
 
 private:
-    void scheduleNextRepeat();
+    void startRepeatTimer(qint64 waitMs);
     void presentCard();
     void answerCram(Rating rating);
     void answerReview(Rating rating, double desiredRetention);
@@ -65,14 +66,13 @@ private:
 
     DeckRepository &m_decks;
     StudyPlanner &m_planner;
-    StudyQueue m_queue;
+    InSessionProgression m_progression;
     QTimer m_repeatTimer;
     MathRenderer m_math;
     qint64 m_repeatDelayMs;
     int m_dueCount = 0;
     int m_reviewed = 0;
     int m_correct = 0;
-    int m_box = 0;
     StudyMode m_mode = StudyMode::Review;
     QString m_question;
     QString m_answer;

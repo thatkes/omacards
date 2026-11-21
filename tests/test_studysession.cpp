@@ -1,7 +1,6 @@
 #include <QtTest>
 
 #include <QByteArray>
-#include <QSet>
 #include <QSignalSpy>
 #include <QStringList>
 #include <QTemporaryDir>
@@ -139,7 +138,7 @@ void TestStudySession::setModeUppercaseCramNormalizesToReview() {
 
     fixture.session.rebuild("Modes");
     QVERIFY(fixture.session.hasCard());
-    QCOMPARE(fixture.session.box(), 0); // remained in review mode
+    QCOMPARE(fixture.session.currentBox(), 0); // remained in review mode
 }
 
 void TestStudySession::setModeCanonicalInputIsNoOp() {
@@ -199,7 +198,7 @@ void TestStudySession::setModeCramSwitchesAndResets() {
 
     fixture.session.rebuild("Modes");
     QVERIFY(fixture.session.hasCard());
-    QCOMPARE(fixture.session.box(), 1);
+    QCOMPARE(fixture.session.currentBox(), 1);
     QVERIFY(fixture.session.status().contains("Cram"));
 }
 
@@ -243,6 +242,15 @@ void TestStudySession::invalidRatingsAreNoOps() {
     QCOMPARE(cardSpy.count(), 0);
     QCOMPARE(statusSpy.count(), 0);
     QCOMPARE(errorSpy.count(), 0);
+}
+
+void TestStudySession::reviewStatusOmitsSessionPositionBox() {
+    SessionFixture fixture;
+    QString error;
+    QVERIFY(prepareSession(fixture, "Status", {"Q1"}, &error));
+
+    QVERIFY(fixture.session.status().contains(QStringLiteral("predicted recall")));
+    QVERIFY(!fixture.session.status().contains(QStringLiteral("FSRS box")));
 }
 
 void TestStudySession::flipAndShowNextToggleAnswer() {
@@ -346,18 +354,15 @@ void TestStudySession::switchingToCramClearsPendingRepeat() {
     QCOMPARE(fixture.session.mode(), StudyMode::Cram);
     fixture.session.rebuild("Switch"); // a cram queue is built from scratch
 
+    // The module suite owns the Cram ordering and endlessness assertions; here
+    // we only check that the session forwards the rebuilt state.
+    QVERIFY(fixture.session.hasCard());
+    QCOMPARE(fixture.session.currentBox(), 1);
+    QVERIFY(!fixture.session.waitingForRepeat());
+    fixture.session.flip();
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QVERIFY(fixture.session.hasCard());
     QVERIFY(!fixture.session.waitingForRepeat());
-    QSet<QString> seen;
-    for (int i = 0; i < 4; ++i) {
-        seen.insert(fixture.session.currentCardId());
-        fixture.session.flip();
-        QVERIFY(fixture.session.rate(i == 0 ? Rating::Again : Rating::Good, Config::kDefaultRetention));
-        QVERIFY(fixture.session.hasCard());           // cram is endless
-        QVERIFY(!fixture.session.waitingForRepeat()); // no review deadline survives
-    }
-    seen.insert(fixture.session.currentCardId());
-    QCOMPARE(seen.size(), 2);
 }
 
 void TestStudySession::statsTextAndMathEngine() {
@@ -369,7 +374,7 @@ void TestStudySession::statsTextAndMathEngine() {
 
     fixture.session.setMode("cram");
     fixture.session.rebuild("Stats");
-    QCOMPARE(fixture.session.box(), 1);
+    QCOMPARE(fixture.session.currentBox(), 1);
     fixture.session.flip();
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QCOMPARE(fixture.session.statsText(), QString("1 reviewed · 100% correct · box 1"));

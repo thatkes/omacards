@@ -14,34 +14,46 @@ struct CramEntry {
     int next = 0;
 };
 
-// The in-session order of cards. It knows nothing about rendering, SQLite or
-// QML; Backend decides when to call it and owns the retry timer.
-class StudyQueue {
+// Owns the in-session order of cards, Cram Leitner boxes and Review Pending
+// repeat timing. It knows nothing about rendering, SQLite or QML; callers
+// supply the policy (ordered Cards and Ratings) and present the results.
+class InSessionProgression {
 public:
     enum class Next { Ready, Waiting, Finished };
+
+    struct NextResult {
+        Next kind = Next::Finished;
+        QString cardId;
+        qint64 waitMs = 0;
+        int box = 0; // 1-based Leitner box of the current Card in Cram
+    };
 
     void clear();
 
     void buildReview(const QStringList &dueIds, const QStringList &freshIds = {},
                      const QHash<QString, qint64> &pending = {});
-    void buildCram(const QVector<Card> &cards);
+    void buildCram(const QVector<Card> &orderedCards);
 
-    Next next(qint64 now, QString *id, qint64 *waitMs, int *box);
-    qint64 nextWait(qint64 now) const;
+    NextResult next(qint64 now);
+    int currentBox() const { return m_currentBox; }
 
     void remove(const QString &id);
     void repeatAfter(const QString &id, qint64 notBefore);
-    void advanceCram(const QString &id, Rating rating, int *box);
+    void advanceCram(const QString &id, Rating rating);
 
     int pendingRepeatCount() const { return m_reviewAgainNotBefore.size(); }
     QHash<QString, qint64> pendingRepeats() const { return m_reviewAgainNotBefore; }
     bool empty() const { return m_reviewQueue.isEmpty() && m_cramQueue.isEmpty(); }
 
 private:
+    qint64 pendingWait(qint64 now) const;
+
     QVector<CramEntry> m_cramQueue;
     QStringList m_reviewQueue;
     QHash<QString, qint64> m_reviewAgainNotBefore;
-    int m_cramReviews = 0;
+    qint64 m_cramReviews = 0;
+    int m_currentBox = 0;
 };
 
-Q_DECLARE_METATYPE(StudyQueue::Next)
+Q_DECLARE_METATYPE(InSessionProgression::Next)
+Q_DECLARE_METATYPE(InSessionProgression::NextResult)

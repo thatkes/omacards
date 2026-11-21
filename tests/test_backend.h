@@ -17,6 +17,7 @@ private slots:
     void backendAppliesDayStartToDueCards();
     void backendReportsNewCountAndDeckSummaries();
     void qmlCanNavigateLibraryCards();
+    void qmlCramLabelUsesCurrentBox();
     void backendAppliesNewCardLimit();
     void backendRequeuesAgainInSameSession();
     void unreadableDeckKeepsSchedulingState();

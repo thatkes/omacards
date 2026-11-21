@@ -1,6 +1,9 @@
 #include "studysession.h"
 
 #include <QDateTime>
+#include <QRandomGenerator>
+
+#include <algorithm>
 
 namespace {
 // TeX typesets at 12pt (~16px at 96dpi) while the QML labels use 30px/24px.
@@ -29,20 +32,24 @@ void StudySession::rebuild(const QString &deckName) {
     // A watcher refresh can rebuild the queue while a repeat is pending. Keep
     // those deadlines for cards that are still available; a cram queue is
     // rebuilt from scratch and clears them instead.
-    const QHash<QString, qint64> pending = m_queue.pendingRepeats();
+    const QHash<QString, qint64> pending = m_progression.pendingRepeats();
     m_repeatTimer.stop();
     m_currentId.clear();
 
     const Deck *deck = m_decks.deckByName(deckName);
     if (deck && m_mode == StudyMode::Cram) {
-        m_queue.buildCram(deck->cards);
+        // A rebuilt Cram session gets a fresh shuffle; the module only orders
+        // the Cards it is given.
+        QVector<Card> ordered = deck->cards;
+        std::shuffle(ordered.begin(), ordered.end(), *QRandomGenerator::global());
+        m_progression.buildCram(ordered);
     } else if (deck) {
         QStringList dueIds;
         QStringList freshIds;
         m_planner.reviewIds(deckName, &dueIds, &freshIds);
-        m_queue.buildReview(dueIds, freshIds, pending);
+        m_progression.buildReview(dueIds, freshIds, pending);
     } else {
-        m_queue.clear();
+        m_progression.clear();
     }
 
     refreshDueCount();
@@ -118,37 +125,32 @@ void StudySession::answerReview(Rating rating, double desiredRetention) {
     if (!m_planner.recordReview(*card, rating, desiredRetention, now, &storeError))
         reportError(tr("Cannot save review: %1").arg(storeError));
 
-    m_queue.remove(card->id);
+    m_progression.remove(card->id);
     if (rating == Rating::Again) {
         // Keep the FSRS due date above, but give the card one more appearance
         // in this sitting after a short break.
-        m_queue.repeatAfter(card->id, now + m_repeatDelayMs);
+        m_progression.repeatAfter(card->id, now + m_repeatDelayMs);
     }
     refreshDueCount();
 }
 
 void StudySession::answerCram(Rating rating) {
-    m_queue.advanceCram(m_currentId, rating, &m_box);
+    m_progression.advanceCram(m_currentId, rating);
 }
 
-void StudySession::scheduleNextRepeat() {
+void StudySession::startRepeatTimer(qint64 waitMs) {
     m_repeatTimer.stop();
-    if (m_mode != StudyMode::Review)
-        return;
-    const qint64 wait = m_queue.nextWait(QDateTime::currentMSecsSinceEpoch());
-    if (wait > 0)
-        m_repeatTimer.start(wait);
+    if (m_mode == StudyMode::Review && waitMs > 0)
+        m_repeatTimer.start(waitMs);
 }
 
 void StudySession::presentCard() {
     m_showingAnswer = false;
     m_waitingForRepeat = false;
     const bool cram = m_mode == StudyMode::Cram;
-    QString nextId;
-    int nextBox = 0;
-    const StudyQueue::Next next = m_queue.next(QDateTime::currentMSecsSinceEpoch(), &nextId, nullptr, &nextBox);
+    const InSessionProgression::NextResult next = m_progression.next(QDateTime::currentMSecsSinceEpoch());
 
-    if (next == StudyQueue::Next::Finished) {
+    if (next.kind == InSessionProgression::Next::Finished) {
         m_currentId.clear();
         m_question.clear();
         m_answer.clear();
@@ -158,8 +160,8 @@ void StudySession::presentCard() {
         emit cardChanged();
         return;
     }
-    if (next == StudyQueue::Next::Waiting) {
-        scheduleNextRepeat();
+    if (next.kind == InSessionProgression::Next::Waiting) {
+        startRepeatTimer(next.waitMs);
         m_waitingForRepeat = true;
         m_currentId.clear();
         m_question.clear();
@@ -169,14 +171,12 @@ void StudySession::presentCard() {
         return;
     }
 
-    m_currentId = nextId;
-    if (cram)
-        m_box = nextBox;
-    scheduleNextRepeat();
+    m_currentId = next.cardId;
+    startRepeatTimer(next.waitMs);
 
     const Card *card = m_decks.cardById(m_currentId);
     if (!card) {
-        m_queue.remove(m_currentId);
+        m_progression.remove(m_currentId);
         m_currentId.clear();
         presentCard();
         return;
@@ -187,20 +187,19 @@ void StudySession::presentCard() {
     if (m_mode == StudyMode::Review) {
         const FsrsState state = m_planner.stateFor(*card);
         const double recall = state.reps > 0 ? Fsrs::retrievability(state, QDateTime::currentMSecsSinceEpoch()) : 1.0;
-        setStatus(
-            tr("Review · predicted recall %1% · FSRS box %2").arg(qRound(recall * 100)).arg(qMax(1, m_reviewed + 1)));
+        setStatus(tr("Review · predicted recall %1%").arg(qRound(recall * 100)));
     } else {
         setStatus(tr("Cram · box %1 of %2 · next in %3 cards")
-                      .arg(m_box)
+                      .arg(currentBox())
                       .arg(Config::kLeitnerBoxes)
-                      .arg(Config::kLeitnerIntervals[m_box - 1]));
+                      .arg(Config::kLeitnerIntervals[currentBox() - 1]));
     }
     emit statsChanged();
     emit cardChanged();
 }
 
 void StudySession::refreshDueCount() {
-    m_dueCount = m_planner.availableCount() + m_queue.pendingRepeatCount();
+    m_dueCount = m_planner.availableCount() + m_progression.pendingRepeatCount();
     emit dueCountChanged();
 }
 
@@ -210,5 +209,5 @@ MathRenderer::Engine StudySession::mathEngine() const {
 
 QString StudySession::statsText() const {
     const double accuracy = m_reviewed > 0 ? 100.0 * m_correct / m_reviewed : 0.0;
-    return tr("%1 reviewed · %2% correct · box %3").arg(m_reviewed).arg(qRound(accuracy)).arg(m_box);
+    return tr("%1 reviewed · %2% correct · box %3").arg(m_reviewed).arg(qRound(accuracy)).arg(currentBox());
 }

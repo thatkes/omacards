@@ -3,7 +3,7 @@
 
 #include "test_cli.h"
 #include "test_backend.h"
-#include "test_studyqueue.h"
+#include "test_insessionprogression.h"
 #include "test_store.h"
 #include "test_fsrs.h"
 #include "test_theme.h"
@@ -27,8 +27,8 @@ int main(int argc, char **argv) {
     failed += QTest::qExec(&cli, argc, argv);
     TestBackend backend;
     failed += QTest::qExec(&backend, argc, argv);
-    TestStudyQueue studyqueue;
-    failed += QTest::qExec(&studyqueue, argc, argv);
+    TestInSessionProgression progression;
+    failed += QTest::qExec(&progression, argc, argv);
     TestStore store;
     failed += QTest::qExec(&store, argc, argv);
     TestFsrs fsrs;
