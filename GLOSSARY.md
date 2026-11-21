@@ -113,7 +113,7 @@ _Avoid_: retention target, target recall
 ### Settings
 
 **Settings**:
-The learner-chosen values that govern the New-card allowance, the start of a Study day and Desired retention.
+The learner-chosen values that govern the New-card allowance, Day-start hour and Desired retention.
 _Avoid_: preferences, options, configuration
 
 **Settings screen**:

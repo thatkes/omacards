@@ -6,6 +6,8 @@
 #include <QFileInfo>
 #include <QProcess>
 #include <QQuickItem>
+#include <QQuickWindow>
+#include <QRectF>
 #include <QSignalSpy>
 #include <QQmlComponent>
 #include <QQmlContext>
@@ -438,6 +440,186 @@ void TestBackend::qmlGoodLabelUsesGoodCount() {
     const QVariantMap stats = view.window->property("statsData").toMap();
     QCOMPARE(stats.value("sessionGood").toInt(), 1);
     QVERIFY(!stats.contains("sessionCorrect"));
+}
+
+void TestBackend::qmlSettingsRowsFitTheirContent() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+
+    auto settle = [] {
+        QCoreApplication::processEvents();
+        QTest::qWait(30);
+    };
+
+    window->resize(window->minimumWidth(), window->minimumHeight());
+    settle();
+    QVERIFY(QMetaObject::invokeMethod(view.window, "openSettings"));
+    settle();
+    QCOMPARE(view.window->property("screen").toString(), QString("settings"));
+
+    auto visualRect = [](QQuickItem *item) { return item->mapRectToScene(item->boundingRect()); };
+    auto isInside = [visualRect](QQuickItem *outer, QQuickItem *inner) {
+        return visualRect(outer).contains(visualRect(inner));
+    };
+    auto leftOf = [visualRect](QQuickItem *left, QQuickItem *right) {
+        return visualRect(left).right() <= visualRect(right).left() + 1.0;
+    };
+    auto above = [visualRect](QQuickItem *top, QQuickItem *bottom) {
+        return visualRect(top).bottom() <= visualRect(bottom).top() + 1.0;
+    };
+    auto nameOf = [](QQuickItem *item) { return item ? item->objectName() : QStringLiteral("<missing>"); };
+
+    QQuickItem *allowancePanel = view.item(QStringLiteral("settingsNewCardAllowancePanel"));
+    QQuickItem *allowanceTitle = view.item(QStringLiteral("settingsNewCardAllowanceTitle"));
+    QQuickItem *allowanceDescription = view.item(QStringLiteral("settingsNewCardAllowanceDescription"));
+    QQuickItem *allowanceMinus = view.item(QStringLiteral("settingsNewCardAllowanceMinus"));
+    QQuickItem *allowanceValue = view.item(QStringLiteral("settingsNewCardAllowanceValue"));
+    QQuickItem *allowancePlus = view.item(QStringLiteral("settingsNewCardAllowancePlus"));
+    QQuickItem *dayPanel = view.item(QStringLiteral("settingsDayStartHourPanel"));
+    QQuickItem *dayTitle = view.item(QStringLiteral("settingsDayStartHourTitle"));
+    QQuickItem *dayDescription = view.item(QStringLiteral("settingsDayStartHourDescription"));
+    QQuickItem *dayMinus = view.item(QStringLiteral("settingsDayStartHourMinus"));
+    QQuickItem *dayValue = view.item(QStringLiteral("settingsDayStartHourValue"));
+    QQuickItem *dayPlus = view.item(QStringLiteral("settingsDayStartHourPlus"));
+    QQuickItem *retentionPanel = view.item(QStringLiteral("settingsRetentionPanel"));
+    QQuickItem *retentionTitle = view.item(QStringLiteral("settingsRetentionTitle"));
+    QQuickItem *retentionValue = view.item(QStringLiteral("settingsRetentionValue"));
+    QQuickItem *retentionSlider = view.item(QStringLiteral("settingsRetentionSlider"));
+    QQuickItem *retentionDescription = view.item(QStringLiteral("settingsRetentionDescription"));
+    QQuickItem *mathPanel = view.item(QStringLiteral("settingsMathPanel"));
+    QQuickItem *mathTitle = view.item(QStringLiteral("settingsMathTitle"));
+    QQuickItem *mathDescription = view.item(QStringLiteral("settingsMathDescription"));
+    QQuickItem *mathEngine = view.item(QStringLiteral("settingsMathEngine"));
+    QQuickItem *deckPanel = view.item(QStringLiteral("settingsDeckFilesPanel"));
+    QQuickItem *deckTitle = view.item(QStringLiteral("settingsDeckFilesTitle"));
+    QQuickItem *deckPath = view.item(QStringLiteral("settingsDeckFilesPath"));
+    QQuickItem *deckEdit = view.item(QStringLiteral("settingsDeckFilesEditButton"));
+    QQuickItem *scroll = view.item(QStringLiteral("settingsScrollView"));
+    QQuickItem *back = view.item(QStringLiteral("settingsBack"));
+    QVERIFY(allowancePanel && allowanceTitle && allowanceDescription && allowanceMinus);
+    QVERIFY(allowanceValue && allowancePlus && dayPanel && dayTitle && dayDescription);
+    QVERIFY(dayMinus && dayValue && dayPlus && retentionPanel && retentionTitle);
+    QVERIFY(retentionValue && retentionSlider && retentionDescription && mathPanel);
+    QVERIFY(mathTitle && mathDescription && mathEngine && deckPanel && deckTitle);
+    QVERIFY(deckPath && deckEdit && scroll && back);
+
+    QCOMPARE(allowanceTitle->property("text").toString(), QString("New-card allowance"));
+    QCOMPARE(dayTitle->property("text").toString(), QString("Day-start hour"));
+
+    auto checkLayout = [&]() -> bool {
+        bool ok = true;
+        auto inside = [&](QQuickItem *outer, QQuickItem *inner) {
+            if (!isInside(outer, inner)) {
+                qWarning() << nameOf(inner) << "paints outside" << nameOf(outer) << visualRect(inner)
+                           << visualRect(outer);
+                ok = false;
+            }
+        };
+        auto separated = [&](QQuickItem *text, QQuickItem *control) {
+            if (!leftOf(text, control)) {
+                qWarning() << nameOf(text) << "overlaps" << nameOf(control) << visualRect(text) << visualRect(control);
+                ok = false;
+            }
+        };
+        auto fixedWidth = [&](QQuickItem *item, qreal expected) {
+            if (qAbs(item->width() - expected) > 1.0) {
+                qWarning() << nameOf(item) << "width" << item->width() << "expected" << expected;
+                ok = false;
+            }
+        };
+
+        inside(allowancePanel, allowanceTitle);
+        inside(allowancePanel, allowanceDescription);
+        inside(allowancePanel, allowanceMinus);
+        inside(allowancePanel, allowanceValue);
+        inside(allowancePanel, allowancePlus);
+        separated(allowanceTitle, allowanceMinus);
+        separated(allowanceDescription, allowanceMinus);
+        fixedWidth(allowanceMinus, 38.0);
+        fixedWidth(allowanceValue, 34.0);
+        fixedWidth(allowancePlus, 38.0);
+
+        inside(dayPanel, dayTitle);
+        inside(dayPanel, dayDescription);
+        inside(dayPanel, dayMinus);
+        inside(dayPanel, dayValue);
+        inside(dayPanel, dayPlus);
+        separated(dayTitle, dayMinus);
+        separated(dayDescription, dayMinus);
+        fixedWidth(dayMinus, 38.0);
+        fixedWidth(dayValue, 46.0);
+        fixedWidth(dayPlus, 38.0);
+
+        inside(retentionPanel, retentionTitle);
+        inside(retentionPanel, retentionValue);
+        inside(retentionPanel, retentionSlider);
+        inside(retentionPanel, retentionDescription);
+        separated(retentionTitle, retentionValue);
+        if (!above(retentionSlider, retentionDescription)) {
+            qWarning() << "retention slider overlaps description" << visualRect(retentionSlider)
+                       << visualRect(retentionDescription);
+            ok = false;
+        }
+
+        inside(mathPanel, mathTitle);
+        inside(mathPanel, mathDescription);
+        inside(mathPanel, mathEngine);
+        separated(mathTitle, mathEngine);
+        separated(mathDescription, mathEngine);
+
+        inside(deckPanel, deckTitle);
+        inside(deckPanel, deckPath);
+        inside(deckPanel, deckEdit);
+        separated(deckTitle, deckEdit);
+        separated(deckPath, deckEdit);
+
+        return ok;
+    };
+
+    QVERIFY2(checkLayout(), "Settings geometry failed with English descriptions");
+
+    const qreal ordinaryAllowanceHeight = allowancePanel->height();
+    const qreal ordinaryRetentionHeight = retentionPanel->height();
+    const QString longDescription =
+        QStringLiteral("Keeps a large import manageable. ") +
+        QStringLiteral("A long translated description can wrap across many lines in this row. ").repeated(5);
+    allowanceDescription->setProperty("text", longDescription);
+    retentionDescription->setProperty("text", longDescription);
+    settle();
+
+    QVERIFY2(allowancePanel->height() > ordinaryAllowanceHeight + 1.0,
+             "New-card allowance box did not grow with its description");
+    QVERIFY2(retentionPanel->height() > ordinaryRetentionHeight + 1.0,
+             "Desired retention box did not grow with its description");
+    QVERIFY2(checkLayout(), "Settings geometry failed with long descriptions");
+
+    const QString longPath =
+        QStringLiteral("/home/learner/decks/") +
+        QStringLiteral("a-very-long-decks-directory-name-that-must-not-stretch-the-row/").repeated(6);
+    deckPath->setProperty("text", longPath);
+    settle();
+
+    const qreal deckPanelWidth = deckPanel->width();
+    const qreal deckPanelHeight = deckPanel->height();
+    QVERIFY2(checkLayout(), "Settings geometry failed with a long decks directory path");
+    QCOMPARE(deckPanel->width(), deckPanelWidth);
+    QCOMPARE(deckPanel->height(), deckPanelHeight);
+
+    QQuickItem *flickable = scroll->property("contentItem").value<QQuickItem *>();
+    QVERIFY(flickable);
+    const qreal maxContentY = qMax<qreal>(0.0, flickable->property("contentHeight").toReal() - flickable->height());
+    QVERIFY2(maxContentY > 0.0, "Settings content should scroll after boxes grow");
+    flickable->setProperty("contentY", maxContentY);
+    settle();
+    QVERIFY2(isInside(flickable, back), "Back button is not reachable by scrolling");
 }
 
 void TestBackend::backendAppliesNewCardLimit() {

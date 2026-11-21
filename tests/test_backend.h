@@ -19,6 +19,7 @@ private slots:
     void qmlCanNavigateLibraryCards();
     void qmlCramLabelUsesCurrentBox();
     void qmlGoodLabelUsesGoodCount();
+    void qmlSettingsRowsFitTheirContent();
     void backendAppliesNewCardLimit();
     void backendRequeuesAgainInSameSession();
     void unreadableDeckKeepsSchedulingState();

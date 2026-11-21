@@ -1134,11 +1134,13 @@ ApplicationWindow {
                     // ------------------------------------------------ settings
                     Item {
                         ScrollView {
+                            objectName: "settingsScrollView"
                             anchors.fill: parent
                             clip: true
                             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
                             ColumnLayout {
+                                objectName: "settingsColumn"
                                 width: Math.min(parent.width, 560)
                                 x: Math.max(0, (parent.width - width) / 2)
                                 spacing: 14
@@ -1159,20 +1161,32 @@ ApplicationWindow {
                             }
 
                             Panel {
+                                objectName: "settingsNewCardAllowancePanel"
                                 Layout.fillWidth: true
-                                implicitHeight: 72
+                                implicitHeight: allowanceRow.implicitHeight + 32
 
                                 RowLayout {
+                                    id: allowanceRow
                                     anchors.fill: parent
                                     anchors.margins: 16
                                     spacing: 12
 
                                     ColumnLayout {
                                         Layout.fillWidth: true
+                                        Layout.minimumWidth: 0
                                         spacing: 2
-                                        Label { text: qsTr("New cards per day"); color: win.text; font.pixelSize: 14 }
                                         Label {
+                                            objectName: "settingsNewCardAllowanceTitle"
                                             Layout.fillWidth: true
+                                            text: qsTr("New-card allowance")
+                                            color: win.text
+                                            font.pixelSize: 14
+                                            wrapMode: Text.Wrap
+                                        }
+                                        Label {
+                                            objectName: "settingsNewCardAllowanceDescription"
+                                            Layout.fillWidth: true
+                                            Layout.minimumWidth: 0
                                             text: qsTr("Keeps a large import manageable. 0 means review only.")
                                             color: win.muted
                                             font.pixelSize: 11
@@ -1181,45 +1195,66 @@ ApplicationWindow {
                                     }
 
                                     ActionButton {
+                                        objectName: "settingsNewCardAllowanceMinus"
                                         compact: true
                                         label: "−"
                                         implicitWidth: 38
+                                        Layout.minimumWidth: 38
+                                        Layout.maximumWidth: 38
                                         onClicked: backend.setNewPerDay(Math.max(0, backend.newPerDay - 1))
                                     }
 
                                     Label {
+                                        objectName: "settingsNewCardAllowanceValue"
                                         text: backend.newPerDay
                                         color: win.text
                                         font.pixelSize: 17
                                         font.family: "monospace"
                                         Layout.preferredWidth: 34
+                                        Layout.minimumWidth: 34
+                                        Layout.maximumWidth: 34
                                         horizontalAlignment: Text.AlignHCenter
                                     }
 
                                     ActionButton {
+                                        objectName: "settingsNewCardAllowancePlus"
                                         compact: true
                                         label: "+"
                                         implicitWidth: 38
+                                        Layout.minimumWidth: 38
+                                        Layout.maximumWidth: 38
                                         onClicked: backend.setNewPerDay(Math.min(999, backend.newPerDay + 1))
                                     }
                                 }
                             }
 
                             Panel {
+                                objectName: "settingsDayStartHourPanel"
                                 Layout.fillWidth: true
-                                implicitHeight: 72
+                                implicitHeight: dayRow.implicitHeight + 32
 
                                 RowLayout {
+                                    id: dayRow
                                     anchors.fill: parent
                                     anchors.margins: 16
                                     spacing: 12
 
                                     ColumnLayout {
                                         Layout.fillWidth: true
+                                        Layout.minimumWidth: 0
                                         spacing: 2
-                                        Label { text: qsTr("Day starts at"); color: win.text; font.pixelSize: 14 }
                                         Label {
+                                            objectName: "settingsDayStartHourTitle"
                                             Layout.fillWidth: true
+                                            text: qsTr("Day-start hour")
+                                            color: win.text
+                                            font.pixelSize: 14
+                                            wrapMode: Text.Wrap
+                                        }
+                                        Label {
+                                            objectName: "settingsDayStartHourDescription"
+                                            Layout.fillWidth: true
+                                            Layout.minimumWidth: 0
                                             text: qsTr("Cards due today unlock at this time, not at midnight.")
                                             color: win.muted
                                             font.pixelSize: 11
@@ -1228,35 +1263,46 @@ ApplicationWindow {
                                     }
 
                                     ActionButton {
+                                        objectName: "settingsDayStartHourMinus"
                                         compact: true
                                         label: "−"
                                         implicitWidth: 38
+                                        Layout.minimumWidth: 38
+                                        Layout.maximumWidth: 38
                                         onClicked: backend.setDayStartHour((backend.dayStartHour + 23) % 24)
                                     }
 
                                     Label {
+                                        objectName: "settingsDayStartHourValue"
                                         text: ("0" + backend.dayStartHour).slice(-2) + ":00"
                                         color: win.text
                                         font.pixelSize: 17
                                         font.family: "monospace"
                                         Layout.preferredWidth: 46
+                                        Layout.minimumWidth: 46
+                                        Layout.maximumWidth: 46
                                         horizontalAlignment: Text.AlignHCenter
                                     }
 
                                     ActionButton {
+                                        objectName: "settingsDayStartHourPlus"
                                         compact: true
                                         label: "+"
                                         implicitWidth: 38
+                                        Layout.minimumWidth: 38
+                                        Layout.maximumWidth: 38
                                         onClicked: backend.setDayStartHour((backend.dayStartHour + 1) % 24)
                                     }
                                 }
                             }
 
                             Panel {
+                                objectName: "settingsRetentionPanel"
                                 Layout.fillWidth: true
-                                implicitHeight: 104
+                                implicitHeight: retentionColumn.implicitHeight + 32
 
                                 ColumnLayout {
+                                    id: retentionColumn
                                     anchors.fill: parent
                                     anchors.margins: 16
                                     spacing: 6
@@ -1264,12 +1310,18 @@ ApplicationWindow {
                                     RowLayout {
                                         Layout.fillWidth: true
                                         Label {
+                                            objectName: "settingsRetentionTitle"
                                             Layout.fillWidth: true
+                                            Layout.minimumWidth: 0
                                             text: qsTr("Desired retention")
                                             color: win.text
                                             font.pixelSize: 14
+                                            wrapMode: Text.Wrap
                                         }
                                         Label {
+                                            id: retentionValue
+                                            objectName: "settingsRetentionValue"
+                                            Layout.minimumWidth: retentionValue.implicitWidth
                                             text: Math.round(retentionSlider.value * 100) + "%"
                                             color: theme.accent
                                             font.pixelSize: 14
@@ -1279,7 +1331,9 @@ ApplicationWindow {
 
                                     Slider {
                                         id: retentionSlider
+                                        objectName: "settingsRetentionSlider"
                                         Layout.fillWidth: true
+                                        Layout.minimumWidth: 0
                                         from: 0.70
                                         to: 0.99
                                         stepSize: 0.01
@@ -1289,7 +1343,9 @@ ApplicationWindow {
                                     }
 
                                     Label {
+                                        objectName: "settingsRetentionDescription"
                                         Layout.fillWidth: true
+                                        Layout.minimumWidth: 0
                                         text: qsTr("Higher retention shortens intervals and means more reviews.")
                                         color: win.muted
                                         font.pixelSize: 11
@@ -1299,26 +1355,43 @@ ApplicationWindow {
                             }
 
                             Panel {
+                                objectName: "settingsMathPanel"
                                 Layout.fillWidth: true
-                                implicitHeight: 72
+                                implicitHeight: mathRow.implicitHeight + 32
 
                                 RowLayout {
+                                    id: mathRow
                                     anchors.fill: parent
                                     anchors.margins: 16
                                     spacing: 12
 
                                     ColumnLayout {
                                         Layout.fillWidth: true
+                                        Layout.minimumWidth: 0
                                         spacing: 2
-                                        Label { text: qsTr("Math"); color: win.text; font.pixelSize: 14 }
                                         Label {
+                                            objectName: "settingsMathTitle"
+                                            Layout.fillWidth: true
+                                            text: qsTr("Math")
+                                            color: win.text
+                                            font.pixelSize: 14
+                                            wrapMode: Text.Wrap
+                                        }
+                                        Label {
+                                            objectName: "settingsMathDescription"
+                                            Layout.fillWidth: true
+                                            Layout.minimumWidth: 0
                                             text: qsTr("Cached under ~/.cache/omacards/math")
                                             color: win.muted
                                             font.pixelSize: 11
+                                            wrapMode: Text.Wrap
                                         }
                                     }
 
                                     Label {
+                                        id: mathEngine
+                                        objectName: "settingsMathEngine"
+                                        Layout.minimumWidth: mathEngine.implicitWidth
                                         text: backend.mathEngine
                                         color: win.muted
                                         font.pixelSize: 12
@@ -1327,20 +1400,32 @@ ApplicationWindow {
                             }
 
                             Panel {
+                                objectName: "settingsDeckFilesPanel"
                                 Layout.fillWidth: true
-                                implicitHeight: 72
+                                implicitHeight: deckRow.implicitHeight + 32
 
                                 RowLayout {
+                                    id: deckRow
                                     anchors.fill: parent
                                     anchors.margins: 16
                                     spacing: 12
 
                                     ColumnLayout {
                                         Layout.fillWidth: true
+                                        Layout.minimumWidth: 0
                                         spacing: 2
-                                        Label { text: qsTr("Deck files"); color: win.text; font.pixelSize: 14 }
                                         Label {
+                                            objectName: "settingsDeckFilesTitle"
                                             Layout.fillWidth: true
+                                            text: qsTr("Deck files")
+                                            color: win.text
+                                            font.pixelSize: 14
+                                            wrapMode: Text.Wrap
+                                        }
+                                        Label {
+                                            objectName: "settingsDeckFilesPath"
+                                            Layout.fillWidth: true
+                                            Layout.minimumWidth: 0
                                             text: backend.decksDirectory
                                             color: win.muted
                                             font.pixelSize: 11
@@ -1349,9 +1434,13 @@ ApplicationWindow {
                                     }
 
                                     ActionButton {
+                                        id: deckEditButton
+                                        objectName: "settingsDeckFilesEditButton"
                                         compact: true
                                         label: qsTr("Edit file")
                                         hint: "E"
+                                        Layout.minimumWidth: deckEditButton.implicitWidth
+                                        Layout.maximumWidth: deckEditButton.implicitWidth
                                         onClicked: backend.editDeckFile()
                                     }
                                 }
@@ -1364,6 +1453,7 @@ ApplicationWindow {
                                 spacing: 10
 
                                 ActionButton {
+                                    objectName: "settingsBack"
                                     label: qsTr("Back")
                                     hint: "Esc"
                                     onClicked: win.goHome()
