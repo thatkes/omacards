@@ -35,7 +35,7 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantList deckList READ deckSummaries NOTIFY decksChanged)
     Q_PROPERTY(int reviewed READ reviewed NOTIFY statsChanged)
     Q_PROPERTY(int correct READ correct NOTIFY statsChanged)
-    Q_PROPERTY(int box READ box NOTIFY statsChanged)
+    Q_PROPERTY(int currentBox READ currentBox NOTIFY statsChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(QString mathEngine READ mathEngine CONSTANT)
     Q_PROPERTY(int totalCards READ totalCards NOTIFY decksChanged)
@@ -77,7 +77,7 @@ public:
     int streak() const { return m_store.summary(m_dayStartHour).streakDays; }
     int reviewed() const { return m_session.reviewed(); }
     int correct() const { return m_session.correct(); }
-    int box() const { return m_session.box(); }
+    int currentBox() const { return m_session.currentBox(); }
     QString status() const { return m_session.status(); }
     QString mathEngine() const;
     int totalCards() const { return m_deckRepo.totalCards(); }

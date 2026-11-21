@@ -24,7 +24,7 @@ private slots:
     void checkDeckScoping();
     void readCommandJsonContracts();
     void reviewCommandContract();
-    void cramCommandDeterminism();
+    void cramCommandContract();
     void addCardJsonContracts();
     void cardsJsonPreservesUnknownFileType();
     void addCardsInputValidationErrors();

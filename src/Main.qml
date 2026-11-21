@@ -667,11 +667,12 @@ ApplicationWindow {
 
                                     Label {
                                         Layout.alignment: Qt.AlignHCenter
+                                        objectName: "cramBoxLabel"
                                         text: {
                                             if (!backend.hasCard)
                                                 return qsTr("SESSION")
                                             return backend.mode === "cram"
-                                                   ? qsTr("CRAM · BOX %1 OF 5").arg(backend.box)
+                                                   ? qsTr("CRAM · BOX %1 OF 5").arg(backend.currentBox)
                                                    : qsTr("REVIEW · %1 DUE").arg(backend.dueCount)
                                         }
                                         color: win.muted
