@@ -178,7 +178,6 @@ Theme watching follows Omacut and Monologue (MIT, David Heinemeier Hansson).
 - Install script
 - Tectonic warming script
 - Fix tray entry
-- Fix settings UI
 - Update README.md pictures
 - Update settings list in README.md
 - Redo deck format in README.md

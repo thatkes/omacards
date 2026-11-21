@@ -110,6 +110,20 @@ _Avoid_: new cards per day, daily cap, new budget
 The probability of recall that Review scheduling aims to maintain.
 _Avoid_: retention target, target recall
 
+### Settings
+
+**Settings**:
+The learner-chosen values that govern the New-card allowance, the start of a Study day and Desired retention.
+_Avoid_: preferences, options, configuration
+
+**Settings screen**:
+The screen that shows the Settings a learner can change.
+_Avoid_: settings dialog, settings window, preferences pane
+
+**Day-start hour**:
+The local hour at which a Study day begins.
+_Avoid_: day start, day starts at, rollover hour
+
 ### Validation
 
 **Deck issue**:
