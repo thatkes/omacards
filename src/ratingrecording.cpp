@@ -8,7 +8,7 @@ RatingRecording::Result RatingRecording::record(const Card &card, Rating rating,
     FsrsState state = m_store.states().value(card.id);
     const QString storedHash = m_store.hashes().value(card.id);
     if (!m_store.lastError().isEmpty())
-        return Result{false, state, 0, m_store.lastError()};
+        return Result{false, state, 0, m_store.lastError(), FailurePhase::SchedulingRead};
     if (storedHash != hash)
         state = FsrsState{};
     const bool wasNew = state.reps == 0;
@@ -18,9 +18,9 @@ RatingRecording::Result RatingRecording::record(const Card &card, Rating rating,
     m_store.save(card.id, hash, reviewed.state);
     m_store.logReview(card.id, Domain::toInt(rating), now, reviewed.state, reviewed.intervalDays, wasNew);
     if (!m_store.lastError().isEmpty())
-        return Result{false, state, 0, m_store.lastError()};
+        return Result{false, state, 0, m_store.lastError(), FailurePhase::StoreWrite};
 
-    return Result{true, reviewed.state, reviewed.intervalDays, {}};
+    return Result{true, reviewed.state, reviewed.intervalDays, {}, FailurePhase::None};
 }
 
 StoreRatingAdapter::StoreRatingAdapter(Store &store) : m_store(store) {}

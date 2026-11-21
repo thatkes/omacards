@@ -829,8 +829,12 @@ int run(const QStringList &arguments) {
         RatingRecording recording(storeAdapter);
         const RatingRecording::Result result =
             recording.record(*target, rating, backend.desiredRetention(), QDateTime::currentMSecsSinceEpoch());
-        if (!result.ok)
-            return fail(QObject::tr("Cannot save review: %1").arg(result.storeError), json);
+        if (!result.ok) {
+            const QString message = result.failurePhase == RatingRecording::FailurePhase::SchedulingRead
+                                        ? QObject::tr("Cannot read scheduling state: %1")
+                                        : QObject::tr("Cannot save review: %1");
+            return fail(message.arg(result.storeError), json);
+        }
 
         QJsonObject object;
         object.insert("ok", true);

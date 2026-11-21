@@ -26,11 +26,14 @@ public:
         virtual QString lastError() const = 0;
     };
 
+    enum class FailurePhase { None, SchedulingRead, StoreWrite };
+
     struct Result {
         bool ok = false;
         FsrsState state; // starting state on failure, updated state on success
         int intervalDays = 0;
         QString storeError;
+        FailurePhase failurePhase = FailurePhase::None;
     };
 
     explicit RatingRecording(StoreAdapter &store);

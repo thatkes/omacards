@@ -671,6 +671,48 @@ void TestCli::reviewWrapsStoreErrors() {
     QCOMPARE(sortedKeys(failure), QStringList({"error", "ok"}));
     QVERIFY(!failure.value(QStringLiteral("ok")).toBool());
     const QString message = failure.value(QStringLiteral("error")).toString();
+    QVERIFY2(message.startsWith(QStringLiteral("Cannot read scheduling state: ")), qPrintable(message));
+    QVERIFY(message.size() > QStringLiteral("Cannot read scheduling state: ").size());
+}
+
+void TestCli::reviewWrapsWriteStoreErrors() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    EnvGuard env(decks, database);
+
+    QString cardId;
+    {
+        auto owned = Backend::fromEnvironment();
+        QString error;
+        QVERIFY(owned->initialize(&error));
+        QVERIFY(owned->createDeck("Failure", &error));
+        QVERIFY(owned->createCard("Failure", "Q", "A", "basic", {}, &error));
+        cardId = owned->allDecks().first().cards.first().id;
+    }
+    QVERIFY(!cardId.isEmpty());
+
+    // Keep the scheduling read working, but leave the history table unable
+    // to accept the append so only the write fails.
+    const QString connection = QStringLiteral("cli-broken-history");
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
+        db.setDatabaseName(database);
+        QVERIFY(db.open());
+        QSqlQuery query(db);
+        QVERIFY(query.exec(QStringLiteral("DROP TABLE reviews")));
+        QVERIFY(query.exec(QStringLiteral("CREATE TABLE reviews (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                                          "card_id TEXT NOT NULL, new_card INTEGER NOT NULL DEFAULT 0)")));
+    }
+    QSqlDatabase::removeDatabase(connection);
+
+    int code = -1;
+    const QJsonObject failure = runCli({"review", "-c", cardId, "-r", "3", "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QCOMPARE(sortedKeys(failure), QStringList({"error", "ok"}));
+    QVERIFY(!failure.value(QStringLiteral("ok")).toBool());
+    const QString message = failure.value(QStringLiteral("error")).toString();
     QVERIFY2(message.startsWith(QStringLiteral("Cannot save review: ")), qPrintable(message));
     QVERIFY(message.size() > QStringLiteral("Cannot save review: ").size());
 }

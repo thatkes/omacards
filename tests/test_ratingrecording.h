@@ -11,4 +11,5 @@ private slots:
     void contentHashMismatchStartsFromEmptySchedulingState();
     void reviewHistoryRecordsWhetherCardWasNew();
     void storeWriteFailureReturnsRawErrorAndKeepsStartingState();
+    void storeReadFailureReturnsRawErrorAndReadPhase();
 };

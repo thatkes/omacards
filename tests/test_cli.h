@@ -25,6 +25,7 @@ private slots:
     void readCommandJsonContracts();
     void reviewCommandContract();
     void reviewWrapsStoreErrors();
+    void reviewWrapsWriteStoreErrors();
     void cramCommandContract();
     void addCardJsonContracts();
     void cardsJsonPreservesUnknownFileType();

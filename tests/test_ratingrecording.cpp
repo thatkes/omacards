@@ -35,7 +35,11 @@ struct LoggedReview {
 class StubStore : public RatingRecording::StoreAdapter {
 public:
     void clearError() override { m_error.clear(); }
-    QHash<QString, FsrsState> states() const override { return m_states; }
+    QHash<QString, FsrsState> states() const override {
+        if (!m_readError.isEmpty())
+            m_error = m_readError;
+        return m_states;
+    }
     QHash<QString, QString> hashes() const override { return m_hashes; }
 
     void save(const QString &cardId, const QString &hash, const FsrsState &state) override {
@@ -62,6 +66,7 @@ public:
     }
 
     void failWrites(const QString &error) { m_writeError = error; }
+    void failReads(const QString &error) { m_readError = error; }
 
     FsrsState savedState(const QString &cardId) const { return m_states.value(cardId); }
     QVector<LoggedReview> reviews() const { return m_reviews; }
@@ -71,7 +76,8 @@ private:
     QHash<QString, QString> m_hashes;
     QVector<LoggedReview> m_reviews;
     QString m_writeError;
-    QString m_error;
+    QString m_readError;
+    mutable QString m_error;
 };
 
 void verifyState(const FsrsState &state, double stability, double difficulty, qint64 due, int reps, int lapses) {
@@ -206,6 +212,7 @@ void TestRatingRecording::storeWriteFailureReturnsRawErrorAndKeepsStartingState(
     const RatingRecording::Result result = recording.record(card, Rating::Good, 0.9, kNow);
 
     QVERIFY(!result.ok);
+    QCOMPARE(result.failurePhase, RatingRecording::FailurePhase::StoreWrite);
     QCOMPARE(result.storeError, QStringLiteral("disk full"));
     QCOMPARE(result.intervalDays, 0);
     QCOMPARE(result.state.stability, 6.0);
@@ -219,4 +226,18 @@ void TestRatingRecording::storeWriteFailureReturnsRawErrorAndKeepsStartingState(
     QCOMPARE(saved.stability, 6.0);
     QCOMPARE(saved.due, kNow - 2 * kDayMs);
     QCOMPARE(saved.reps, 3);
+}
+
+void TestRatingRecording::storeReadFailureReturnsRawErrorAndReadPhase() {
+    const Card card = makeCard(QStringLiteral("read-fail"), QStringLiteral("Read?"), QStringLiteral("A"));
+    StubStore store;
+    store.failReads(QStringLiteral("no such column: stability"));
+    RatingRecording recording(store);
+
+    const RatingRecording::Result result = recording.record(card, Rating::Good, 0.9, kNow);
+
+    QVERIFY(!result.ok);
+    QCOMPARE(result.failurePhase, RatingRecording::FailurePhase::SchedulingRead);
+    QCOMPARE(result.storeError, QStringLiteral("no such column: stability"));
+    QVERIFY(store.reviews().isEmpty());
 }
