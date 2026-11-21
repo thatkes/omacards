@@ -18,6 +18,7 @@
 #include "test_domain.h"
 #include "test_studyplanner.h"
 #include "test_studysession.h"
+#include "test_ratingrecording.h"
 #include "test_importer.h"
 #include "test_deckrepository.h"
 #include "test_translator.h"
@@ -80,6 +81,7 @@ int main(int argc, char **argv) {
     TestDomain domain;
     TestStudyPlanner studyplanner;
     TestStudySession studysession;
+    TestRatingRecording ratingrecording;
     TestImporter importer;
     TestDeckRepository deckrepository;
     TestTranslator translator;
@@ -98,6 +100,7 @@ int main(int argc, char **argv) {
         {QStringLiteral("TestDomain"), &domain},
         {QStringLiteral("TestStudyPlanner"), &studyplanner},
         {QStringLiteral("TestStudySession"), &studysession},
+        {QStringLiteral("TestRatingRecording"), &ratingrecording},
         {QStringLiteral("TestImporter"), &importer},
         {QStringLiteral("TestDeckRepository"), &deckrepository},
         {QStringLiteral("TestTranslator"), &translator},

@@ -18,6 +18,7 @@ HEADERS += \
     src/store.h \
     src/studyplanner.h \
     src/insessionprogression.h \
+    src/ratingrecording.h \
     src/studysession.h \
     src/theme.h \
     src/traycontroller.h \
@@ -37,6 +38,7 @@ SOURCES += \
     src/store.cpp \
     src/studyplanner.cpp \
     src/insessionprogression.cpp \
+    src/ratingrecording.cpp \
     src/studysession.cpp \
     src/theme.cpp \
     src/traycontroller.cpp \
