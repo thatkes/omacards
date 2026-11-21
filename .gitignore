@@ -5,5 +5,17 @@
 
 # Local-only agent instructions; keep out of the remote.
 /AGENTS.md
+/docs/agents/
+# src/skill/SKILL.md is product code: it is bundled and installed by the CLI.
+
+# Local-only maintainer teaching workspace; keep out of the remote.
+/MISSION.md
+/NOTES.md
+/RESOURCES.md
+/assets/
+/learning-records/
+/lessons/
+/reference/
+
 # Inert while this file is tracked; applies if it is ever untracked.
 /.gitignore
