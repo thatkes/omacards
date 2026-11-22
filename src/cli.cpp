@@ -149,6 +149,102 @@ int fail(const QString &message, bool json) {
     return 1;
 }
 
+struct DeckIssueReport {
+    QJsonArray entries;
+    QStringList lines;
+    int errors = 0;
+    int warnings = 0;
+};
+
+// Same resolution order as check: a loaded Deck name first, then the deck
+// filename fallback for the supported suffixes.
+QString resolveDeckPath(const QVector<Deck> &decks, const QString &decksDirectory, const QString &deckName) {
+    for (const Deck &deck : decks) {
+        if (deck.name == deckName)
+            return deck.path;
+    }
+    if (!deckName.isEmpty()) {
+        const QDir dir(decksDirectory);
+        const QString base = DeckIO::safeFileName(deckName);
+        for (const QString &suffix : {QStringLiteral(".txt"), QStringLiteral(".deck")}) {
+            const QString candidate = dir.filePath(base + suffix);
+            if (QFileInfo::exists(candidate))
+                return candidate;
+        }
+    }
+    return {};
+}
+
+DeckIssueReport deckIssueReport(const QString &decksDirectory, const QString &targetPath) {
+    DeckIssueReport report;
+    for (const DeckIssue &issue : DeckIO::lint(decksDirectory)) {
+        if (!targetPath.isEmpty() && issue.path != targetPath)
+            continue;
+        QJsonObject entry;
+        entry.insert("path", issue.path);
+        if (!issue.card.isEmpty())
+            entry.insert("card", issue.card);
+        if (issue.line > 0)
+            entry.insert("line", issue.line);
+        entry.insert("severity", issue.severity);
+        entry.insert("message", issue.message);
+        entry.insert("hint", issue.hint);
+        report.entries << entry;
+        if (issue.severity == QLatin1String("error"))
+            ++report.errors;
+        else
+            ++report.warnings;
+        report.lines << QStringLiteral("%1:%2 %3: %4 (%5)")
+                            .arg(issue.path)
+                            .arg(issue.line)
+                            .arg(issue.severity, issue.message, issue.hint);
+    }
+    return report;
+}
+
+QJsonObject issueCountsJson(const DeckIssueReport &report) {
+    QJsonObject counts;
+    counts.insert("error", report.errors);
+    counts.insert("warning", report.warnings);
+    return counts;
+}
+
+QString checkCommandHint(const QString &deckName) {
+    bool needsQuotes = false;
+    for (const QChar ch : deckName) {
+        if (ch.isSpace()) {
+            needsQuotes = true;
+            break;
+        }
+    }
+    if (!needsQuotes)
+        return QStringLiteral("omacards check --deck %1").arg(deckName);
+    QString escaped = deckName;
+    escaped.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
+    return QStringLiteral("omacards check --deck '%1'").arg(escaped);
+}
+
+int failEmptyDeck(const QString &deckName, const DeckIssueReport &report, bool json) {
+    const QString message = QObject::tr("Deck %1 has no Cards").arg(deckName);
+    const QString hint = checkCommandHint(deckName);
+    if (json) {
+        QJsonObject object;
+        object.insert("ok", false);
+        object.insert("error", message);
+        object.insert("deck", deckName);
+        object.insert("issues", report.entries);
+        object.insert("issueCounts", issueCountsJson(report));
+        object.insert("hint", hint);
+        write(object, true, {});
+    } else {
+        fprintf(stderr, "%s\n", qPrintable(message));
+        for (const QString &line : report.lines)
+            fprintf(stderr, "%s\n", qPrintable(line));
+        fprintf(stderr, "%s\n", qPrintable(hint));
+    }
+    return 1;
+}
+
 QVector<Card> allCards(const QVector<Deck> &decks, const QString &deckName) {
     QVector<Card> cards;
     for (const Deck &deck : decks) {
@@ -318,30 +414,10 @@ int run(const QStringList &arguments) {
     const bool json = options.json;
 
     if (options.command == "check") {
-        QString targetPath;
-        if (!options.deck.isEmpty()) {
-            for (const Deck &deck : decks) {
-                if (deck.name == options.deck) {
-                    targetPath = deck.path;
-                    break;
-                }
-            }
-            if (targetPath.isEmpty()) {
-                // A deck with parse errors is skipped by loadAll(), but its
-                // issues are exactly what --deck is for: resolve its file.
-                const QDir dir(backend.decksDirectory());
-                const QString base = DeckIO::safeFileName(options.deck);
-                for (const QString &suffix : {QStringLiteral(".txt"), QStringLiteral(".deck")}) {
-                    const QString candidate = dir.filePath(base + suffix);
-                    if (QFileInfo::exists(candidate)) {
-                        targetPath = candidate;
-                        break;
-                    }
-                }
-            }
-            if (targetPath.isEmpty())
-                return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
-        }
+        const QString targetPath =
+            options.deck.isEmpty() ? QString() : resolveDeckPath(decks, backend.decksDirectory(), options.deck);
+        if (!options.deck.isEmpty() && targetPath.isEmpty())
+            return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
 
         QVector<Deck> checkedDecks;
         if (targetPath.isEmpty()) {
@@ -389,38 +465,10 @@ int run(const QStringList &arguments) {
             }
         }
 
-        QVector<DeckIssue> issues;
-        for (const DeckIssue &issue : DeckIO::lint(backend.decksDirectory())) {
-            if (targetPath.isEmpty() || issue.path == targetPath)
-                issues << issue;
-        }
-        QJsonArray issueArray;
-        QStringList issueLines;
-        int errors = 0;
-        int warnings = 0;
-        for (const DeckIssue &issue : issues) {
-            QJsonObject entry;
-            entry.insert("path", issue.path);
-            if (!issue.card.isEmpty())
-                entry.insert("card", issue.card);
-            if (issue.line > 0)
-                entry.insert("line", issue.line);
-            entry.insert("severity", issue.severity);
-            entry.insert("message", issue.message);
-            entry.insert("hint", issue.hint);
-            issueArray << entry;
-            if (issue.severity == QLatin1String("error"))
-                ++errors;
-            else
-                ++warnings;
-            issueLines << QStringLiteral("%1:%2 %3: %4 (%5)")
-                              .arg(issue.path)
-                              .arg(issue.line)
-                              .arg(issue.severity, issue.message, issue.hint);
-        }
+        const DeckIssueReport report = deckIssueReport(backend.decksDirectory(), targetPath);
 
         QJsonObject object;
-        object.insert("ok", errors == 0);
+        object.insert("ok", report.errors == 0);
         object.insert("version", QString("0.1.0"));
         if (!options.deck.isEmpty())
             object.insert("deck", options.deck);
@@ -435,11 +483,8 @@ int run(const QStringList &arguments) {
         object.insert("math", backend.mathEngine());
         object.insert("decksDir", backend.decksDirectory());
         object.insert("database", backend.databasePath());
-        object.insert("issues", issueArray);
-        QJsonObject counts;
-        counts.insert("error", errors);
-        counts.insert("warning", warnings);
-        object.insert("issueCounts", counts);
+        object.insert("issues", report.entries);
+        object.insert("issueCounts", issueCountsJson(report));
         if (options.math)
             object.insert("mathWarnings", mathWarnings);
         QString human = QObject::tr("%1 decks · %2 cards · %3 due · math: %4")
@@ -447,15 +492,18 @@ int run(const QStringList &arguments) {
                             .arg(total)
                             .arg(due)
                             .arg(backend.mathEngine());
-        human += QStringLiteral("\n%1 issues · %2 errors · %3 warnings").arg(issues.size()).arg(errors).arg(warnings);
-        if (!issueLines.isEmpty())
-            human += QLatin1String("\n") + issueLines.join(QLatin1String("\n"));
+        human += QStringLiteral("\n%1 issues · %2 errors · %3 warnings")
+                     .arg(report.entries.size())
+                     .arg(report.errors)
+                     .arg(report.warnings);
+        if (!report.lines.isEmpty())
+            human += QLatin1String("\n") + report.lines.join(QLatin1String("\n"));
         if (options.math) {
             human += QLatin1String("\n");
             human += warningLines.isEmpty() ? QObject::tr("No math warnings") : warningLines.join('\n');
         }
         write(object, json, human);
-        if (options.strict && !issues.isEmpty())
+        if (options.strict && !report.entries.isEmpty())
             return 1;
         return 0;
     }
@@ -473,8 +521,16 @@ int run(const QStringList &arguments) {
                     filtered << card;
             cards = filtered;
         }
-        if (cards.isEmpty())
+        if (cards.isEmpty()) {
+            // A --card miss keeps the old message; only an existing Deck file
+            // that yields no Cards gets the empty-Deck diagnostic.
+            if (options.card.isEmpty()) {
+                const QString targetPath = resolveDeckPath(decks, backend.decksDirectory(), options.deck);
+                if (!targetPath.isEmpty() && QFileInfo::exists(targetPath))
+                    return failEmptyDeck(options.deck, deckIssueReport(backend.decksDirectory(), targetPath), json);
+            }
             return fail(QObject::tr("No cards to preview"), json);
+        }
 
         constexpr double previewMathScale = 1.6; // Match the review answer label size.
         MathRenderer renderer;

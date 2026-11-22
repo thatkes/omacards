@@ -114,7 +114,7 @@ Q: The {{c1::cat}} sleeps.
 type: cloze
 ```
 
-Questions and answers may span multiple lines: indent every continuation line with exactly two spaces. `omacards check` reports lines with more indentation as format issues.
+Questions and answers may span multiple lines: indent every continuation line with exactly two spaces. `omacards check` reports lines with more indentation as Deck issues.
 
 A card's id is a hash of its deck, question and answer, so editing a card resets its FSRS state but keeps the file readable. An explicit `id:` line pins the identity across edits.
 

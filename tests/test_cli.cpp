@@ -28,6 +28,14 @@ QStringList sortedKeys(const QJsonObject &object) {
     return keys;
 }
 
+QString checkIssueLine(const QJsonObject &issue) {
+    return QStringLiteral("%1:%2 %3: %4 (%5)")
+        .arg(issue.value(QStringLiteral("path")).toString())
+        .arg(issue.value(QStringLiteral("line")).toInt())
+        .arg(issue.value(QStringLiteral("severity")).toString(), issue.value(QStringLiteral("message")).toString(),
+             issue.value(QStringLiteral("hint")).toString());
+}
+
 } // namespace
 
 void TestCli::helpIsHeadless() {
@@ -1001,6 +1009,151 @@ void TestCli::previewJsonContracts() {
     QStringList itemKeys{"id", "questionHtml", "answerHtml"};
     itemKeys.sort();
     QCOMPARE(sortedKeys(item), itemKeys);
+}
+
+void TestCli::previewZeroCardDeckDiagnostics() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    EnvGuard env(decks, database);
+
+    const QDir deckDir(decks);
+    QVERIFY(writeFile(deckDir.filePath("Broken.txt"), R"deck(# Deck: Broken
+---
+oops: not a key
+   too much indent
+)deck"));
+    QVERIFY(writeFile(deckDir.filePath("Empty.txt"), "# Deck: Empty\n"));
+    // The supplied name differs from both the filename and the header name.
+    QVERIFY(writeFile(deckDir.filePath("Quoted-Name.txt"), "# Deck: Different Name\n"));
+    QVERIFY(writeFile(deckDir.filePath("Good.txt"), "# Deck: Good\n---\nQ: Q?\nA: A\n"));
+
+    int code = -1;
+    QByteArray stderrOutput;
+    const QStringList failureKeys{"deck", "error", "hint", "issueCounts", "issues", "ok"};
+
+    // A malformed deck file with zero Cards: the JSON failure keeps ok/error
+    // and adds the same Deck issues that check reports for that Deck.
+    const QJsonObject check = runCli({"check", "--deck", "Broken", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    const QJsonArray checkIssues = check.value(QStringLiteral("issues")).toArray();
+    QVERIFY(checkIssues.size() >= 2);
+
+    const QJsonObject broken = runCli({"preview", "--deck", "Broken", "--json"}, decks, database, &code, &stderrOutput);
+    QCOMPARE(code, 1);
+    QVERIFY(stderrOutput.isEmpty());
+    QCOMPARE(sortedKeys(broken), failureKeys);
+    QVERIFY(!broken.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(broken.value(QStringLiteral("error")).toString(), QStringLiteral("Deck Broken has no Cards"));
+    QCOMPARE(broken.value(QStringLiteral("deck")).toString(), QStringLiteral("Broken"));
+    QCOMPARE(broken.value(QStringLiteral("hint")).toString(), QStringLiteral("omacards check --deck Broken"));
+    QCOMPARE(QJsonDocument(broken.value(QStringLiteral("issues")).toArray()).toJson(QJsonDocument::Compact),
+             QJsonDocument(checkIssues).toJson(QJsonDocument::Compact));
+    const QJsonObject counts = broken.value(QStringLiteral("issueCounts")).toObject();
+    QCOMPARE(sortedKeys(counts), QStringList({"error", "warning"}));
+    QCOMPARE(counts.value(QStringLiteral("error")).toInt(),
+             check.value(QStringLiteral("issueCounts")).toObject().value(QStringLiteral("error")).toInt());
+    QCOMPARE(counts.value(QStringLiteral("warning")).toInt(),
+             check.value(QStringLiteral("issueCounts")).toObject().value(QStringLiteral("warning")).toInt());
+    bool sawError = false;
+    bool sawWarning = false;
+    bool sawLine = false;
+    for (const QJsonValue &value : broken.value(QStringLiteral("issues")).toArray()) {
+        const QJsonObject issue = value.toObject();
+        QVERIFY(issue.contains(QStringLiteral("path")));
+        QVERIFY(!issue.value(QStringLiteral("severity")).toString().isEmpty());
+        QVERIFY(!issue.value(QStringLiteral("message")).toString().isEmpty());
+        QVERIFY(!issue.value(QStringLiteral("hint")).toString().isEmpty());
+        sawError |= issue.value(QStringLiteral("severity")).toString() == QStringLiteral("error");
+        sawWarning |= issue.value(QStringLiteral("severity")).toString() == QStringLiteral("warning");
+        sawLine |= issue.value(QStringLiteral("line")).toInt() > 0;
+    }
+    QVERIFY(sawError);
+    QVERIFY(sawWarning);
+    QVERIFY(sawLine);
+
+    // Text mode puts the whole diagnostic on stderr and nothing on stdout.
+    const QString brokenText = runCliText({"preview", "--deck", "Broken"}, decks, database, &code, &stderrOutput);
+    QCOMPARE(code, 1);
+    QVERIFY(brokenText.isEmpty());
+    QStringList expectedLines{"Deck Broken has no Cards"};
+    for (const QJsonValue &value : checkIssues)
+        expectedLines << checkIssueLine(value.toObject());
+    expectedLines << QStringLiteral("omacards check --deck Broken");
+    QCOMPARE(QString::fromUtf8(stderrOutput), expectedLines.join('\n') + '\n');
+
+    // A valid empty Deck has no Deck issues but still gets the hint.
+    const QJsonObject empty = runCli({"preview", "--deck", "Empty", "--json"}, decks, database, &code, &stderrOutput);
+    QCOMPARE(code, 1);
+    QVERIFY(stderrOutput.isEmpty());
+    QCOMPARE(sortedKeys(empty), failureKeys);
+    QCOMPARE(empty.value(QStringLiteral("error")).toString(), QStringLiteral("Deck Empty has no Cards"));
+    QCOMPARE(empty.value(QStringLiteral("deck")).toString(), QStringLiteral("Empty"));
+    QVERIFY(empty.value(QStringLiteral("issues")).toArray().isEmpty());
+    const QJsonObject emptyCounts = empty.value(QStringLiteral("issueCounts")).toObject();
+    QCOMPARE(emptyCounts.value(QStringLiteral("error")).toInt(), 0);
+    QCOMPARE(emptyCounts.value(QStringLiteral("warning")).toInt(), 0);
+    QCOMPARE(empty.value(QStringLiteral("hint")).toString(), QStringLiteral("omacards check --deck Empty"));
+
+    const QString emptyText = runCliText({"preview", "--deck", "Empty"}, decks, database, &code, &stderrOutput);
+    QCOMPARE(code, 1);
+    QVERIFY(emptyText.isEmpty());
+    QCOMPARE(QString::fromUtf8(stderrOutput), QStringLiteral("Deck Empty has no Cards\nomacards check --deck Empty\n"));
+
+    // The hint uses the supplied name, quoted only when it has whitespace,
+    // even when the Deck file and header use different names.
+    const QJsonObject quoted =
+        runCli({"preview", "--deck", "Quoted Name", "--json"}, decks, database, &code, &stderrOutput);
+    QCOMPARE(code, 1);
+    QCOMPARE(quoted.value(QStringLiteral("deck")).toString(), QStringLiteral("Quoted Name"));
+    QCOMPARE(quoted.value(QStringLiteral("hint")).toString(), QStringLiteral("omacards check --deck 'Quoted Name'"));
+    const QString quotedText = runCliText({"preview", "--deck", "Quoted Name"}, decks, database, &code, &stderrOutput);
+    QCOMPARE(code, 1);
+    QVERIFY(quotedText.isEmpty());
+    QVERIFY(QString::fromUtf8(stderrOutput).endsWith("omacards check --deck 'Quoted Name'\n"));
+
+    // A missing Deck keeps the old message and its old two-key JSON shape.
+    const QJsonObject missing =
+        runCli({"preview", "--deck", "Missing", "--json"}, decks, database, &code, &stderrOutput);
+    QCOMPARE(code, 1);
+    QVERIFY(stderrOutput.isEmpty());
+    QCOMPARE(sortedKeys(missing), QStringList({"error", "ok"}));
+    QVERIFY(!missing.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(missing.value(QStringLiteral("error")).toString(), QStringLiteral("No cards to preview"));
+    const QString missingText = runCliText({"preview", "--deck", "Missing"}, decks, database, &code, &stderrOutput);
+    QCOMPARE(code, 1);
+    QVERIFY(missingText.isEmpty());
+    QCOMPARE(QString::fromUtf8(stderrOutput), QStringLiteral("No cards to preview\n"));
+
+    // A --card miss also keeps the old message even though the Deck file exists.
+    const QJsonObject filtered =
+        runCli({"preview", "--deck", "Good", "--card", "nope", "--json"}, decks, database, &code, &stderrOutput);
+    QCOMPARE(code, 1);
+    QVERIFY(stderrOutput.isEmpty());
+    QCOMPARE(sortedKeys(filtered), QStringList({"error", "ok"}));
+    QCOMPARE(filtered.value(QStringLiteral("error")).toString(), QStringLiteral("No cards to preview"));
+    const QString filteredText =
+        runCliText({"preview", "--deck", "Good", "--card", "nope"}, decks, database, &code, &stderrOutput);
+    QCOMPARE(code, 1);
+    QVERIFY(filteredText.isEmpty());
+    QCOMPARE(QString::fromUtf8(stderrOutput), QStringLiteral("No cards to preview\n"));
+
+    // A preview with Cards is unchanged in both output modes.
+    const QJsonObject good = runCli({"preview", "--deck", "Good", "--json"}, decks, database, &code, &stderrOutput);
+    QCOMPARE(code, 0);
+    QVERIFY(stderrOutput.isEmpty());
+    QCOMPARE(sortedKeys(good), QStringList({"deck", "format", "items", "ok"}));
+    QVERIFY(good.value(QStringLiteral("ok")).toBool());
+    const QJsonArray items = good.value(QStringLiteral("items")).toArray();
+    QCOMPARE(items.size(), 1);
+    const QJsonObject item = items.at(0).toObject();
+    QCOMPARE(item.value(QStringLiteral("question")).toString(), QStringLiteral("Q?"));
+    QCOMPARE(item.value(QStringLiteral("answer")).toString(), QStringLiteral("A"));
+    const QString goodText = runCliText({"preview", "--deck", "Good"}, decks, database, &code, &stderrOutput);
+    QCOMPARE(code, 0);
+    QVERIFY(stderrOutput.isEmpty());
+    QCOMPARE(goodText, QStringLiteral("[%1]\nQ: Q?\nA: A\n").arg(item.value(QStringLiteral("id")).toString()));
 }
 
 void TestCli::configValidationAndPersistence() {
