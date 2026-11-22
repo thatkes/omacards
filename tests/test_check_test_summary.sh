@@ -78,6 +78,14 @@ check_case totals_failure_fails 1 '1 failed tests' "$tmp/totals-failure.log"
 printf 'OMACARDS_TEST_MODE: info\n' > "$tmp/info.log"
 check_case informational_mode_passes 0 'across 0 suites' "$tmp/info.log"
 
+write_announcement 17 "$tmp/info-marker-mix.log"
+printf 'OMACARDS_TEST_MODE: info\n' >> "$tmp/info-marker-mix.log"
+check_case info_marker_with_announcement_fails 1 'conflicts' "$tmp/info-marker-mix.log"
+
+printf 'OMACARDS_TEST_MODE: info\n' > "$tmp/info-totals-mix.log"
+write_totals 17 "$tmp/info-totals-mix.log"
+check_case info_marker_with_totals_fails 1 'conflicts' "$tmp/info-totals-mix.log"
+
 if [ "$failures" -ne 0 ]; then
     printf '%s check-test-summary case(s) failed\n' "$failures"
     exit 1

@@ -60,7 +60,8 @@ constexpr int kExpectedSuiteCount = 17;
 
 bool isInformationalMode(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
-        if (std::strcmp(argv[i], "-functions") == 0 || std::strcmp(argv[i], "-help") == 0 ||
+        if (std::strcmp(argv[i], "-functions") == 0 || std::strcmp(argv[i], "-datatags") == 0 ||
+            std::strcmp(argv[i], "-perfcounterlist") == 0 || std::strcmp(argv[i], "-help") == 0 ||
             std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "-?") == 0)
             return true;
     }

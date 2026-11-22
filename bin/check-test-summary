@@ -35,6 +35,10 @@ awk '
       printf "ERROR: %d failed tests in Totals lines\n", failed > "/dev/stderr"
       bad = 1
     }
+    if (info_mode && (have_announcement || suites > 0)) {
+      print "ERROR: info marker conflicts with suite results" > "/dev/stderr"
+      bad = 1
+    }
     if (!info_mode) {
       if (!have_announcement) {
         print "ERROR: test run did not report OMACARDS_TEST_SUITES" > "/dev/stderr"
