@@ -113,10 +113,11 @@ void TestImporter::csvSelectsDelimiterByExtension() {
 void TestImporter::csvDetectsHeaderCaseInsensitively() {
     QTemporaryDir dir;
     const QString questionHeader = dir.filePath("question.csv");
-    const QString frontHeader = dir.filePath("front.csv");
+    const QString questionAliasHeader = dir.filePath("question-alias.csv");
     const QString noHeader = dir.filePath("noheader.csv");
     QVERIFY(writeText(questionHeader, "QUESTION,ANSWER\nq,a\n"));
-    QVERIFY(writeText(frontHeader, "Front,Back\nf,b\n"));
+    // "Front,Back" is an external Anki alias, so the literal stays as-is.
+    QVERIFY(writeText(questionAliasHeader, "Front,Back\nf,b\n"));
     QVERIFY(writeText(noHeader, "Name,Value\nx,y\n"));
 
     QString error;
@@ -126,7 +127,7 @@ void TestImporter::csvDetectsHeaderCaseInsensitively() {
     QCOMPARE(result.cards.first().question, QString("q"));
 
     result = DeckImport::Result{};
-    QVERIFY(DeckImport::csv(frontHeader, {}, &result, &error));
+    QVERIFY(DeckImport::csv(questionAliasHeader, {}, &result, &error));
     QCOMPARE(result.cards.size(), 1);
     QCOMPARE(result.cards.first().question, QString("f"));
 

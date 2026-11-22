@@ -39,8 +39,9 @@ void TestDomain::domainModeRoundTrips() {
 }
 
 void TestDomain::domainRatingConversionsAreExact() {
-    // Only 1 and 3 are valid at the boundary; no other integer (including
-    // negatives and the FSRS-internal grades 2 and 4) maps to a Rating.
+    // Only 1 and 3 are valid Ratings at the boundary; no other integer
+    // (including negatives and the FSRS algorithm inputs 2 and 4) maps to
+    // a Rating.
     for (int value : {-100, -1, 0, 2, 4, 5, 100})
         QCOMPARE(Domain::ratingFromInt(value), Rating::Invalid);
 
@@ -50,7 +51,7 @@ void TestDomain::domainRatingConversionsAreExact() {
 
     for (Rating rating : {Rating::Again, Rating::Good})
         QCOMPARE(Domain::ratingFromInt(Domain::toInt(rating)), rating);
-    // Invalid is a sentinel, not a grade: it does not round-trip through int.
+    // Invalid is a sentinel, not a Rating: it does not round-trip through int.
     QCOMPARE(Domain::ratingFromInt(Domain::toInt(Rating::Invalid)), Rating::Invalid);
 
     // toInt() is a raw cast, not a validating conversion: it preserves even

@@ -8,7 +8,7 @@
 
 using namespace TestSupport;
 
-void TestFsrs::fsrsInitialState() {
+void TestFsrs::fsrsInitialSchedulingState() {
     QCOMPARE(Fsrs::initial().reps, 0);
     QVERIFY(Fsrs::initialStability(3) > Fsrs::initialStability(1));
     QVERIFY(Fsrs::initialDifficulty(1) > Fsrs::initialDifficulty(3));
@@ -46,9 +46,10 @@ void TestFsrs::fsrsRetentionShapesIntervals() {
     QVERIFY(relaxed.intervalDays >= strict.intervalDays);
 }
 
-void TestFsrs::fsrsInitialGradesClampAndPinWeights() {
-    // The model accepts all four internal grades even though the UI only
-    // exposes Again (1) and Good (3). Out-of-range grades clamp to that range.
+void TestFsrs::fsrsInitialInputsClampAndPinWeights() {
+    // FSRS accepts four algorithm inputs (1..4) even though the UI exposes
+    // only the Again (1) and Good (3) Ratings. Out-of-range inputs clamp
+    // to that range.
     QVERIFY(qFuzzyCompare(Fsrs::initialStability(1), Fsrs::weights[0]));
     QVERIFY(qFuzzyCompare(Fsrs::initialStability(2), Fsrs::weights[1]));
     QVERIFY(qFuzzyCompare(Fsrs::initialStability(3), Fsrs::weights[2]));
@@ -57,11 +58,11 @@ void TestFsrs::fsrsInitialGradesClampAndPinWeights() {
     QVERIFY(qFuzzyCompare(Fsrs::initialStability(-5), Fsrs::weights[0]));
     QVERIFY(qFuzzyCompare(Fsrs::initialStability(5), Fsrs::weights[3]));
 
-    // Grade 1 keeps the whole 7.1434 weight; later grades subtract an exp
-    // term. Difficulty stays inside 1..10 for every clamped grade.
+    // Input 1 keeps the whole 7.1434 weight; later inputs subtract an exp
+    // term. Difficulty stays inside 1..10 for every clamped input.
     QVERIFY(qFuzzyCompare(Fsrs::initialDifficulty(1), 7.1434));
-    for (int grade = 1; grade <= 4; ++grade) {
-        const double difficulty = Fsrs::initialDifficulty(grade);
+    for (int algorithmInput = 1; algorithmInput <= 4; ++algorithmInput) {
+        const double difficulty = Fsrs::initialDifficulty(algorithmInput);
         QVERIFY(difficulty >= 1.0);
         QVERIFY(difficulty <= 10.0);
     }
@@ -115,7 +116,8 @@ void TestFsrs::fsrsRetrievabilityHandlesMissingAndFutureReviews() {
 void TestFsrs::fsrsReviewClampsRatingAndRetention() {
     const qint64 now = 1'700'000'000'000LL;
 
-    // Invalid boundary ratings use the same branch as the nearest valid grade.
+    // Out-of-range FSRS algorithm inputs use the same branch as the nearest
+    // valid input; value 4 is not a domain Rating.
     const ReviewResult invalidLow = Fsrs::review(Fsrs::initial(), 0, now);
     const ReviewResult again = Fsrs::review(Fsrs::initial(), 1, now);
     QVERIFY(qFuzzyCompare(invalidLow.state.stability, again.state.stability));
@@ -123,8 +125,8 @@ void TestFsrs::fsrsReviewClampsRatingAndRetention() {
     QCOMPARE(invalidLow.state.lapses, 1);
 
     const ReviewResult invalidHigh = Fsrs::review(Fsrs::initial(), 99, now);
-    const ReviewResult easy = Fsrs::review(Fsrs::initial(), 4, now);
-    QVERIFY(qFuzzyCompare(invalidHigh.state.stability, easy.state.stability));
+    const ReviewResult fourthInput = Fsrs::review(Fsrs::initial(), 4, now);
+    QVERIFY(qFuzzyCompare(invalidHigh.state.stability, fourthInput.state.stability));
     QCOMPARE(invalidHigh.state.lapses, 0);
 
     // Retention is clamped to the Config window in both directions.
