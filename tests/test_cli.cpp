@@ -738,20 +738,21 @@ void TestCli::cramCommandContract() {
     QCOMPARE(four.value(QStringLiteral("reviews")).toInt(), 4);
     QCOMPARE(four.value(QStringLiteral("good")).toInt(), 3);
     QVERIFY(!four.contains(QStringLiteral("correct")));
-    // The Leitner box progression itself lives in the InSessionProgression
-    // suite; the CLI contract only promises a 1-based box in range.
-    QVERIFY(four.value(QStringLiteral("box")).toInt() >= 1);
-    QVERIFY(four.value(QStringLiteral("box")).toInt() <= Config::kLeitnerBoxes);
+    // Exact box values pin the CLI output contract; Leitner progression
+    // rules stay in the InSessionProgression suite.
+    QCOMPARE(four.value(QStringLiteral("box")).toInt(), 1);
 
     const QJsonObject two = runCli({"cram", "--deck", "Cram", "--steps", "2", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
     QCOMPARE(two.value(QStringLiteral("reviews")).toInt(), 2);
     QCOMPARE(two.value(QStringLiteral("good")).toInt(), 2);
+    QCOMPARE(two.value(QStringLiteral("box")).toInt(), 3);
 
     const QJsonObject eight = runCli({"cram", "--deck", "Cram", "--steps", "8", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
     QCOMPARE(eight.value(QStringLiteral("reviews")).toInt(), 8);
     QCOMPARE(eight.value(QStringLiteral("good")).toInt(), 6);
+    QCOMPARE(eight.value(QStringLiteral("box")).toInt(), 1);
 
     // Repeating step counts in a different order must reproduce each result.
     const QJsonObject repeatedEight =
@@ -763,7 +764,7 @@ void TestCli::cramCommandContract() {
 
     const QString human = runCliText({"cram", "--deck", "Cram", "--steps", "4"}, decks, database, &code);
     QCOMPARE(code, 0);
-    QVERIFY2(human.startsWith(QStringLiteral("4 reviews · 3 Good · box ")), qPrintable(human));
+    QCOMPARE(human.trimmed(), QStringLiteral("4 reviews · 3 Good · box 1"));
     QVERIFY2(!human.contains(QStringLiteral("correct")), qPrintable(human));
 
     const QJsonObject clamped = runCli({"cram", "--deck", "Cram", "--steps", "0", "--json"}, decks, database, &code);
