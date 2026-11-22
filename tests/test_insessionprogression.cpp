@@ -168,10 +168,14 @@ void TestInSessionProgression::buildCramKeepsTheGivenOrder() {
     InSessionProgression progression;
     progression.buildCram(cardsWithIds({"c1", "c2", "c3"}));
 
+    QCOMPARE(progression.boxCounts(), QVector<int>({3, 0, 0, 0, 0}));
+
     QCOMPARE(progression.next(0).cardId, QStringLiteral("c1"));
     progression.advanceCram(QStringLiteral("c1"), Rating::Good);
+    QCOMPARE(progression.boxCounts(), QVector<int>({2, 1, 0, 0, 0}));
     QCOMPARE(progression.next(0).cardId, QStringLiteral("c2"));
     progression.advanceCram(QStringLiteral("c2"), Rating::Good);
+    QCOMPARE(progression.boxCounts(), QVector<int>({1, 2, 0, 0, 0}));
     QCOMPARE(progression.next(0).cardId, QStringLiteral("c3"));
 }
 
@@ -182,16 +186,21 @@ void TestInSessionProgression::advanceCramPromotesAndResetsTheCurrentBox() {
     progression.buildCram(cardsWithIds({"c1"}));
     QCOMPARE(progression.next(0).box, 1);
 
+    QCOMPARE(progression.boxCounts(), QVector<int>({1, 0, 0, 0, 0}));
     for (int expected = 2; expected <= Config::kLeitnerBoxes; ++expected) {
         progression.advanceCram(QStringLiteral("c1"), Rating::Good);
         QCOMPARE(progression.currentBox(), expected); // no box out-parameter
         QCOMPARE(progression.next(0).box, expected);
+        QVector<int> counts(Config::kLeitnerBoxes, 0);
+        counts[expected - 1] = 1;
+        QCOMPARE(progression.boxCounts(), counts);
     }
     progression.advanceCram(QStringLiteral("c1"), Rating::Good);
     QCOMPARE(progression.currentBox(), Config::kLeitnerBoxes);
     progression.advanceCram(QStringLiteral("c1"), Rating::Again);
     QCOMPARE(progression.currentBox(), 1);
     QCOMPARE(progression.next(0).box, 1);
+    QCOMPARE(progression.boxCounts(), QVector<int>({1, 0, 0, 0, 0}));
 }
 
 void TestInSessionProgression::cramIntervalsCountOtherCards() {

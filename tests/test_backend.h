@@ -25,6 +25,10 @@ private slots:
     void qmlStudyScalesPicturesToWidth();
     void qmlStudyVisualFactsPinLayoutAtMinimumSize();
     void qmlCramLabelUsesCurrentBox();
+    void qmlCramBoxDistributionShowsCountsTimingAndHighlight();
+    void qmlCramBoxDistributionFollowsRatings();
+    void qmlCramBoxDistributionIsCramOnlyAndHidesWhenEmpty();
+    void qmlCramBoxHighlightFollowsThemeChange();
     void qmlGoodLabelUsesGoodCount();
     void qmlSettingsRowsFitTheirContent();
     void backendAppliesNewCardLimit();

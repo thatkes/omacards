@@ -37,6 +37,8 @@ class Backend : public QObject {
     Q_PROPERTY(int reviewed READ reviewed NOTIFY statsChanged)
     Q_PROPERTY(int good READ good NOTIFY statsChanged)
     Q_PROPERTY(int currentBox READ currentBox NOTIFY statsChanged)
+    Q_PROPERTY(QVariantList boxCounts READ boxCounts NOTIFY statsChanged)
+    Q_PROPERTY(int cramNextInCards READ cramNextInCards NOTIFY statsChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(QString mathEngine READ mathEngine CONSTANT)
     Q_PROPERTY(int totalCards READ totalCards NOTIFY decksChanged)
@@ -79,6 +81,13 @@ public:
     int reviewed() const { return m_session.reviewed(); }
     int good() const { return m_session.good(); }
     int currentBox() const { return m_session.currentBox(); }
+    QVariantList boxCounts() const {
+        QVariantList counts;
+        for (int count : m_session.boxCounts())
+            counts << count;
+        return counts;
+    }
+    int cramNextInCards() const { return m_session.cramNextInCards(); }
     QString status() const { return m_session.status(); }
     QString mathEngine() const;
     int totalCards() const { return m_deckRepo.totalCards(); }

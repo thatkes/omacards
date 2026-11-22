@@ -46,6 +46,11 @@ public:
     int reviewed() const { return m_reviewed; }
     int good() const { return m_good; }
     int currentBox() const { return m_progression.currentBox(); }
+    QVector<int> boxCounts() const { return m_progression.boxCounts(); }
+    int cramNextInCards() const {
+        const int box = currentBox();
+        return box >= 1 && box <= Config::kLeitnerBoxes ? Config::kLeitnerIntervals[box - 1] : 0;
+    }
     QString status() const { return m_status; }
     QString currentCardId() const { return m_currentId; }
 
