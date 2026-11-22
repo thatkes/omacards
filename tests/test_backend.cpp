@@ -6,6 +6,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
+#include <QFontMetricsF>
 #include <QImage>
 #include <QMouseEvent>
 #include <QWheelEvent>
@@ -225,6 +226,24 @@ QString svgFromMathHtml(const QString &html) {
         return {};
     const QByteArray encoded = html.mid(start + prefix.size(), end - start - prefix.size()).toLocal8Bit();
     return QString::fromUtf8(QByteArray::fromBase64(encoded));
+}
+
+// The fake SVG has to declare the logical size the renderer will reserve for
+// this expression. Derive it from Qt's math-font metrics instead of calling
+// the renderer's private sizing helper.
+QSize expectedMathSize(const QString &expression, double scale) {
+    QFont font(QStringLiteral("Noto Sans Math"));
+    font.setPixelSize(qMax(1, qRound(10.0 * scale)));
+    const QFontMetricsF metrics(font);
+    const QRectF glyphs = metrics.boundingRect(unicodeMath(expression));
+    const auto evenPixels = [](qreal value) { return qMax(2, 2 * qCeil(value / 2.0)); };
+    return QSize(evenPixels(glyphs.width() + 4.0), evenPixels(glyphs.height() + 4.0));
+}
+
+QSize mathImageSize(const QString &html) {
+    static const QRegularExpression image(R"re(<img\b[^>]*\bwidth=['"]?(\d+)['"]?[^>]*\bheight=['"]?(\d+)['"]?)re");
+    const QRegularExpressionMatch match = image.match(html);
+    return match.hasMatch() ? QSize(match.captured(1).toInt(), match.captured(2).toInt()) : QSize();
 }
 
 int toolchainRenders(const QString &logPath) {
@@ -2408,8 +2427,13 @@ void TestBackend::qmlStudyShowsMathPlaceholderUntilSvgArrives() {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
     const QString bin = dir.filePath("bin");
-    const QString svg = QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10pt\" height=\"5pt\" "
-                                       "viewBox=\"0 0 10 5\"><g fill=\"rgb(0%, 0%, 0%)\"/></svg>");
+    const QSize reserved = expectedMathSize(QStringLiteral("x^2"), MathScale::kQuestion);
+    // svgPixelSize() halves the supersampled file, then the question scale
+    // doubles it again: a Wpx root becomes a W x H image at scale 2.
+    const QString svg = QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%1px\" height=\"%2px\" "
+                                       "viewBox=\"0 0 %1 %2\"><g fill=\"rgb(0%, 0%, 0%)\"/></svg>")
+                            .arg(reserved.width() / 2)
+                            .arg(reserved.height() / 2);
     QVERIFY(writeFakePdfToolchain(bin, svg, QStringLiteral("sleep 1\n")));
 
     TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
@@ -2417,21 +2441,39 @@ void TestBackend::qmlStudyShowsMathPlaceholderUntilSvgArrives() {
     StudyViewFixture fixture;
     QVERIFY(fixture.initialize());
     QVERIFY(fixture.createDeck());
-    QVERIFY(fixture.createCard(QStringLiteral("What is \\(x^2\\)?"), QStringLiteral("A \\(y^2\\)")));
+    QVERIFY(fixture.createCard(QStringLiteral("What is \\(x^2\\)?"), QStringLiteral("plain answer")));
     fixture.selectDeck();
     QVERIFY(fixture.loadWindow());
     QVERIFY(fixture.enterStudy(QStringLiteral("review")));
 
     auto *question = fixture.view->item(QStringLiteral("studyQuestionLabel"));
+    auto *answer = fixture.view->item(QStringLiteral("studyAnswerLabel"));
     QVERIFY(question);
+    QVERIFY(answer);
+    fixture.backend.flip();
+    fixture.settle();
+    QVERIFY(answer->isVisible());
+
     const QString text = question->property("text").toString();
     QVERIFY2(text.contains(QStringLiteral("<!--omacards-math:")), qPrintable(text));
     QVERIFY(!text.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
+    QVERIFY(!text.contains(QStringLiteral("font-family: monospace")));
+    QCOMPARE(mathImageSize(text), reserved);
+
+    const QSizeF questionSizeBefore(question->property("contentWidth").toReal(),
+                                    question->property("contentHeight").toReal());
+    const qreal answerTopBefore = answer->mapRectToScene(answer->boundingRect()).top();
 
     QTRY_VERIFY_WITH_TIMEOUT(!question->property("text").toString().contains(QStringLiteral("<!--omacards-math:")),
                              5000);
-    QVERIFY(question->property("text").toString().contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
-    QVERIFY(!question->property("text").toString().contains(QStringLiteral("font-family: monospace")));
+    const QString swapped = question->property("text").toString();
+    QVERIFY(swapped.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
+    QCOMPARE(mathImageSize(swapped), reserved);
+
+    const QSizeF questionSizeAfter(question->property("contentWidth").toReal(),
+                                   question->property("contentHeight").toReal());
+    QCOMPARE(questionSizeAfter, questionSizeBefore);
+    QVERIFY(qAbs(answer->mapRectToScene(answer->boundingRect()).top() - answerTopBefore) < 1.0);
 }
 
 void TestBackend::qmlStudyRecolorsCachedSvgWhenThemeChanges() {
