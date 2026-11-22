@@ -147,8 +147,9 @@ a notation that survives that fallback:
   the TeX bundle once with
   `printf '\\documentclass{article}\n\\begin{document}$x^2$\\end{document}\n' > /tmp/warm.tex && tectonic --untrusted --outdir=/tmp /tmp/warm.tex`.
   Restart the app after installing. `omacards check --json` reports
-  `math: LaTeX (SVG)` when the renderer is active; SVGs cache in
-  `~/.cache/omacards/math`.
+  `math: LaTeX (SVG)` when the renderer is active; one neutral SVG per
+  expression caches in `~/.cache/omacards/math` and is recolored to the
+  active theme at display time.
 
 Check how a card actually renders with `omacards preview --deck X --format text
 --json` before authoring many similar cards. Use `--format html` with a running

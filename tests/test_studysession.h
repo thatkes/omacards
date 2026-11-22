@@ -25,5 +25,5 @@ private slots:
     void setMathColorsEmitsOnlyOnChange();
     void prefetchQueuesTheNextThreeCardsWithoutChangingOrder();
     void prefetchResultIsIgnoredForCardsAlreadyLeftBehind();
-    void themeChangeRequeuesUpcomingCards();
+    void themeChangeRecolorsFromCacheWithoutPrefetch();
 };

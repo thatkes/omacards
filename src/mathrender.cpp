@@ -17,7 +17,6 @@
 #include <QSet>
 #include <QSize>
 #include <QStandardPaths>
-#include <QUrl>
 
 namespace {
 QString escapePlain(const QString &text) {
@@ -137,12 +136,32 @@ QString mathPlaceholderTag(const QString &key, const QSize &size) {
                .arg(QString(spaces, QChar::Nbsp));
 }
 
-QString sizedMathImage(const QString &path, const QString &expression, const QSize &size) {
+const QRegularExpression &blackFillPattern();
+QSize svgPixelSize(const QString &path);
+QString normalizeInk(const QString &ink);
+
+// The cached file stays a neutral master. Recoloring happens on the bytes that
+// go into the rich-text <img> src, so no themed file is ever written.
+QString colorizedSvgUri(const QString &path, const QString &ink) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    QString svg = QString::fromUtf8(file.readAll());
+    svg.replace(blackFillPattern(), normalizeInk(ink));
+    return QStringLiteral("data:image/svg+xml;base64,") + QString::fromLatin1(svg.toUtf8().toBase64());
+}
+
+QString mathImageHtml(const QString &path, const QString &expression, const QString &ink, double scale) {
+    const QString source = colorizedSvgUri(path, ink);
+    if (source.isEmpty())
+        return {};
+    const QSize logical = svgPixelSize(path);
+    const QSize pixels(qRound(logical.width() * scale), qRound(logical.height() * scale));
     return QStringLiteral("<img src='%1' alt='%2' width='%3' height='%4' align='middle' "
                           "style='vertical-align: middle;'>")
-        .arg(QUrl::fromLocalFile(path).toString(), expression.toHtmlEscaped())
-        .arg(size.width())
-        .arg(size.height());
+        .arg(source, expression.toHtmlEscaped())
+        .arg(pixels.width())
+        .arg(pixels.height());
 }
 
 // One render per cache key, shared by live presentation, prefetching and the
@@ -195,7 +214,8 @@ public:
         if (!owner)
             return;
         const QString path = owner->renderRequest(m_request);
-        const QString html = path.isEmpty() ? QString() : sizedMathImage(path, m_request.expression, m_request.size);
+        const QString html =
+            path.isEmpty() ? QString() : mathImageHtml(path, m_request.expression, m_request.ink, m_request.scale);
         QMetaObject::invokeMethod(
             owner, [owner, key = m_request.key, html] { owner->finishRender(key, html); }, Qt::QueuedConnection);
     }
@@ -276,34 +296,27 @@ QStringList MathRenderer::warnings(const QString &text) const {
     return result;
 }
 
-namespace {
-QSize svgPixelSize(const QString &path);
-QString normalizeInk(const QString &ink);
-} // namespace
-
-QString MathRenderer::mathKey(const QString &expression, const QString &ink, double scale) const {
-    // Ink and scale are part of the key so question/answer colors and label
-    // sizes never share a cached file. The prefix invalidates SVGs from the
-    // old unscaled/full-page renderers.
-    const QString key = expression + "\n" + normalizeInk(ink) + "\n" + QString::number(scale, 'f', 3);
+QString MathRenderer::mathKey(const QString &expression) const {
+    // One neutral master per expression. The prefix invalidates the old
+    // per-theme files without deleting them; they are simply never read.
     const QString base =
-        "eq4-" +
-        QString::fromLatin1(QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha256).toHex().left(20));
+        "eq5-" +
+        QString::fromLatin1(QCryptographicHash::hash(expression.toUtf8(), QCryptographicHash::Sha256).toHex().left(20));
     return m_cache + "/" + base + ".svg";
 }
 
-QString MathRenderer::cachedSvgPath(const QString &expression, const QString &ink, double scale) const {
-    const QString path = mathKey(expression, ink, scale);
+QString MathRenderer::cachedSvgPath(const QString &expression) const {
+    const QString path = mathKey(expression);
     return QFileInfo::exists(path) ? path : QString();
 }
 
-int MathRenderer::warm(const QString &text, const QString &ink, double scale, int *cached) {
+int MathRenderer::warm(const QString &text, int *cached) {
     int rendered = 0;
     if (cached)
         *cached = 0;
     QSet<QString> seen;
     for (const QString &expression : expressionsIn(text)) {
-        const QString path = mathKey(expression, ink, scale);
+        const QString path = mathKey(expression);
         if (seen.contains(path))
             continue;
         seen.insert(path);
@@ -312,7 +325,7 @@ int MathRenderer::warm(const QString &text, const QString &ink, double scale, in
                 ++*cached;
             continue;
         }
-        if (renderExpression(expression, ink, scale).startsWith("<img "))
+        if (renderExpression(expression).startsWith("<img "))
             ++rendered;
     }
     return rendered;
@@ -328,7 +341,7 @@ QString MathRenderer::renderWithPlaceholders(const QString &text, const QString 
     return mapMath(
         text,
         [this, ink, scale](const QString &expression) {
-            const QString path = mathKey(expression, ink, scale);
+            const QString path = mathKey(expression);
             if (QFileInfo::exists(path))
                 return renderExpression(expression, ink, scale);
             const QString key = QFileInfo(path).completeBaseName();
@@ -342,8 +355,10 @@ QString MathRenderer::renderWithPlaceholders(const QString &text, const QString 
 void MathRenderer::prefetch(const QString &text, const QString &ink, double scale) {
     if (!hasRenderer())
         return;
+    // Ink no longer affects which file is rendered; it stays on the request so
+    // a queued render can emit the right data URI for the card being shown.
     for (const QString &expression : expressionsIn(text)) {
-        const QString path = mathKey(expression, ink, scale);
+        const QString path = mathKey(expression);
         if (QFileInfo::exists(path))
             continue;
         enqueueExpression(
@@ -358,7 +373,7 @@ void MathRenderer::clearPendingMath() {
 
 void MathRenderer::enqueueExpression(const RenderRequest &request) {
     constexpr int kMaxQueued = 12;
-    if (QFileInfo::exists(mathKey(request.expression, request.ink, request.scale)))
+    if (QFileInfo::exists(mathKey(request.expression)))
         return;
     if (m_queuedKeys.contains(request.key) || m_activeKeys.contains(request.key))
         return;
@@ -374,7 +389,7 @@ void MathRenderer::startNextRender() {
     while (m_activeKeys.size() < kMaxActive && !m_queue.isEmpty()) {
         const RenderRequest request = m_queue.dequeue();
         m_queuedKeys.remove(request.key);
-        if (QFileInfo::exists(mathKey(request.expression, request.ink, request.scale)))
+        if (QFileInfo::exists(mathKey(request.expression)))
             continue;
         if (m_activeKeys.contains(request.key))
             continue;
@@ -384,7 +399,7 @@ void MathRenderer::startNextRender() {
 }
 
 QString MathRenderer::renderRequest(const RenderRequest &request) {
-    return renderLatex(request.expression, request.ink, request.scale);
+    return renderLatex(request.expression);
 }
 
 void MathRenderer::finishRender(const QString &key, const QString &html) {
@@ -396,15 +411,11 @@ void MathRenderer::finishRender(const QString &key, const QString &html) {
 }
 
 QString MathRenderer::renderExpression(const QString &expression, const QString &ink, double scale) const {
-    const QString image = renderLatex(expression, ink, scale);
+    const QString image = renderLatex(expression);
     if (!image.isEmpty()) {
-        // QML's rich-text engine sizes <img> from these attributes; the SVG's
-        // intrinsic size is scaled too, so the vector stays sharp either way.
-        const QSize pixels = svgPixelSize(image);
-        return QString("<img src='%1' alt='%2' width='%3' height='%4' align='middle' style='vertical-align: middle;'>")
-            .arg(QUrl::fromLocalFile(image).toString(), expression.toHtmlEscaped())
-            .arg(pixels.width())
-            .arg(pixels.height());
+        const QString html = mathImageHtml(image, expression, ink, scale);
+        if (!html.isEmpty())
+            return html;
     }
     return QString("<span style='font-family: \"Noto Sans Math\", serif;'>%1</span>")
         .arg(unicodeMath(expression).toHtmlEscaped());
@@ -429,13 +440,13 @@ QString svgRootTag(const QString &svg) {
     return match.hasMatch() ? match.captured() : QString();
 }
 
-void scaleSvgRoot(QString &svg, double scale) {
+void scaleSvgRoot(QString &svg) {
     const QString tag = svgRootTag(svg);
     if (tag.isEmpty())
         return;
     // Qt's SVG renderer treats `pt` values as pixels, so pdftocairo's pt-sized
     // root is rasterized too small and then stretched by the <img> element.
-    // Publish explicit pixel dimensions that match the rich-text image size.
+    // Publish explicit pixel dimensions once; display scale lives in HTML.
     static const QRegularExpression dimension(R"re((\b(?:width|height)=")([0-9]*\.?[0-9]+)(pt|px)("))re");
     QString scaled;
     qsizetype last = 0;
@@ -443,7 +454,7 @@ void scaleSvgRoot(QString &svg, double scale) {
     while (matches.hasNext()) {
         const QRegularExpressionMatch match = matches.next();
         const double factor = match.captured(3) == QLatin1String("pt") ? 4.0 / 3.0 : 1.0;
-        const int pixels = qRound(match.captured(2).toDouble() * scale * factor) * kSvgSupersample;
+        const int pixels = qRound(match.captured(2).toDouble() * factor) * kSvgSupersample;
         scaled += tag.mid(last, match.capturedStart() - last);
         scaled += match.captured(1) + QString::number(pixels) + "px" + match.captured(4);
         last = match.capturedEnd();
@@ -452,16 +463,19 @@ void scaleSvgRoot(QString &svg, double scale) {
     svg.replace(svg.indexOf(tag), tag.size(), scaled);
 }
 
-void colorizeSvg(const QString &path, const QString &ink, double scale) {
+const QRegularExpression &blackFillPattern() {
+    static const QRegularExpression black(R"re(rgb\(\s*0%\s*,\s*0%\s*,\s*0%\s*\)|#(?:000|000000)\b|\bblack\b)re",
+                                          QRegularExpression::CaseInsensitiveOption);
+    return black;
+}
+
+void normalizeCachedSvg(const QString &path) {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly))
         return;
     QString svg = QString::fromUtf8(file.readAll());
     file.close();
-    static const QRegularExpression black(R"re(rgb\(\s*0%\s*,\s*0%\s*,\s*0%\s*\)|#(?:000|000000)\b|\bblack\b)re",
-                                          QRegularExpression::CaseInsensitiveOption);
-    svg.replace(black, ink);
-    scaleSvgRoot(svg, scale);
+    scaleSvgRoot(svg);
     if (file.open(QIODevice::WriteOnly | QIODevice::Truncate))
         file.write(svg.toUtf8());
 }
@@ -485,11 +499,11 @@ QSize svgPixelSize(const QString &path) {
 }
 } // namespace
 
-QString MathRenderer::renderLatex(const QString &expression, const QString &ink, double scale) const {
+QString MathRenderer::renderLatex(const QString &expression) const {
     if (detect() != Engine::LatexSvg)
         return {};
 
-    const QString svgPath = mathKey(expression, ink, scale);
+    const QString svgPath = mathKey(expression);
     if (QFileInfo::exists(svgPath))
         return svgPath;
 
@@ -568,7 +582,7 @@ QString MathRenderer::renderLatex(const QString &expression, const QString &ink,
              run(QStandardPaths::findExecutable("dvisvgm"), {"--no-fonts", "-o", svgPath, dvi}, localTimeoutMs);
     }
     if (ok && QFileInfo::exists(svgPath)) {
-        colorizeSvg(svgPath, normalizeInk(ink), scale);
+        normalizeCachedSvg(svgPath);
         return svgPath;
     }
     return {};

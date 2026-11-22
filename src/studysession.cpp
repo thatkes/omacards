@@ -92,8 +92,9 @@ void StudySession::setMathColors(const QString &questionColor, const QString &an
         return;
     m_question = m_math.renderWithPlaceholders(DeckIO::displayQuestion(*card), m_questionInk, MathScale::kQuestion);
     m_answer = m_math.renderWithPlaceholders(DeckIO::displayAnswer(*card), m_answerInk, MathScale::kAnswer);
+    // Only the data URIs change on a theme switch; upcoming cards already have
+    // their SVGs, so there is nothing to prefetch again.
     emit cardChanged();
-    queueMathPrefetch();
 }
 
 void StudySession::applyMathRenderResult(const QString &key, const QString &html) {

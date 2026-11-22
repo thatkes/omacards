@@ -11,7 +11,6 @@
 #include "mathrender.h"
 #include "ratingrecording.h"
 #include "store.h"
-#include "theme.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -448,17 +447,15 @@ int run(const QStringList &arguments) {
         if (cards.isEmpty())
             return failEmptyDeck(options.deck, deckIssueReport(backend.decksDirectory(), targetPath), json);
 
-        Theme theme;
         MathRenderer renderer;
         int rendered = 0;
         int cached = 0;
         for (const Card &card : cards) {
             int fieldCached = 0;
-            rendered +=
-                renderer.warm(DeckIO::displayQuestion(card), theme.foreground(), MathScale::kQuestion, &fieldCached);
+            rendered += renderer.warm(DeckIO::displayQuestion(card), &fieldCached);
             cached += fieldCached;
             fieldCached = 0;
-            rendered += renderer.warm(DeckIO::displayAnswer(card), theme.accent(), MathScale::kAnswer, &fieldCached);
+            rendered += renderer.warm(DeckIO::displayAnswer(card), &fieldCached);
             cached += fieldCached;
         }
 
@@ -599,16 +596,17 @@ int run(const QStringList &arguments) {
             return fail(QObject::tr("No cards to preview"), json);
         }
 
-        constexpr double previewMathScale = 1.6; // Match the review answer label size.
+        constexpr double previewMathScale = 1.6;              // Match the review answer label size.
+        const QString previewInk = QStringLiteral("#000000"); // HTML stays readable on light backgrounds.
         MathRenderer renderer;
         QJsonArray items;
         QStringList lines;
         for (const Card &card : cards) {
             const bool html = options.format == QLatin1String("html");
-            const QString question =
-                html ? renderer.render(card.question, {}, previewMathScale) : renderer.renderPlain(card.question);
+            const QString question = html ? renderer.render(card.question, previewInk, previewMathScale)
+                                          : renderer.renderPlain(card.question);
             const QString answer =
-                html ? renderer.render(card.answer, {}, previewMathScale) : renderer.renderPlain(card.answer);
+                html ? renderer.render(card.answer, previewInk, previewMathScale) : renderer.renderPlain(card.answer);
             QJsonObject item;
             item.insert("id", card.id);
             item.insert(html ? QStringLiteral("questionHtml") : QStringLiteral("question"), question);

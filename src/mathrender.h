@@ -29,22 +29,22 @@ public:
     explicit MathRenderer(const QString &cacheDirectory = {}, QObject *parent = nullptr);
     ~MathRenderer() override;
 
-    // `ink` colors the rendered SVG; an empty value keeps the renderer's
-    // neutral black (used by headless output). `scale` enlarges the intrinsic
-    // SVG size so TeX's 12pt glyphs match the surrounding QML label size.
+    // `ink` colors the emitted data URI; an empty value keeps neutral black
+    // (used by headless output). `scale` multiplies the cached SVG's logical
+    // size in the <img> dimensions so TeX glyphs match the QML label size.
     QString render(const QString &text, const QString &ink = {}, double scale = 1.0) const;
     QString renderPlain(const QString &text) const;
     QStringList warnings(const QString &text) const;
     QString renderExpression(const QString &expression, const QString &ink = {}, double scale = 1.0) const;
 
-    // Full path of the cached SVG for one expression. The key combines the
-    // expression, ink and scale; the file name itself is unchanged by warming.
-    QString mathKey(const QString &expression, const QString &ink, double scale) const;
-    QString cachedSvgPath(const QString &expression, const QString &ink, double scale) const;
+    // Full path of the one neutral cached SVG for an expression. Inks and
+    // scales are display concerns and never change the file name.
+    QString mathKey(const QString &expression) const;
+    QString cachedSvgPath(const QString &expression) const;
 
-    // Renders every uncached expression in `text`, counting newly written SVGs
-    // and (when supplied) cache hits. Repeated expressions share one render.
-    int warm(const QString &text, const QString &ink, double scale, int *cached = nullptr);
+    // Renders every uncached expression in `text` once, counting newly written
+    // SVGs and (when supplied) cache hits. Colors and scales are irrelevant.
+    int warm(const QString &text, int *cached = nullptr);
 
     // Presentation and prefetching share the renderer so color handling stays
     // here. renderWithPlaceholders reserves a fixed-size neutral slot for each
@@ -95,7 +95,7 @@ private:
     QSet<QString> m_queuedKeys;
     QSet<QString> m_activeKeys;
 
-    QString renderLatex(const QString &expression, const QString &ink, double scale) const;
+    QString renderLatex(const QString &expression) const;
 };
 
 QString unicodeMath(const QString &expression);

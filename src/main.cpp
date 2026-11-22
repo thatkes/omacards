@@ -52,8 +52,8 @@ int main(int argc, char *argv[]) {
     Backend &backend = *ownedBackend;
     const auto syncMathColors = [&theme, &backend] { backend.setMathColors(theme.foreground(), theme.accent()); };
     QObject::connect(&theme, &Theme::changed, &backend, syncMathColors);
-    // Set the ink before the first render so startup does not cache black SVGs
-    // that are immediately replaced with themed ones.
+    // Set the ink before the first card, so its data URIs use the active theme
+    // even though the cached SVG itself stays neutral.
     syncMathColors();
 
     QString error;

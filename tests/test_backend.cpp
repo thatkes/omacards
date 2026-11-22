@@ -215,6 +215,25 @@ private:
     }
 };
 
+QString svgFromMathHtml(const QString &html) {
+    static const QString prefix = QStringLiteral("<img src='data:image/svg+xml;base64,");
+    const int start = html.indexOf(prefix);
+    if (start < 0)
+        return {};
+    const int end = html.indexOf('\'', start + prefix.size());
+    if (end < 0)
+        return {};
+    const QByteArray encoded = html.mid(start + prefix.size(), end - start - prefix.size()).toLocal8Bit();
+    return QString::fromUtf8(QByteArray::fromBase64(encoded));
+}
+
+int toolchainRenders(const QString &logPath) {
+    QFile log(logPath);
+    if (!log.open(QIODevice::ReadOnly))
+        return 0;
+    return QString::fromUtf8(log.readAll()).count(QStringLiteral(".tex"));
+}
+
 QString manyCardLines(int count) {
     QString text;
     for (int i = 0; i < count; ++i)
@@ -2407,12 +2426,62 @@ void TestBackend::qmlStudyShowsMathPlaceholderUntilSvgArrives() {
     QVERIFY(question);
     const QString text = question->property("text").toString();
     QVERIFY2(text.contains(QStringLiteral("<!--omacards-math:")), qPrintable(text));
-    QVERIFY(!text.contains(QStringLiteral("<img src='file://")));
+    QVERIFY(!text.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
 
     QTRY_VERIFY_WITH_TIMEOUT(!question->property("text").toString().contains(QStringLiteral("<!--omacards-math:")),
                              5000);
-    QVERIFY(question->property("text").toString().contains(QStringLiteral("<img src='file://")));
+    QVERIFY(question->property("text").toString().contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
     QVERIFY(!question->property("text").toString().contains(QStringLiteral("font-family: monospace")));
+}
+
+void TestBackend::qmlStudyRecolorsCachedSvgWhenThemeChanges() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString bin = dir.filePath("bin");
+    const QString cache = dir.filePath("cache/omacards/math");
+    const QString argsLog = dir.filePath("args.log");
+    const QString svg = QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10pt\" height=\"5pt\" "
+                                       "viewBox=\"0 0 10 5\"><g fill=\"rgb(0%, 0%, 0%)\"/></svg>");
+    QVERIFY(writeFakePdfToolchain(bin, svg));
+
+    TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
+    TestSupport::ScopedEnv argsEnv("OMACARDS_TEST_ARGS", argsLog);
+    PathPrependGuard pathGuard(bin);
+    MathRenderer prewarm(cache);
+    QVERIFY(prewarm.hasRenderer());
+    QVERIFY(prewarm.renderExpression("x^2", QStringLiteral("#112233"), MathScale::kQuestion)
+                .startsWith(QStringLiteral("<img ")));
+    QVERIFY(prewarm.renderExpression("y^2", QStringLiteral("#112233"), MathScale::kQuestion)
+                .startsWith(QStringLiteral("<img ")));
+    const QStringList filesBefore = QDir(cache).entryList({"*.svg"});
+
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    QVERIFY(fixture.createCard(QStringLiteral("What is \\(x^2\\)?"), QStringLiteral("plain answer")));
+    QVERIFY(fixture.createCard(QStringLiteral("Next \\(y^2\\)"), QStringLiteral("plain answer")));
+    fixture.backend.setMathColors(QStringLiteral("#112233"), QStringLiteral("#445566"));
+    fixture.selectDeck();
+    QVERIFY(fixture.loadWindow());
+    QVERIFY(fixture.enterStudy(QStringLiteral("review")));
+
+    auto *question = fixture.view->item(QStringLiteral("studyQuestionLabel"));
+    QVERIFY(question);
+    const QString before = question->property("text").toString();
+    QVERIFY(before.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
+    QVERIFY(svgFromMathHtml(before).contains(QStringLiteral("fill=\"#112233\"")));
+    const int rendersBefore = toolchainRenders(argsLog);
+
+    fixture.backend.setMathColors(QStringLiteral("#abcdef"), QStringLiteral("#123456"));
+    fixture.settle();
+    const QString after = question->property("text").toString();
+    QVERIFY(after.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
+    QVERIFY(!after.contains(QStringLiteral("<!--omacards-math:")));
+    QVERIFY(svgFromMathHtml(after).contains(QStringLiteral("fill=\"#abcdef\"")));
+    QVERIFY(!svgFromMathHtml(after).contains(QStringLiteral("fill=\"#112233\"")));
+
+    QCOMPARE(toolchainRenders(argsLog), rendersBefore);
+    QCOMPARE(QDir(cache).entryList({"*.svg"}), filesBefore);
 }
 
 void TestBackend::qmlStudyUsesCachedSvgWithoutPlaceholder() {
@@ -2442,6 +2511,6 @@ void TestBackend::qmlStudyUsesCachedSvgWithoutPlaceholder() {
     auto *question = fixture.view->item(QStringLiteral("studyQuestionLabel"));
     QVERIFY(question);
     const QString text = question->property("text").toString();
-    QVERIFY(text.contains(QStringLiteral("<img src='file://")));
+    QVERIFY(text.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
     QVERIFY(!text.contains(QStringLiteral("<!--omacards-math:")));
 }

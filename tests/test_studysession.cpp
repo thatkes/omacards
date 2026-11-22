@@ -659,16 +659,14 @@ void TestStudySession::prefetchQueuesTheNextThreeCardsWithoutChangingOrder() {
     QCOMPARE(fixture.session.question(), QStringLiteral("plain"));
 
     // Only the next three cards are warmed; the first card has no math and x4
-    // is too far away. Question and Answer use different scales, so each card
-    // contributes two cache entries and two renders.
-    QTRY_VERIFY_WITH_TIMEOUT(tectonicRenders(argsLog) >= 6, 5000);
-    QCOMPARE(tectonicRenders(argsLog), 6);
+    // is too far away. Question and Answer share one neutral SVG per expression
+    // even though they display at different scales.
+    QTRY_VERIFY_WITH_TIMEOUT(tectonicRenders(argsLog) >= 3, 5000);
+    QCOMPARE(tectonicRenders(argsLog), 3);
     MathRenderer renderer(cache);
-    for (const QString expression : {"x1", "x2", "x3"}) {
-        QVERIFY(QFileInfo::exists(renderer.mathKey(expression, "#000000", MathScale::kQuestion)));
-        QVERIFY(QFileInfo::exists(renderer.mathKey(expression, "#000000", MathScale::kAnswer)));
-    }
-    QVERIFY(!QFileInfo::exists(renderer.mathKey("x4", "#000000", MathScale::kQuestion)));
+    for (const QString expression : {"x1", "x2", "x3"})
+        QVERIFY(QFileInfo::exists(renderer.mathKey(expression)));
+    QVERIFY(!QFileInfo::exists(renderer.mathKey("x4")));
 
     // Warming is a read-only peek: ratings still meet the cards in order.
     for (const QString expression : {"x1", "x2", "x3", "x4"}) {
@@ -695,7 +693,7 @@ void TestStudySession::prefetchResultIsIgnoredForCardsAlreadyLeftBehind() {
     QString error;
     QVERIFY(prepareSession(fixture, "Stale", {"\\(x^2\\)", "plain"}, &error));
     MathRenderer renderer(cache);
-    const QString key = cacheKey(renderer.mathKey("x^2", "#000000", MathScale::kQuestion));
+    const QString key = cacheKey(renderer.mathKey("x^2"));
     QVERIFY(fixture.session.question().contains(QStringLiteral("<!--omacards-math:%1-->").arg(key)));
 
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
@@ -710,7 +708,7 @@ void TestStudySession::prefetchResultIsIgnoredForCardsAlreadyLeftBehind() {
     QCOMPARE(fixture.session.question(), questionBefore);
 }
 
-void TestStudySession::themeChangeRequeuesUpcomingCards() {
+void TestStudySession::themeChangeRecolorsFromCacheWithoutPrefetch() {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
     const QString bin = dir.filePath("bin");
@@ -723,20 +721,25 @@ void TestStudySession::themeChangeRequeuesUpcomingCards() {
     TestSupport::PathPrependGuard pathGuard(bin);
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Theme", {"plain", "\\(x^2\\)"}, &error));
+    QVERIFY(prepareSession(fixture, "Theme", {"\\(x^2\\)", "plain", "\\(y^2\\)"}, &error));
     QTRY_VERIFY_WITH_TIMEOUT(tectonicRenders(argsLog) >= 2, 5000);
 
     MathRenderer renderer(cache);
-    QVERIFY(QFileInfo::exists(renderer.mathKey("x^2", "#000000", MathScale::kQuestion)));
-    QVERIFY(QFileInfo::exists(renderer.mathKey("x^2", "#000000", MathScale::kAnswer)));
+    QVERIFY(QFileInfo::exists(renderer.mathKey("x^2")));
+    QVERIFY(QFileInfo::exists(renderer.mathKey("y^2")));
+    const QStringList filesBefore = QDir(cache).entryList({"*.svg"});
+    const QString questionBefore = fixture.session.question();
 
     QSignalSpy cardSpy(&fixture.session, &StudySession::cardChanged);
     fixture.session.setMathColors("#112233", "#445566");
     QCOMPARE(cardSpy.count(), 1);
 
-    const QString questionKey = renderer.mathKey("x^2", "#112233", MathScale::kQuestion);
-    const QString answerKey = renderer.mathKey("x^2", "#445566", MathScale::kAnswer);
-    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(questionKey), 5000);
-    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(answerKey), 5000);
-    QVERIFY(tectonicRenders(argsLog) >= 4);
+    // New inks only change the data URIs. No upcoming card is re-rendered and
+    // no cache file is added, so a theme switch stays instant.
+    QCOMPARE(tectonicRenders(argsLog), 2);
+    QCOMPARE(QDir(cache).entryList({"*.svg"}), filesBefore);
+    const QString questionAfter = fixture.session.question();
+    QVERIFY(questionAfter != questionBefore);
+    QVERIFY(questionAfter.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
+    QVERIFY(!questionAfter.contains(QStringLiteral("<!--omacards-math:")));
 }
