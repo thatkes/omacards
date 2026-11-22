@@ -1,16 +1,8 @@
 #!/bin/sh
 set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-cd "$ROOT"
 source_file="$ROOT/src/skill/SKILL.md"
 installed_file="$HOME/.agents/skills/omacards/SKILL.md"
-
-git_dir="$(git rev-parse --path-format=absolute --git-dir)"
-git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
-if [ "$git_dir" != "$git_common_dir" ]; then
-    printf 'Linked worktree: skipping installed skill check\n' >&2
-    exit 0
-fi
 
 if [ ! -f "$installed_file" ]; then
     printf 'Installed omacards skill not found at %s; skipping check\n' \
