@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Reject tracked local-only paths; the index includes staged additions.
+# CI runs the same check via ./bin/lint.
+./bin/check-local-only-files
+
 # Check the staged version of each C++ file, leaving the working tree alone.
 # CI still runs ./bin/lint over the whole tree.
 while IFS= read -r -d '' file; do

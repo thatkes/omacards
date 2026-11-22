@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$ROOT"
+
+# Tracked paths matching .gitignore are local-only, except the ignore file
+# itself: /.gitignore keeps it tracked by design (see .gitignore line 22).
+offenders="$(git ls-files -i -c --exclude-standard | grep -vxF '.gitignore' || true)"
+if [ -n "$offenders" ]; then
+    printf 'Tracked files under local-only paths:\n' >&2
+    printf '%s\n' "$offenders" >&2
+    printf 'Keep local-only files untracked: git rm --cached <path>\n' >&2
+    exit 1
+fi
