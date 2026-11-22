@@ -6,10 +6,10 @@ class TestFsrs : public QObject {
     Q_OBJECT
 
 private slots:
-    void fsrsInitialState();
+    void fsrsInitialSchedulingState();
     void fsrsReviewMovesDueForward();
     void fsrsRetentionShapesIntervals();
-    void fsrsInitialGradesClampAndPinWeights();
+    void fsrsInitialInputsClampAndPinWeights();
     void fsrsIntervalClampsRetentionAndMaximum();
     void fsrsRetrievabilityHandlesMissingAndFutureReviews();
     void fsrsReviewClampsRatingAndRetention();

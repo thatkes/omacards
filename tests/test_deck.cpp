@@ -140,7 +140,7 @@ void TestDeck::deckCardIdIsStableAndIgnoresType() {
 
 void TestDeck::deckContentHashPinsHashBytes() {
     // Pin the SHA-256 prefix so a change to the hash formula cannot silently
-    // make every existing card look edited and reset its FSRS progress.
+    // make every existing card look edited and reset its Scheduling state.
     Card card;
     card.question = "Q";
     card.answer = "A";
