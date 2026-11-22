@@ -1915,6 +1915,11 @@ ApplicationWindow {
                         { keys: "2 / G / →", action: qsTr("Good") },
                         { keys: "R / C", action: qsTr("Review or cram mode") },
                         { keys: "[ / ]", action: qsTr("Previous or next deck on Home or Study") },
+                        {
+                            keys: "",
+                            action: qsTr("Deck selector: choose a deck on Home or in the Study header"),
+                            objectName: "helpDeckSelectorRow"
+                        },
                         { keys: "B", action: qsTr("Open the library") },
                         { keys: "J / K", action: qsTr("Scroll a long card, or move the library selection") },
                         { keys: "Enter", action: qsTr("Edit the selected card in the library") },
@@ -1930,6 +1935,7 @@ ApplicationWindow {
                     ]
 
                     RowLayout {
+                        objectName: modelData.objectName || ""
                         Layout.fillWidth: true
                         spacing: 20
 
@@ -1942,6 +1948,7 @@ ApplicationWindow {
                         }
 
                         Label {
+                            objectName: modelData.objectName ? modelData.objectName + "Text" : ""
                             text: modelData.action
                             color: win.soft
                             font.pixelSize: 13
