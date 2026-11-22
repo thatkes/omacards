@@ -114,7 +114,7 @@ void StudySession::applyMathRenderResult(const QString &key, const QString &html
         emit cardChanged();
 }
 
-void StudySession::flip() {
+void StudySession::reveal() {
     if (!hasCard())
         return;
     m_showingAnswer = !m_showingAnswer;
@@ -123,7 +123,7 @@ void StudySession::flip() {
 
 void StudySession::showNext() {
     if (m_showingAnswer)
-        flip();
+        reveal();
 }
 
 bool StudySession::rate(Rating rating, double desiredRetention) {
@@ -228,7 +228,7 @@ void StudySession::presentCard() {
         setStatus(tr("Review · predicted recall %1%").arg(qRound(recall * 100)));
     } else {
         setStatus(tr("Cram · box %1 of %2 · next in %3 cards")
-                      .arg(currentBox())
+                      .arg(currentLeitnerBox())
                       .arg(Config::kLeitnerBoxes)
                       .arg(cramNextInCards()));
     }

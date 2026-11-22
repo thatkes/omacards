@@ -10,7 +10,7 @@
 
 struct CramEntry {
     QString cardId;
-    int box = 0;            // 0..Config::kLeitnerBoxes-1, delays in Config::kLeitnerIntervals
+    int leitnerBox = 0;     // 0..Config::kLeitnerBoxes-1, delays in Config::kLeitnerIntervals
     int nextShowReview = 0; // review count at which this Card is shown again
 };
 
@@ -25,7 +25,7 @@ public:
         Next kind = Next::Finished;
         QString cardId;
         qint64 waitMs = 0;
-        int box = 0; // 1-based Leitner box of the current Card in Cram
+        int leitnerBox = 0; // 1-based Leitner box of the current Card in Cram
     };
 
     void clear();
@@ -38,9 +38,9 @@ public:
     // Read-only look at the next cards; used for prefetching only. It never
     // consumes a Card, changes a deadline or advances a Leitner box.
     QStringList upcoming(int limit) const;
-    int currentBox() const { return m_currentBox; }
+    int currentLeitnerBox() const { return m_currentLeitnerBox; }
     // Box distribution of the live Cram queue, in Box 1 to Box 5 order.
-    QVector<int> boxCounts() const;
+    QVector<int> boxDistribution() const;
 
     void remove(const QString &id);
     void repeatAfter(const QString &id, qint64 notBefore);
@@ -57,7 +57,7 @@ private:
     QStringList m_reviewQueue;
     QHash<QString, qint64> m_reviewAgainNotBefore;
     qint64 m_cramReviews = 0;
-    int m_currentBox = 0;
+    int m_currentLeitnerBox = 0;
 };
 
 Q_DECLARE_METATYPE(InSessionProgression::Next)

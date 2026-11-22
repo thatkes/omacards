@@ -1034,9 +1034,9 @@ int run(const QStringList &arguments) {
         object.insert("ok", true);
         object.insert("ratings", steps);
         object.insert("good", good);
-        object.insert("leitnerBox", progression.currentBox()); // already 1-based
+        object.insert("leitnerBox", progression.currentLeitnerBox()); // already 1-based
         write(object, json,
-              QObject::tr("%1 reviews · %2 Good · box %3").arg(steps).arg(good).arg(progression.currentBox()));
+              QObject::tr("%1 reviews · %2 Good · box %3").arg(steps).arg(good).arg(progression.currentLeitnerBox()));
         return 0;
     }
 

@@ -244,7 +244,7 @@ void TestStudySession::setModeUppercaseCramNormalizesToReview() {
 
     fixture.session.rebuild("Modes");
     QVERIFY(fixture.session.hasCard());
-    QCOMPARE(fixture.session.currentBox(), 0); // remained in review mode
+    QCOMPARE(fixture.session.currentLeitnerBox(), 0); // remained in review mode
 }
 
 void TestStudySession::setModeCanonicalInputIsNoOp() {
@@ -304,26 +304,26 @@ void TestStudySession::setModeCramSwitchesAndResets() {
 
     fixture.session.rebuild("Modes");
     QVERIFY(fixture.session.hasCard());
-    QCOMPARE(fixture.session.currentBox(), 1);
+    QCOMPARE(fixture.session.currentLeitnerBox(), 1);
     QVERIFY(fixture.session.status().contains("Cram"));
-    QCOMPARE(fixture.session.boxCounts(), QVector<int>({2, 0, 0, 0, 0}));
+    QCOMPARE(fixture.session.boxDistribution(), QVector<int>({2, 0, 0, 0, 0}));
     QCOMPARE(fixture.session.cramNextInCards(), 1);
 
-    fixture.session.flip();
+    fixture.session.reveal();
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
-    QCOMPARE(fixture.session.boxCounts(), QVector<int>({1, 1, 0, 0, 0}));
-    QCOMPARE(fixture.session.currentBox(), 1);
+    QCOMPARE(fixture.session.boxDistribution(), QVector<int>({1, 1, 0, 0, 0}));
+    QCOMPARE(fixture.session.currentLeitnerBox(), 1);
 
-    fixture.session.flip();
+    fixture.session.reveal();
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
-    QCOMPARE(fixture.session.boxCounts(), QVector<int>({0, 2, 0, 0, 0}));
-    QCOMPARE(fixture.session.currentBox(), 2); // the next Flashcard is in Box 2
+    QCOMPARE(fixture.session.boxDistribution(), QVector<int>({0, 2, 0, 0, 0}));
+    QCOMPARE(fixture.session.currentLeitnerBox(), 2); // the next Flashcard is in Box 2
     QCOMPARE(fixture.session.cramNextInCards(), 2);
 
-    fixture.session.flip();
+    fixture.session.reveal();
     QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention));
-    QCOMPARE(fixture.session.boxCounts(), QVector<int>({1, 1, 0, 0, 0}));
-    QCOMPARE(fixture.session.currentBox(), 2); // the reset card waits; the other Box 2 card is next
+    QCOMPARE(fixture.session.boxDistribution(), QVector<int>({1, 1, 0, 0, 0}));
+    QCOMPARE(fixture.session.currentLeitnerBox(), 2); // the reset card waits; the other Box 2 card is next
     QCOMPARE(fixture.session.cramNextInCards(), 2);
 }
 
@@ -496,24 +496,24 @@ void TestStudySession::reviewStatusOmitsSessionPositionBox() {
     QVERIFY(!fixture.session.status().contains(QStringLiteral("FSRS box")));
 }
 
-void TestStudySession::flipAndShowNextToggleAnswer() {
+void TestStudySession::revealAndShowNextToggleAnswer() {
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Flip", {"Q1"}, &error));
+    QVERIFY(prepareSession(fixture, "Reveal", {"Q1"}, &error));
     QSignalSpy cardSpy(&fixture.session, &StudySession::cardChanged);
 
     QVERIFY(!fixture.session.showingAnswer());
-    fixture.session.flip();
+    fixture.session.reveal();
     QVERIFY(fixture.session.showingAnswer());
     QCOMPARE(cardSpy.count(), 1);
 
-    fixture.session.flip();
+    fixture.session.reveal();
     QVERIFY(!fixture.session.showingAnswer());
     QCOMPARE(cardSpy.count(), 2);
 
-    fixture.session.flip();
+    fixture.session.reveal();
     QVERIFY(fixture.session.showingAnswer());
-    fixture.session.showNext(); // only flips when the answer is showing
+    fixture.session.showNext(); // only reveals when the answer is showing
     QVERIFY(!fixture.session.showingAnswer());
     QCOMPARE(cardSpy.count(), 4);
 
@@ -524,7 +524,7 @@ void TestStudySession::flipAndShowNextToggleAnswer() {
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QVERIFY(!fixture.session.hasCard());
     cardSpy.clear();
-    fixture.session.flip();
+    fixture.session.reveal();
     fixture.session.showNext();
     QCOMPARE(cardSpy.count(), 0);
     QVERIFY(!fixture.session.showingAnswer());
@@ -600,9 +600,9 @@ void TestStudySession::switchingToCramClearsPendingRepeat() {
     // The module suite owns the Cram ordering and endlessness assertions; here
     // we only check that the session forwards the rebuilt state.
     QVERIFY(fixture.session.hasCard());
-    QCOMPARE(fixture.session.currentBox(), 1);
+    QCOMPARE(fixture.session.currentLeitnerBox(), 1);
     QVERIFY(!fixture.session.waitingForRepeat());
-    fixture.session.flip();
+    fixture.session.reveal();
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QVERIFY(fixture.session.hasCard());
     QVERIFY(!fixture.session.waitingForRepeat());
@@ -613,19 +613,19 @@ void TestStudySession::statsTextAndMathEngine() {
     QString error;
     QVERIFY(prepareSession(fixture, "Stats", {"Q1", "Q2"}, &error));
 
-    QCOMPARE(fixture.session.boxCounts(), QVector<int>({0, 0, 0, 0, 0}));
+    QCOMPARE(fixture.session.boxDistribution(), QVector<int>({0, 0, 0, 0, 0}));
     QCOMPARE(fixture.session.statsText(), QString("0 reviewed · 0% Good"));
 
     fixture.session.setMode("cram");
     fixture.session.rebuild("Stats");
-    QCOMPARE(fixture.session.currentBox(), 1);
-    QCOMPARE(fixture.session.boxCounts(), QVector<int>({2, 0, 0, 0, 0}));
-    fixture.session.flip();
+    QCOMPARE(fixture.session.currentLeitnerBox(), 1);
+    QCOMPARE(fixture.session.boxDistribution(), QVector<int>({2, 0, 0, 0, 0}));
+    fixture.session.reveal();
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
-    QCOMPARE(fixture.session.boxCounts(), QVector<int>({1, 1, 0, 0, 0}));
+    QCOMPARE(fixture.session.boxDistribution(), QVector<int>({1, 1, 0, 0, 0}));
     QCOMPARE(fixture.session.statsText(), QString("1 reviewed · 100% Good"));
 
-    fixture.session.flip();
+    fixture.session.reveal();
     QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention));
     QCOMPARE(fixture.session.statsText(), QString("2 reviewed · 50% Good"));
 

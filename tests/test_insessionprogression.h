@@ -16,10 +16,10 @@ private slots:
     void repeatAfterOverwritesDeadline();
     void pendingRepeatsIsACopy();
     void buildCramKeepsTheGivenOrder();
-    void advanceCramPromotesAndResetsTheCurrentBox();
+    void advanceCramPromotesAndResetsTheCurrentLeitnerBox();
     void cramIntervalsCountOtherCards();
     void cramQueueNeverEndsForOneCard();
-    void emptyCramHasNoCurrentBox();
+    void emptyCramHasNoCurrentLeitnerBox();
     void removeDropsReviewAndCramCards();
     void clearDropsRepeatsAndLeitnerBox();
     void switchingToCramDropsPendingRepeats();

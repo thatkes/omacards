@@ -17,7 +17,7 @@ private slots:
     void goodRatingWithFailedRefreshPinsErrorAndDegradedValues();
     void againRatingWithFailedRefreshKeepsPendingRepeat();
     void reviewStatusOmitsSessionPositionBox();
-    void flipAndShowNextToggleAnswer();
+    void revealAndShowNextToggleAnswer();
     void setStatusDedupesAndReportErrorSignals();
     void rebuildKeepsPendingRepeatInReview();
     void switchingToCramClearsPendingRepeat();

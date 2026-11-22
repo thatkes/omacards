@@ -248,8 +248,8 @@ void Backend::setMode(const QString &mode) {
     m_session.rebuild(m_currentDeck);
 }
 
-void Backend::flip() {
-    m_session.flip();
+void Backend::reveal() {
+    m_session.reveal();
 }
 
 void Backend::rate(int rating) {
