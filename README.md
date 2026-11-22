@@ -187,4 +187,3 @@ Theme watching follows Omacut and Monologue (MIT, David Heinemeier Hansson).
 - Ensure switching themes works properly
 - Investigate LaTeX rendered size discrepancy: `\sqrt{10}` in the local Taylor-Series-Worked-Problems (“Worked”) deck renders at a different size than the surrounding math. Check SVG root width/height scaling in `src/mathrender.cpp` (`scaleSvgRoot`, `svgPixelSize`) and the `<img>` sizing emitted for rich text; reproduce with `omacards preview --deck Taylor-Series-Worked-Problems --format html` and add a regression check for the fix.
 - Make latex svg caching faster (or, feel faster)
-- In cram mode, show distribution

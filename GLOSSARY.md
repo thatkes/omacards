@@ -100,6 +100,18 @@ _Avoid_: pass, correct, easy
 A stage in Cram that decides how many other cards appear before a card returns.
 _Avoid_: box, level, bucket
 
+**Box distribution**:
+The count of Cards in each Leitner box during a Cram session.
+_Avoid_: box histogram, box breakdown, level counts
+
+**Box distribution display**:
+The view in the Study footer that shows the Box distribution for the current Cram session.
+_Avoid_: box histogram view, Leitner chart
+
+**Study footer**:
+The fixed bottom area of the Study screen that holds the Rating controls and session status.
+_Avoid_: status bar, bottom bar
+
 **Review history**:
 The record of ratings given to cards over time.
 _Avoid_: review log, activity
