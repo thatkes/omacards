@@ -7,12 +7,15 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFont>
+#include <QFontMetricsF>
 #include <QHash>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QPointer>
 #include <QProcess>
 #include <QRunnable>
+#include <QRectF>
 #include <QRegularExpression>
 #include <QSet>
 #include <QSize>
@@ -122,22 +125,40 @@ QStringList expressionsIn(const QString &text) {
     return result;
 }
 
-// The reserved box uses the same dimensions for the placeholder and the final
-// SVG, so swapping one for the other cannot move the surrounding text.
-QSize reservedMathSize(const QString &expression, double scale) {
-    const int characters = qBound(3, expression.trimmed().size(), 40);
-    return QSize(qRound(characters * 7.0 * scale / 1.6), qRound(18.0 * scale / 1.6));
+QSize svgPixelSize(const QString &path);
+
+// A cached SVG already knows its logical size, so use it for the display box.
+// No TeX run is available while the file is still missing; there we measure the
+// Unicode glyphs the fallback uses in the math font at the requested scale.
+// Rounding to whole even pixels keeps the box symmetric and gives the fake
+// toolchain an exact logical size to publish in its SVG.
+QSize reservedMathSize(const QString &expression, double scale, const QString &svgPath = {}) {
+    if (!svgPath.isEmpty()) {
+        const QSize logical = svgPixelSize(svgPath);
+        if (!logical.isEmpty())
+            return QSize(qRound(logical.width() * scale), qRound(logical.height() * scale));
+    }
+    QFont font(QStringLiteral("Noto Sans Math"));
+    font.setPixelSize(qMax(1, qRound(10.0 * scale)));
+    const QFontMetricsF metrics(font);
+    const QRectF glyphs = metrics.boundingRect(unicodeMath(expression));
+    const auto evenPixels = [](qreal value) { return qMax(2, 2 * qCeil(value / 2.0)); };
+    return QSize(evenPixels(glyphs.width() + 4.0), evenPixels(glyphs.height() + 4.0));
 }
 
 QString mathPlaceholderTag(const QString &key, const QSize &size) {
-    const int spaces = qMax(2, size.width() / 7);
+    // An inline image is the same rich-text layout primitive as the finished
+    // SVG, so a transparent pixel scaled to the reserved box holds the slot
+    // without shifting the text around it.
     return MathRenderer::mathPlaceholderMarker(key) +
-           QStringLiteral("<span style='font-family: monospace; color: #888888;'>%1</span>")
-               .arg(QString(spaces, QChar::Nbsp));
+           QStringLiteral("<span><img src='data:image/png;base64,"
+                          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII="
+                          "' width='%1' height='%2' align='middle' style='vertical-align: middle;'></span>")
+               .arg(size.width())
+               .arg(size.height());
 }
 
 const QRegularExpression &blackFillPattern();
-QSize svgPixelSize(const QString &path);
 QString normalizeInk(const QString &ink);
 
 // The cached file stays a neutral master. Recoloring happens on the bytes that
@@ -155,8 +176,7 @@ QString mathImageHtml(const QString &path, const QString &expression, const QStr
     const QString source = colorizedSvgUri(path, ink);
     if (source.isEmpty())
         return {};
-    const QSize logical = svgPixelSize(path);
-    const QSize pixels(qRound(logical.width() * scale), qRound(logical.height() * scale));
+    const QSize pixels = reservedMathSize(expression, scale, path);
     return QStringLiteral("<img src='%1' alt='%2' width='%3' height='%4' align='middle' "
                           "style='vertical-align: middle;'>")
         .arg(source, expression.toHtmlEscaped())
@@ -350,7 +370,7 @@ QString MathRenderer::renderWithPlaceholders(const QString &text, const QString 
             if (QFileInfo::exists(path))
                 return renderExpression(expression, ink, scale);
             const QString key = QFileInfo(path).completeBaseName();
-            const QSize size = reservedMathSize(expression, scale);
+            const QSize size = reservedMathSize(expression, scale, path);
             enqueueExpression({key, expression, ink, scale, size});
             return mathPlaceholderTag(key, size);
         },
@@ -367,7 +387,7 @@ void MathRenderer::prefetch(const QString &text, const QString &ink, double scal
         if (QFileInfo::exists(path))
             continue;
         enqueueExpression(
-            {QFileInfo(path).completeBaseName(), expression, ink, scale, reservedMathSize(expression, scale)});
+            {QFileInfo(path).completeBaseName(), expression, ink, scale, reservedMathSize(expression, scale, path)});
     }
 }
 
