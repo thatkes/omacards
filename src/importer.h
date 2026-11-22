@@ -10,7 +10,6 @@ namespace DeckImport {
 
 struct Result {
     QString deckName;
-    QString description;
     QVector<CardDraft> cards;
 };
 
