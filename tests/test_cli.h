@@ -22,7 +22,7 @@ private slots:
     void cliEditsAndDeletesCardsAcrossDecks();
     void previewRendersMathAsText();
     void checkMathReportsUnsupportedCommands();
-    void checkReportsLineNumberedIssues();
+    void checkReportsLineNumberedDeckIssues();
     void headlessCommandDetectionIsComplete();
     void unknownCommandJsonError();
     void checkJsonKeyContract();

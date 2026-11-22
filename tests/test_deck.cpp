@@ -346,7 +346,7 @@ void TestDeck::deckSaveRoundTripsAndRejectsEmptyPath() {
     QVERIFY(error.contains(QStringLiteral("has no file path")));
 }
 
-void TestDeck::deckLintReportsIssues() {
+void TestDeck::deckLintReportsDeckIssues() {
     QTemporaryDir dir;
     QVERIFY(DeckIO::lint(dir.filePath("nonexistent")).isEmpty());
 

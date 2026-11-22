@@ -17,7 +17,7 @@ private slots:
     void deckLoadAllFiltersSortsAndReportsErrors();
     void deckSafeFileNameSanitizes();
     void deckSaveRoundTripsAndRejectsEmptyPath();
-    void deckLintReportsIssues();
+    void deckLintReportsDeckIssues();
     void deckLintFileMatchesDirectoryLint();
     void deckClozeEdgeCases();
 };

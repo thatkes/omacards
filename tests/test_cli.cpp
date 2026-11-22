@@ -500,7 +500,7 @@ void TestCli::checkMathReportsUnsupportedCommands() {
              QString("Unsupported math command: \\foobar"));
 }
 
-void TestCli::checkReportsLineNumberedIssues() {
+void TestCli::checkReportsLineNumberedDeckIssues() {
     QTemporaryDir dir;
     EnvGuard env(dir.filePath("decks"), dir.filePath("state.db"));
     QVERIFY(QDir().mkpath(dir.filePath("decks")));
