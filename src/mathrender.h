@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QMutex>
 #include <QObject>
 #include <QQueue>
@@ -52,6 +53,9 @@ public:
     // producing any markup. No toolchain process runs on the calling thread.
     QString renderWithPlaceholders(const QString &text, const QString &ink, double scale);
     void prefetch(const QString &text, const QString &ink, double scale);
+    // Drops the waiting queue and invalidates in-flight results. A worker that
+    // started before this call still writes its neutral SVG, but its markup is
+    // rebuilt with the request that is current when it finishes.
     void clearPendingMath();
 
     static QString mathPlaceholderMarker(const QString &key);
@@ -66,7 +70,7 @@ signals:
     void mathRendered(const QString &key, const QString &html);
 
 private slots:
-    void finishRender(const QString &key, const QString &html);
+    void finishRender(const QString &key, const QString &html, quint64 generation);
 
 private:
     friend class MathRenderRunnable;
@@ -94,6 +98,9 @@ private:
     QQueue<RenderRequest> m_queue;
     QSet<QString> m_queuedKeys;
     QSet<QString> m_activeKeys;
+    QHash<QString, RenderRequest> m_activeRequests;
+    QHash<QString, quint64> m_activeRequestGenerations;
+    quint64 m_generation = 0;
 
     QString renderLatex(const QString &expression) const;
 };

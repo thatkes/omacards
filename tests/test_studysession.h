@@ -26,4 +26,5 @@ private slots:
     void prefetchQueuesTheNextThreeCardsWithoutChangingOrder();
     void prefetchResultIsIgnoredForCardsAlreadyLeftBehind();
     void themeChangeRecolorsFromCacheWithoutPrefetch();
+    void themeChangeDuringRenderUsesNewInk();
 };

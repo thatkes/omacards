@@ -96,7 +96,8 @@ struct StubSessionFixture {
 };
 
 bool prepareSessionParts(DeckRepository &repo, Store &store, StudyPlanner &planner, StudySession &session,
-                         QString *loadedDeck, const QString &deckName, const QStringList &questions, QString *error) {
+                         QString *loadedDeck, const QString &deckName, const QStringList &questions, QString *error,
+                         const QStringList &answers = {}) {
     if (!repo.initialize(error))
         return false;
     if (!store.open(error))
@@ -108,8 +109,9 @@ bool prepareSessionParts(DeckRepository &repo, Store &store, StudyPlanner &plann
     }
     if (!repo.createDeck(deckName, loadedDeck, error))
         return false;
-    for (const QString &question : questions) {
-        if (!repo.createCard(deckName, loadedDeck, question, "A " + question, "basic", QString(), error))
+    for (int i = 0; i < questions.size(); ++i) {
+        const QString answer = i < answers.size() ? answers.at(i) : "A " + questions.at(i);
+        if (!repo.createCard(deckName, loadedDeck, questions.at(i), answer, "basic", QString(), error))
             return false;
     }
     repo.load(loadedDeck);
@@ -153,6 +155,18 @@ int tectonicRenders(const QString &logPath) {
 
 QString cacheKey(const QString &path) {
     return QFileInfo(path).completeBaseName();
+}
+
+QString decodedMathSvg(const QString &html) {
+    static const QString prefix = QStringLiteral("<img src='data:image/svg+xml;base64,");
+    const int start = html.indexOf(prefix);
+    if (start < 0)
+        return {};
+    const int end = html.indexOf('\'', start + prefix.size());
+    if (end < 0)
+        return {};
+    const QByteArray encoded = html.mid(start + prefix.size(), end - start - prefix.size()).toLocal8Bit();
+    return QString::fromUtf8(QByteArray::fromBase64(encoded));
 }
 
 class AgainDelayGuard {
@@ -742,4 +756,52 @@ void TestStudySession::themeChangeRecolorsFromCacheWithoutPrefetch() {
     QVERIFY(questionAfter != questionBefore);
     QVERIFY(questionAfter.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
     QVERIFY(!questionAfter.contains(QStringLiteral("<!--omacards-math:")));
+}
+
+void TestStudySession::themeChangeDuringRenderUsesNewInk() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString bin = dir.filePath("bin");
+    const QString cache = dir.filePath("cache/omacards/math");
+    const QString argsLog = dir.filePath("args.log");
+    const QString started = dir.filePath("started");
+    const QString release = dir.filePath("release");
+    // pdftocairo announces the in-flight render and waits for the test, so the
+    // theme switch cannot race past the worker into an already cached SVG.
+    const QString gate = QStringLiteral("printf 'started' > \"$OMACARDS_TEST_STARTED\"\n"
+                                        "i=0\n"
+                                        "while [ ! -e \"$OMACARDS_TEST_RELEASE\" ] && [ $i -lt 200 ]; do\n"
+                                        "    sleep 0.05\n"
+                                        "    i=$((i+1))\n"
+                                        "done\n");
+    QVERIFY(writeFakePdfToolchain(bin, kTinySvg, gate));
+
+    TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
+    TestSupport::ScopedEnv argsEnv("OMACARDS_TEST_ARGS", argsLog);
+    TestSupport::ScopedEnv startedEnv("OMACARDS_TEST_STARTED", started);
+    TestSupport::ScopedEnv releaseEnv("OMACARDS_TEST_RELEASE", release);
+    TestSupport::PathPrependGuard pathGuard(bin);
+
+    SessionFixture fixture;
+    QString error;
+    QVERIFY(prepareSessionParts(fixture.repo, fixture.store, fixture.planner, fixture.session, &fixture.current,
+                                "InFlight", {"\\(x^2\\)"}, &error, {"plain"}));
+    QVERIFY(error.isEmpty());
+
+    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(started), 5000);
+    QVERIFY(fixture.session.question().contains(QStringLiteral("<!--omacards-math:")));
+    QCOMPARE(tectonicRenders(argsLog), 1);
+
+    fixture.session.setMathColors("#112233", "#445566");
+    QVERIFY(writeFile(release, ""));
+
+    QTRY_VERIFY_WITH_TIMEOUT(!fixture.session.question().contains(QStringLiteral("<!--omacards-math:")), 5000);
+    const QString question = fixture.session.question();
+    QVERIFY(question.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
+    const QString svg = decodedMathSvg(question);
+    QVERIFY(svg.contains(QStringLiteral("fill=\"#112233\"")));
+    QVERIFY(!svg.contains(QStringLiteral("fill=\"#000000\"")));
+    // Switching ink reused the in-flight neutral render; it never started a
+    // second toolchain run or changed the cached SVG.
+    QCOMPARE(tectonicRenders(argsLog), 1);
 }
