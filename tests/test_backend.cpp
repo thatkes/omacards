@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFont>
 #include <QImage>
 #include <QMouseEvent>
 #include <QWheelEvent>
@@ -56,6 +57,62 @@ struct MainWindowHarness {
 
     QQuickItem *item(const QString &objectName) const {
         return window ? window->findChild<QQuickItem *>(objectName) : nullptr;
+    }
+
+    // Geometry-only facts for the loaded study panel. All rects are mapped
+    // through real QML items; text measured inside the scroll content, and
+    // gaps measured against the clipped viewport, so a long answer that is
+    // still scrollable does not look like an overlap with the fixed controls.
+    QVariantMap visualFacts() const {
+        QVariantMap facts;
+        auto *scroll = item(QStringLiteral("studyScrollView"));
+        auto *content = scroll ? scroll->property("contentItem").value<QQuickItem *>() : nullptr;
+        auto *question = item(QStringLiteral("studyQuestionLabel"));
+        auto *answer = item(QStringLiteral("studyAnswerLabel"));
+        auto *hint = item(QStringLiteral("studyHint"));
+        auto *again = item(QStringLiteral("studyAgainButton"));
+        auto *good = item(QStringLiteral("studyGoodButton"));
+        if (!scroll || !content || !question || !answer || !hint || !again || !good)
+            return facts;
+
+        const qreal tolerance = 1.5;
+        const qreal contentWidth = content->property("contentWidth").toReal();
+        const qreal contentHeight = content->property("contentHeight").toReal();
+        const QRectF contentRect(0.0, 0.0, contentWidth, contentHeight);
+        const QRectF viewportScene = scroll->mapRectToScene(scroll->boundingRect());
+        QRectF textInContent;
+        QRectF visibleTextScene;
+        for (QQuickItem *label : {question, answer}) {
+            if (!label->isVisible())
+                continue;
+            const QRectF labelContent = label->mapRectToItem(content, label->boundingRect());
+            textInContent = textInContent.isEmpty() ? labelContent : textInContent.united(labelContent);
+            const QRectF labelScene = label->mapRectToScene(label->boundingRect()).intersected(viewportScene);
+            visibleTextScene = visibleTextScene.isEmpty() ? labelScene : visibleTextScene.united(labelScene);
+        }
+        if (textInContent.isEmpty() || visibleTextScene.isEmpty())
+            return facts;
+
+        facts.insert(QStringLiteral("textInsideContent"),
+                     contentRect.adjusted(-tolerance, -tolerance, tolerance, tolerance).contains(textInContent));
+        const auto gapBelowText = [&](QQuickItem *control) {
+            if (!control->isVisible())
+                return -1.0;
+            return control->mapRectToScene(control->boundingRect()).top() - visibleTextScene.bottom();
+        };
+        facts.insert(QStringLiteral("gapToHint"), gapBelowText(hint));
+        facts.insert(QStringLiteral("gapToRatings"), qMin(gapBelowText(again), gapBelowText(good)));
+        facts.insert(QStringLiteral("scrollRange"), qMax<qreal>(0.0, contentHeight - content->height()));
+        facts.insert(QStringLiteral("lastLineBottomGap"), contentHeight - textInContent.bottom());
+        facts.insert(QStringLiteral("horizontalOverflow"), contentWidth - content->width());
+        facts.insert(QStringLiteral("answerContentWidth"), answer->property("contentWidth").toReal());
+        facts.insert(QStringLiteral("textWidth"), answer->width());
+        const auto fontPixels = [](QQuickItem *label) {
+            return qvariant_cast<QFont>(label->property("font")).pixelSize();
+        };
+        facts.insert(QStringLiteral("answerFontPixels"), fontPixels(answer));
+        facts.insert(QStringLiteral("questionFontPixels"), fontPixels(question));
+        return facts;
     }
 
     void settle() const {
@@ -775,6 +832,66 @@ void TestBackend::qmlStudyScalesPicturesToWidth() {
     QVERIFY(narrowSize.second > 0);
     QCOMPARE(narrowSize.first, qreal(120));
     QCOMPARE(narrowSize.second, qreal(40));
+}
+
+void TestBackend::qmlStudyVisualFactsPinLayoutAtMinimumSize() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Study", &error));
+    QImage wide(900, 300, QImage::Format_ARGB32);
+    wide.fill(Qt::white);
+    const QString imagePath = dir.filePath("wide.png");
+    QVERIFY(wide.save(imagePath));
+    const QString answer = QStringLiteral("<img src=\"%1\" width=\"900\" height=\"300\">%2")
+                               .arg(QUrl::fromLocalFile(imagePath).toString(), manyCardLines(30));
+    QVERIFY(backend.createCard("Study", "Short question", answer, "basic", {}, &error));
+    backend.selectDeck("Study");
+    backend.setMode("cram");
+    backend.refresh();
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    window->resize(760, 540);
+    QCOMPARE(window->width(), 760);
+    QCOMPARE(window->height(), 540);
+    QVERIFY(QMetaObject::invokeMethod(view.window, "startStudy", Q_ARG(QVariant, QStringLiteral("cram"))));
+    view.settleFileWatcher();
+    QCOMPARE(view.window->property("screen").toString(), QStringLiteral("study"));
+
+    const QStringList names{"textInsideContent", "gapToHint",          "gapToRatings",       "scrollRange",
+                            "lastLineBottomGap", "horizontalOverflow", "answerContentWidth", "textWidth",
+                            "answerFontPixels",  "questionFontPixels"};
+    const QVariantMap questionFacts = view.visualFacts();
+    for (const QString &name : names)
+        QVERIFY2(questionFacts.contains(name), qPrintable(name + QStringLiteral(" missing in question facts")));
+
+    QVERIFY(questionFacts.value("textInsideContent").toBool());
+    QVERIFY2(questionFacts.value("gapToHint").toDouble() >= 8.0, "question text touches the hint");
+    QVERIFY2(questionFacts.value("horizontalOverflow").toDouble() <= 1.0, "horizontal overflow in question state");
+
+    QVERIFY(QMetaObject::invokeMethod(view.window, "flipAndResetStudyScroll"));
+    view.settle();
+    QVERIFY(backend.showingAnswer());
+
+    const QVariantMap answerFacts = view.visualFacts();
+    for (const QString &name : names)
+        QVERIFY2(answerFacts.contains(name), qPrintable(name + QStringLiteral(" missing in answer facts")));
+
+    QVERIFY(answerFacts.value("textInsideContent").toBool());
+    QVERIFY2(answerFacts.value("gapToRatings").toDouble() >= 8.0, "answer text touches the Again/Good row");
+    QVERIFY2(answerFacts.value("scrollRange").toDouble() > 50.0, "long answer should scroll");
+    QVERIFY2(qAbs(answerFacts.value("lastLineBottomGap").toDouble()) <= 1.0,
+             "last answer line should lie at the scrollable content bottom");
+    QVERIFY2(answerFacts.value("horizontalOverflow").toDouble() <= 1.0, "horizontal overflow in answer state");
+    QVERIFY2(answerFacts.value("answerContentWidth").toDouble() <= answerFacts.value("textWidth").toDouble() + 1.0,
+             "wide image should fit inside the text column");
+    QCOMPARE(answerFacts.value("answerFontPixels").toInt(), 24);
+    QCOMPARE(answerFacts.value("questionFontPixels").toInt(), 30);
 }
 
 void TestBackend::qmlCramLabelUsesCurrentBox() {

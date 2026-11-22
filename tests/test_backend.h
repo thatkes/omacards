@@ -23,6 +23,7 @@ private slots:
     void qmlStudyResetsScrollOnFlipAndNewCard();
     void qmlStudyPointerScrollAndClickFlip();
     void qmlStudyScalesPicturesToWidth();
+    void qmlStudyVisualFactsPinLayoutAtMinimumSize();
     void qmlCramLabelUsesCurrentBox();
     void qmlGoodLabelUsesGoodCount();
     void qmlSettingsRowsFitTheirContent();
