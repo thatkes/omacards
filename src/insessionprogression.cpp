@@ -8,7 +8,7 @@ void InSessionProgression::clear() {
     m_reviewQueue.clear();
     m_reviewAgainNotBefore.clear();
     m_cramReviews = 0;
-    m_currentBox = 0;
+    m_currentLeitnerBox = 0;
 }
 
 void InSessionProgression::buildReview(const QStringList &dueIds, const QStringList &newIds,
@@ -39,8 +39,8 @@ InSessionProgression::NextResult InSessionProgression::next(qint64 now) {
                 best = i;
         result.kind = Next::Ready;
         result.cardId = m_cramQueue.at(best).cardId;
-        m_currentBox = m_cramQueue.at(best).box + 1;
-        result.box = m_currentBox;
+        m_currentLeitnerBox = m_cramQueue.at(best).leitnerBox + 1;
+        result.leitnerBox = m_currentLeitnerBox;
         return result;
     }
     if (m_reviewQueue.isEmpty())
@@ -68,10 +68,10 @@ InSessionProgression::NextResult InSessionProgression::next(qint64 now) {
     return result;
 }
 
-QVector<int> InSessionProgression::boxCounts() const {
+QVector<int> InSessionProgression::boxDistribution() const {
     QVector<int> counts(Config::kLeitnerBoxes, 0);
     for (const CramEntry &entry : m_cramQueue)
-        ++counts[entry.box];
+        ++counts[entry.leitnerBox];
     return counts;
 }
 
@@ -142,10 +142,10 @@ void InSessionProgression::advanceCram(const QString &id, Rating rating) {
         if (m_cramQueue.at(i).cardId != id)
             continue;
         CramEntry entry = m_cramQueue.takeAt(i);
-        entry.box = rating == Rating::Again ? 0 : qMin(Config::kLeitnerBoxes - 1, entry.box + 1);
-        entry.nextShowReview = ++m_cramReviews + Config::kLeitnerIntervals[entry.box];
+        entry.leitnerBox = rating == Rating::Again ? 0 : qMin(Config::kLeitnerBoxes - 1, entry.leitnerBox + 1);
+        entry.nextShowReview = ++m_cramReviews + Config::kLeitnerIntervals[entry.leitnerBox];
         m_cramQueue.append(entry);
-        m_currentBox = entry.box + 1;
+        m_currentLeitnerBox = entry.leitnerBox + 1;
         return;
     }
 }

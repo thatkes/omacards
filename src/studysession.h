@@ -36,7 +36,7 @@ public:
     void setMathColors(const QString &questionColor, const QString &answerColor);
     void applyMathRenderResult(const QString &key, const QString &html);
 
-    void flip();
+    void reveal();
     bool rate(Rating rating, double desiredRetention);
     void showNext();
 
@@ -49,11 +49,11 @@ public:
     int dueCount() const { return m_dueCount; }
     int reviewed() const { return m_reviewed; }
     int good() const { return m_good; }
-    int currentBox() const { return m_progression.currentBox(); }
-    QVector<int> boxCounts() const { return m_progression.boxCounts(); }
+    int currentLeitnerBox() const { return m_progression.currentLeitnerBox(); }
+    QVector<int> boxDistribution() const { return m_progression.boxDistribution(); }
     int cramNextInCards() const {
-        const int box = currentBox();
-        return box >= 1 && box <= Config::kLeitnerBoxes ? Config::kLeitnerIntervals[box - 1] : 0;
+        const int leitnerBox = currentLeitnerBox();
+        return leitnerBox >= 1 && leitnerBox <= Config::kLeitnerBoxes ? Config::kLeitnerIntervals[leitnerBox - 1] : 0;
     }
     QString status() const { return m_status; }
     QString currentCardId() const { return m_currentId; }

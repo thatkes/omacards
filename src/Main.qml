@@ -5,7 +5,7 @@ import QtQuick.Layouts
 
 // Main.qml map. Names, not line numbers, so this stays true after edits.
 // keyHandler - one Keys.onPressed for every screen
-// study - study Panel with the Flashcard viewport, edge fades, end hint and flip MouseArea
+// study - study Panel with the Flashcard viewport, edge fades, end hint and reveal MouseArea
 // library - deckList and cardView ListViews
 // settings - ScrollView
 // help overlay - keyboard Repeater
@@ -47,7 +47,7 @@ ApplicationWindow {
     }
 
     function cramQueueHasCards() {
-        const counts = backend.boxCounts
+        const counts = backend.boxDistribution
         for (let i = 0; i < counts.length; ++i)
             if (counts[i] > 0)
                 return true
@@ -159,21 +159,21 @@ ApplicationWindow {
     }
 
     function resetStudyScroll() {
-        const flick = studyViewport.contentItem
+        const flick = flashcardViewport.contentItem
         if (flick) {
             flick.contentX = 0
             flick.contentY = 0
         }
     }
 
-    function flipAndResetStudyScroll() {
-        backend.flip()
+    function revealAndResetFlashcardViewport() {
+        backend.reveal()
         resetStudyScroll()
     }
 
     function scrollStudy(direction) {
-        const flick = studyViewport.contentItem
-        if (!flick || !studyViewport.visible)
+        const flick = flashcardViewport.contentItem
+        if (!flick || !flashcardViewport.visible)
             return false
         const maxY = Math.max(0, flick.contentHeight - flick.height)
         const target = Math.min(maxY, Math.max(0, flick.contentY + direction * 48))
@@ -570,17 +570,17 @@ ApplicationWindow {
                     case Qt.Key_Space:
                     case Qt.Key_Return:
                     case Qt.Key_Enter:
-                        win.flipAndResetStudyScroll()
+                        win.revealAndResetFlashcardViewport()
                         event.accepted = true
                         break
                     case Qt.Key_Up:
                         if (!win.scrollStudy(-1))
-                            win.flipAndResetStudyScroll()
+                            win.revealAndResetFlashcardViewport()
                         event.accepted = true
                         break
                     case Qt.Key_Down:
                         if (!win.scrollStudy(1))
-                            win.flipAndResetStudyScroll()
+                            win.revealAndResetFlashcardViewport()
                         event.accepted = true
                         break
                     case Qt.Key_K:
@@ -594,13 +594,13 @@ ApplicationWindow {
                     case Qt.Key_1:
                     case Qt.Key_A:
                     case Qt.Key_Left:
-                        backend.showingAnswer ? backend.rate(1) : win.flipAndResetStudyScroll()
+                        backend.showingAnswer ? backend.rate(1) : win.revealAndResetFlashcardViewport()
                         event.accepted = true
                         break
                     case Qt.Key_2:
                     case Qt.Key_G:
                     case Qt.Key_Right:
-                        backend.showingAnswer ? backend.rate(3) : win.flipAndResetStudyScroll()
+                        backend.showingAnswer ? backend.rate(3) : win.revealAndResetFlashcardViewport()
                         event.accepted = true
                         break
                     case Qt.Key_R:
@@ -881,12 +881,12 @@ ApplicationWindow {
 
                                     Label {
                                         Layout.alignment: Qt.AlignHCenter
-                                        objectName: "cramBoxLabel"
+                                        objectName: "cramLeitnerBoxLabel"
                                         text: {
                                             if (!backend.hasCard)
                                                 return qsTr("SESSION")
                                             return backend.mode === "cram"
-                                                   ? qsTr("CRAM · BOX %1 OF 5").arg(backend.currentBox)
+                                                   ? qsTr("CRAM · BOX %1 OF 5").arg(backend.currentLeitnerBox)
                                                    : qsTr("REVIEW · %1 DUE").arg(backend.dueCount)
                                         }
                                         color: win.muted
@@ -901,8 +901,8 @@ ApplicationWindow {
                                         visible: backend.hasCard
 
                                         ScrollView {
-                                            id: studyViewport
-                                            objectName: "studyScrollView"
+                                            id: flashcardViewport
+                                            objectName: "flashcardViewport"
                                             anchors.fill: parent
                                             visible: backend.hasCard
                                             clip: true
@@ -928,14 +928,14 @@ ApplicationWindow {
                                             }
 
                                             Item {
-                                                width: studyViewport.width
+                                                width: flashcardViewport.width
                                                 height: studyText.implicitHeight
 
                                                 Column {
                                                     id: studyText
                                                     objectName: "studyTextColumn"
                                                     anchors.horizontalCenter: parent.horizontalCenter
-                                                    width: Math.min(studyViewport.width - 96, 660)
+                                                    width: Math.min(flashcardViewport.width - 96, 660)
                                                     spacing: 18
 
                                                     Label {
@@ -982,7 +982,7 @@ ApplicationWindow {
                                             anchors.top: parent.top
                                             height: 34
                                             enabled: false
-                                            visible: backend.hasCard && studyViewport.canScrollUp
+                                            visible: backend.hasCard && flashcardViewport.canScrollUp
                                             opacity: visible ? 0.9 : 0
                                             gradient: Gradient {
                                                 GradientStop { position: 0.0; color: win.panel }
@@ -1001,7 +1001,7 @@ ApplicationWindow {
                                             anchors.bottom: parent.bottom
                                             height: 34
                                             enabled: false
-                                            visible: backend.hasCard && studyViewport.canScrollDown
+                                            visible: backend.hasCard && flashcardViewport.canScrollDown
                                             opacity: visible ? 0.9 : 0
                                             gradient: Gradient {
                                                 GradientStop {
@@ -1021,7 +1021,7 @@ ApplicationWindow {
                                             color: win.muted
                                             font.pixelSize: 12
                                             visible: backend.hasCard && backend.showingAnswer
-                                                     && studyViewport.contentOverflows && !studyViewport.canScrollDown
+                                                     && flashcardViewport.contentOverflows && !flashcardViewport.canScrollDown
                                             opacity: visible ? 1 : 0
                                         }
                                     }
@@ -1033,7 +1033,7 @@ ApplicationWindow {
                                         primary: true
                                         label: qsTr("Show answer")
                                         hint: "Space"
-                                        onClicked: win.flipAndResetStudyScroll()
+                                        onClicked: win.revealAndResetFlashcardViewport()
                                     }
 
                                     Label {
@@ -1098,7 +1098,7 @@ ApplicationWindow {
                                     objectName: "studyClickArea"
                                     anchors.fill: parent
                                     enabled: backend.hasCard
-                                    onClicked: win.flipAndResetStudyScroll()
+                                    onClicked: win.revealAndResetFlashcardViewport()
                                     z: -1
                                 }
                             }
@@ -1826,33 +1826,33 @@ ApplicationWindow {
                         spacing: 10
 
                         Label {
-                            objectName: "cramBoxCount1"
-                            text: qsTr("Box 1: %1").arg(backend.boxCounts[0] || 0)
-                            color: backend.currentBox === 1 ? theme.green : win.muted
+                            objectName: "boxDistributionCount1"
+                            text: qsTr("Box 1: %1").arg(backend.boxDistribution[0] || 0)
+                            color: backend.currentLeitnerBox === 1 ? theme.green : win.muted
                             font.pixelSize: 11
                         }
                         Label {
-                            objectName: "cramBoxCount2"
-                            text: qsTr("Box 2: %1").arg(backend.boxCounts[1] || 0)
-                            color: backend.currentBox === 2 ? theme.green : win.muted
+                            objectName: "boxDistributionCount2"
+                            text: qsTr("Box 2: %1").arg(backend.boxDistribution[1] || 0)
+                            color: backend.currentLeitnerBox === 2 ? theme.green : win.muted
                             font.pixelSize: 11
                         }
                         Label {
-                            objectName: "cramBoxCount3"
-                            text: qsTr("Box 3: %1").arg(backend.boxCounts[2] || 0)
-                            color: backend.currentBox === 3 ? theme.green : win.muted
+                            objectName: "boxDistributionCount3"
+                            text: qsTr("Box 3: %1").arg(backend.boxDistribution[2] || 0)
+                            color: backend.currentLeitnerBox === 3 ? theme.green : win.muted
                             font.pixelSize: 11
                         }
                         Label {
-                            objectName: "cramBoxCount4"
-                            text: qsTr("Box 4: %1").arg(backend.boxCounts[3] || 0)
-                            color: backend.currentBox === 4 ? theme.green : win.muted
+                            objectName: "boxDistributionCount4"
+                            text: qsTr("Box 4: %1").arg(backend.boxDistribution[3] || 0)
+                            color: backend.currentLeitnerBox === 4 ? theme.green : win.muted
                             font.pixelSize: 11
                         }
                         Label {
-                            objectName: "cramBoxCount5"
-                            text: qsTr("Box 5: %1").arg(backend.boxCounts[4] || 0)
-                            color: backend.currentBox === 5 ? theme.green : win.muted
+                            objectName: "boxDistributionCount5"
+                            text: qsTr("Box 5: %1").arg(backend.boxDistribution[4] || 0)
+                            color: backend.currentLeitnerBox === 5 ? theme.green : win.muted
                             font.pixelSize: 11
                         }
                         Label {

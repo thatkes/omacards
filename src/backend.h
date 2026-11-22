@@ -37,8 +37,8 @@ class Backend : public QObject {
     Q_PROPERTY(QVariantList deckSelector READ deckSelector NOTIFY decksChanged)
     Q_PROPERTY(int reviewed READ reviewed NOTIFY statsChanged)
     Q_PROPERTY(int good READ good NOTIFY statsChanged)
-    Q_PROPERTY(int currentBox READ currentBox NOTIFY statsChanged)
-    Q_PROPERTY(QVariantList boxCounts READ boxCounts NOTIFY statsChanged)
+    Q_PROPERTY(int currentLeitnerBox READ currentLeitnerBox NOTIFY statsChanged)
+    Q_PROPERTY(QVariantList boxDistribution READ boxDistribution NOTIFY statsChanged)
     Q_PROPERTY(int cramNextInCards READ cramNextInCards NOTIFY statsChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(QString mathEngine READ mathEngine CONSTANT)
@@ -81,10 +81,10 @@ public:
     int streak() const { return m_store.summary(m_dayStartHour).streak; }
     int reviewed() const { return m_session.reviewed(); }
     int good() const { return m_session.good(); }
-    int currentBox() const { return m_session.currentBox(); }
-    QVariantList boxCounts() const {
+    int currentLeitnerBox() const { return m_session.currentLeitnerBox(); }
+    QVariantList boxDistribution() const {
         QVariantList counts;
-        for (int count : m_session.boxCounts())
+        for (int count : m_session.boxDistribution())
             counts << count;
         return counts;
     }
@@ -135,7 +135,7 @@ public slots:
     Q_INVOKABLE void refresh();
     Q_INVOKABLE void selectDeck(const QString &name);
     Q_INVOKABLE void setMode(const QString &mode);
-    Q_INVOKABLE void flip();
+    Q_INVOKABLE void reveal();
     // Named `rate` rather than `answer` because `answer` is also the Q_PROPERTY
     // holding the revealed answer text; QML resolves the property first.
     Q_INVOKABLE void rate(int rating);

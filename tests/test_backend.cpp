@@ -88,7 +88,7 @@ struct MainWindowHarness {
     // still scrollable does not look like an overlap with the fixed controls.
     QVariantMap visualFacts() const {
         QVariantMap facts;
-        auto *scroll = item(QStringLiteral("studyScrollView"));
+        auto *scroll = item(QStringLiteral("flashcardViewport"));
         auto *content = scroll ? scroll->property("contentItem").value<QQuickItem *>() : nullptr;
         auto *question = item(QStringLiteral("studyQuestionLabel"));
         auto *answer = item(QStringLiteral("studyAnswerLabel"));
@@ -209,8 +209,8 @@ struct StudyViewFixture {
 
     QVariantMap visualFacts() const { return view ? view->visualFacts() : QVariantMap(); }
 
-    bool flipAndResetStudyScroll() const {
-        return view && QMetaObject::invokeMethod(view->window, "flipAndResetStudyScroll");
+    bool revealAndResetFlashcardViewport() const {
+        return view && QMetaObject::invokeMethod(view->window, "revealAndResetFlashcardViewport");
     }
 
     bool scaleImagesToWidth(const QString &html, double width, QString *out) const {
@@ -321,7 +321,7 @@ void TestBackend::backendCreatesCardAndRatesInCram() {
     backend.selectDeck("Test");
     backend.setMode("cram");
     QVERIFY(backend.hasCard());
-    backend.flip();
+    backend.reveal();
     QVERIFY(backend.showingAnswer());
     backend.rate(3);
     QCOMPARE(backend.reviewed(), 1);
@@ -338,7 +338,7 @@ void TestBackend::qmlCanRateCards() {
     QVERIFY(backend.createCard("Test", "Question?", "Answer", "basic", {}, &error));
     backend.selectDeck("Test");
     backend.setMode("cram");
-    backend.flip();
+    backend.reveal();
 
     QQmlEngine engine;
     engine.rootContext()->setContextProperty("backend", &backend);
@@ -754,7 +754,7 @@ void TestBackend::qmlStudySelectorSwitchesDeckFresh() {
     QTest::keyClick(window, Qt::Key_2);
     fixture.settle();
     QCOMPARE(fixture.backend.reviewed(), 1);
-    QCOMPARE(fixture.backend.currentBox(), 2);
+    QCOMPARE(fixture.backend.currentLeitnerBox(), 2);
 
     QTest::keyClick(window, Qt::Key_BracketRight);
     fixture.settle();
@@ -763,10 +763,10 @@ void TestBackend::qmlStudySelectorSwitchesDeckFresh() {
     QCOMPARE(fixture.backend.mode(), QString("cram"));
     QVERIFY(fixture.backend.question().contains("Beta question"));
     QCOMPARE(fixture.backend.reviewed(), 0);
-    QCOMPARE(fixture.backend.currentBox(), 1);
+    QCOMPARE(fixture.backend.currentLeitnerBox(), 1);
 }
 
-void TestBackend::qmlStudyScrollViewClipsAndSizes() {
+void TestBackend::qmlStudyFlashcardViewportClipsAndSizes() {
     StudyViewFixture fixture;
     QVERIFY(fixture.initialize());
     QVERIFY(fixture.createDeck());
@@ -780,7 +780,7 @@ void TestBackend::qmlStudyScrollViewClipsAndSizes() {
     QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
     QCOMPARE(fixture.screenName(), QStringLiteral("study"));
 
-    auto *scroll = fixture.item(QStringLiteral("studyScrollView"));
+    auto *scroll = fixture.item(QStringLiteral("flashcardViewport"));
     auto *verticalBar = fixture.item(QStringLiteral("studyVerticalScrollBar"));
     auto *horizontalBar = fixture.item(QStringLiteral("studyHorizontalScrollBar"));
     auto *question = fixture.item(QStringLiteral("studyQuestionLabel"));
@@ -810,7 +810,7 @@ void TestBackend::qmlStudyScrollViewClipsAndSizes() {
     for (QQuickItem *item : fixed)
         places << visualRect(item);
 
-    QVERIFY(fixture.flipAndResetStudyScroll());
+    QVERIFY(fixture.revealAndResetFlashcardViewport());
     fixture.settle();
     QVERIFY(fixture.backend.showingAnswer());
 
@@ -832,7 +832,7 @@ void TestBackend::qmlStudyScrollViewClipsAndSizes() {
     QVERIFY(qAbs(flickable->property("contentY").toReal() - qMin(heldPosition, grownMax)) < 1.0);
 }
 
-void TestBackend::qmlStudyScrollFirstKeysAndFlipFallbacks() {
+void TestBackend::qmlStudyScrollFirstKeysAndRevealFallbacks() {
     StudyViewFixture fixture;
     QVERIFY(fixture.initialize());
     QVERIFY(fixture.createDeck());
@@ -845,7 +845,7 @@ void TestBackend::qmlStudyScrollFirstKeysAndFlipFallbacks() {
     QVERIFY(window);
     QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
 
-    auto *scroll = fixture.item(QStringLiteral("studyScrollView"));
+    auto *scroll = fixture.item(QStringLiteral("flashcardViewport"));
     QVERIFY(scroll);
     auto *flickable = scroll->property("contentItem").value<QQuickItem *>();
     QVERIFY(flickable);
@@ -859,7 +859,7 @@ void TestBackend::qmlStudyScrollFirstKeysAndFlipFallbacks() {
     };
 
     QVERIFY(!fixture.backend.showingAnswer());
-    press(Qt::Key_Down); // the short question cannot scroll, so it flips
+    press(Qt::Key_Down); // the short question cannot scroll, so it reveals
     QVERIFY(fixture.backend.showingAnswer());
     QVERIFY2(maxPosition() > 50.0, "the long answer should scroll");
 
@@ -881,17 +881,17 @@ void TestBackend::qmlStudyScrollFirstKeysAndFlipFallbacks() {
 
     flickable->setProperty("contentY", 0.0);
     fixture.settle();
-    press(Qt::Key_K); // K only scrolls, so it cannot flip at the top
+    press(Qt::Key_K); // K only scrolls, so it cannot reveal at the top
     QVERIFY(fixture.backend.showingAnswer());
     QCOMPARE(position(), qreal(0));
     flickable->setProperty("contentY", maxPosition());
     fixture.settle();
-    press(Qt::Key_J); // J only scrolls, so it cannot flip at the bottom
+    press(Qt::Key_J); // J only scrolls, so it cannot reveal at the bottom
     QVERIFY(fixture.backend.showingAnswer());
     QCOMPARE(position(), maxPosition());
-    press(Qt::Key_Down); // at the bottom, Down flips
+    press(Qt::Key_Down); // at the bottom, Down reveals
     QVERIFY(!fixture.backend.showingAnswer());
-    press(Qt::Key_Up); // at the top, Up flips
+    press(Qt::Key_Up); // at the top, Up reveals
     QVERIFY(fixture.backend.showingAnswer());
 
     flickable->setProperty("contentY", 0.0);
@@ -917,7 +917,7 @@ void TestBackend::qmlStudyJKScrollOnlyWithoutOverflow() {
     QVERIFY(window);
     QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
 
-    auto *scroll = fixture.item(QStringLiteral("studyScrollView"));
+    auto *scroll = fixture.item(QStringLiteral("flashcardViewport"));
     auto *verticalBar = fixture.item(QStringLiteral("studyVerticalScrollBar"));
     auto *topFade = fixture.item(QStringLiteral("studyTopFade"));
     auto *bottomFade = fixture.item(QStringLiteral("studyBottomFade"));
@@ -969,7 +969,7 @@ void TestBackend::qmlStudyScrollCuesFollowPosition() {
     QVERIFY(window);
     QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
 
-    auto *scroll = fixture.item(QStringLiteral("studyScrollView"));
+    auto *scroll = fixture.item(QStringLiteral("flashcardViewport"));
     auto *verticalBar = fixture.item(QStringLiteral("studyVerticalScrollBar"));
     auto *horizontalBar = fixture.item(QStringLiteral("studyHorizontalScrollBar"));
     auto *topFade = fixture.item(QStringLiteral("studyTopFade"));
@@ -1008,7 +1008,7 @@ void TestBackend::qmlStudyScrollCuesFollowPosition() {
     expectCues(true, false, true, true); // the hint appears only at the bottom of revealed content
 
     QTest::keyClick(window, Qt::Key_Space);
-    expectCues(false, true, false, true); // flip resets scroll to the top of the question
+    expectCues(false, true, false, true); // reveal resets scroll to the top of the question
 }
 
 void TestBackend::qmlStudyRatingKeysKeepTheirMeaning() {
@@ -1035,7 +1035,7 @@ void TestBackend::qmlStudyRatingKeysKeepTheirMeaning() {
     }
 }
 
-void TestBackend::qmlStudyResetsScrollOnFlipAndNewCard() {
+void TestBackend::qmlStudyResetsScrollOnRevealAndNewCard() {
     StudyViewFixture fixture;
     QVERIFY(fixture.initialize());
     QVERIFY(fixture.createDeck());
@@ -1049,7 +1049,7 @@ void TestBackend::qmlStudyResetsScrollOnFlipAndNewCard() {
     QVERIFY(window);
     QVERIFY(fixture.enterStudy(QStringLiteral("review")));
 
-    auto *scroll = fixture.item(QStringLiteral("studyScrollView"));
+    auto *scroll = fixture.item(QStringLiteral("flashcardViewport"));
     QVERIFY(scroll);
     auto *flickable = scroll->property("contentItem").value<QQuickItem *>();
     QVERIFY(flickable);
@@ -1080,7 +1080,7 @@ void TestBackend::qmlStudyResetsScrollOnFlipAndNewCard() {
     QCOMPARE(position(), qreal(0));
 }
 
-void TestBackend::qmlStudyPointerScrollAndClickFlip() {
+void TestBackend::qmlStudyPointerScrollAndClickReveal() {
     StudyViewFixture fixture;
     QVERIFY(fixture.initialize());
     QVERIFY(fixture.createDeck());
@@ -1096,7 +1096,7 @@ void TestBackend::qmlStudyPointerScrollAndClickFlip() {
     fixture.settle();
     QVERIFY(fixture.backend.showingAnswer());
 
-    auto *scroll = fixture.item(QStringLiteral("studyScrollView"));
+    auto *scroll = fixture.item(QStringLiteral("flashcardViewport"));
     QVERIFY(scroll);
     auto *flickable = scroll->property("contentItem").value<QQuickItem *>();
     QVERIFY(flickable);
@@ -1235,7 +1235,7 @@ void TestBackend::qmlStudyVisualFactsPinLayoutAtMinimumSize() {
     QVERIFY2(questionFacts.value("gapToHint").toDouble() >= 8.0, "question text touches the hint");
     QVERIFY2(questionFacts.value("horizontalOverflow").toDouble() <= 1.0, "horizontal overflow in question state");
 
-    QVERIFY(fixture.flipAndResetStudyScroll());
+    QVERIFY(fixture.revealAndResetFlashcardViewport());
     fixture.settle();
     QVERIFY(fixture.backend.showingAnswer());
 
@@ -1255,7 +1255,7 @@ void TestBackend::qmlStudyVisualFactsPinLayoutAtMinimumSize() {
     QCOMPARE(answerFacts.value("questionFontPixels").toInt(), 30);
 }
 
-void TestBackend::qmlCramLabelUsesCurrentBox() {
+void TestBackend::qmlCramLabelUsesCurrentLeitnerBox() {
     QTemporaryDir dir;
     Backend backend(dir.path(), dir.filePath("state.db"));
     QString error;
@@ -1270,9 +1270,12 @@ void TestBackend::qmlCramLabelUsesCurrentBox() {
     QVERIFY(view.window);
 
     QVERIFY(!backend.property("box").isValid());
-    QQuickItem *label = view.item(QStringLiteral("cramBoxLabel"));
+    const QVariant distribution = backend.property("boxDistribution");
+    QVERIFY(distribution.isValid());
+    QCOMPARE(distribution.toList(), QVariantList({1, 0, 0, 0, 0}));
+    QQuickItem *label = view.item(QStringLiteral("cramLeitnerBoxLabel"));
     QVERIFY(label);
-    const int current = backend.currentBox();
+    const int current = backend.currentLeitnerBox();
     QVERIFY(current >= 1);
     QVERIFY(label->property("text").toString().contains(QStringLiteral("BOX %1 OF 5").arg(current)));
 }
@@ -1290,7 +1293,7 @@ void TestBackend::qmlCramBoxDistributionShowsCountsTimingAndHighlight() {
     QVERIFY(fixture.loadWindow());
     QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
 
-    const QVariantList counts = fixture.backend.property("boxCounts").toList();
+    const QVariantList counts = fixture.backend.property("boxDistribution").toList();
     QCOMPARE(counts, QVariantList({3, 0, 0, 0, 0}));
     QCOMPARE(fixture.backend.property("cramNextInCards").toInt(), 1);
 
@@ -1303,12 +1306,12 @@ void TestBackend::qmlCramBoxDistributionShowsCountsTimingAndHighlight() {
 
     const QColor green(fixture.view->theme.green());
     const QColor muted(fixture.view->theme.muted());
-    for (int box = 1; box <= Config::kLeitnerBoxes; ++box) {
-        QQuickItem *label = fixture.view->item(QStringLiteral("cramBoxCount%1").arg(box));
-        QVERIFY2(label, qPrintable(QStringLiteral("cramBoxCount%1 is missing").arg(box)));
+    for (int leitnerBox = 1; leitnerBox <= Config::kLeitnerBoxes; ++leitnerBox) {
+        QQuickItem *label = fixture.view->item(QStringLiteral("boxDistributionCount%1").arg(leitnerBox));
+        QVERIFY2(label, qPrintable(QStringLiteral("boxDistributionCount%1 is missing").arg(leitnerBox)));
         QCOMPARE(label->property("text").toString(),
-                 QStringLiteral("Box %1: %2").arg(box).arg(counts.at(box - 1).toInt()));
-        QCOMPARE(label->property("color").value<QColor>(), box == 1 ? green : muted);
+                 QStringLiteral("Box %1: %2").arg(leitnerBox).arg(counts.at(leitnerBox - 1).toInt()));
+        QCOMPARE(label->property("color").value<QColor>(), leitnerBox == 1 ? green : muted);
     }
 
     QQuickItem *timing = fixture.view->item(QStringLiteral("cramNextInLabel"));
@@ -1333,8 +1336,8 @@ void TestBackend::qmlCramBoxDistributionFollowsRatings() {
     QVERIFY(fixture.loadWindow());
     QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
 
-    QQuickItem *box1 = fixture.view->item(QStringLiteral("cramBoxCount1"));
-    QQuickItem *box2 = fixture.view->item(QStringLiteral("cramBoxCount2"));
+    QQuickItem *box1 = fixture.view->item(QStringLiteral("boxDistributionCount1"));
+    QQuickItem *box2 = fixture.view->item(QStringLiteral("boxDistributionCount2"));
     QQuickItem *timing = fixture.view->item(QStringLiteral("cramNextInLabel"));
     QVERIFY(box1 && box2 && timing);
     const QColor green(fixture.view->theme.green());
@@ -1346,14 +1349,14 @@ void TestBackend::qmlCramBoxDistributionFollowsRatings() {
     QCOMPARE(box2->property("color").value<QColor>(), muted);
     QCOMPARE(timing->property("text").toString(), QStringLiteral("next in 1 cards"));
 
-    fixture.backend.flip();
+    fixture.backend.reveal();
     fixture.backend.rate(3);
     QCOMPARE(box1->property("text").toString(), QStringLiteral("Box 1: 1"));
     QCOMPARE(box2->property("text").toString(), QStringLiteral("Box 2: 1"));
     QCOMPARE(box1->property("color").value<QColor>(), green);
     QCOMPARE(timing->property("text").toString(), QStringLiteral("next in 1 cards"));
 
-    fixture.backend.flip();
+    fixture.backend.reveal();
     fixture.backend.rate(3);
     QCOMPARE(box1->property("text").toString(), QStringLiteral("Box 1: 0"));
     QCOMPARE(box2->property("text").toString(), QStringLiteral("Box 2: 2"));
@@ -1361,7 +1364,7 @@ void TestBackend::qmlCramBoxDistributionFollowsRatings() {
     QCOMPARE(box1->property("color").value<QColor>(), muted);
     QCOMPARE(timing->property("text").toString(), QStringLiteral("next in 2 cards"));
 
-    fixture.backend.flip();
+    fixture.backend.reveal();
     fixture.backend.rate(1);
     QCOMPARE(box1->property("text").toString(), QStringLiteral("Box 1: 1"));
     QCOMPARE(box2->property("text").toString(), QStringLiteral("Box 2: 1"));
@@ -1371,7 +1374,7 @@ void TestBackend::qmlCramBoxDistributionFollowsRatings() {
     // A Deck change rebuilds the queue; no stale counts or highlight linger.
     QVERIFY(fixture.backend.createCard("Study", "Q3", "A3"));
     fixture.view->settleFileWatcher();
-    QCOMPARE(fixture.backend.property("boxCounts").toList(), QVariantList({3, 0, 0, 0, 0}));
+    QCOMPARE(fixture.backend.property("boxDistribution").toList(), QVariantList({3, 0, 0, 0, 0}));
     QCOMPARE(box1->property("text").toString(), QStringLiteral("Box 1: 3"));
     QCOMPARE(box2->property("text").toString(), QStringLiteral("Box 2: 0"));
     QCOMPARE(box1->property("color").value<QColor>(), green);
@@ -1414,7 +1417,7 @@ void TestBackend::qmlCramBoxDistributionIsCramOnlyAndHidesWhenEmpty() {
     QVERIFY(empty.loadWindow());
     QVERIFY(empty.enterStudy(QStringLiteral("cram")));
     QVERIFY(!empty.backend.hasCard());
-    QCOMPARE(empty.backend.property("boxCounts").toList(), QVariantList({0, 0, 0, 0, 0}));
+    QCOMPARE(empty.backend.property("boxDistribution").toList(), QVariantList({0, 0, 0, 0, 0}));
     QQuickItem *emptyDisplay = empty.view->item(QStringLiteral("boxDistributionDisplay"));
     QQuickItem *emptyStatus = empty.view->item(QStringLiteral("studyStatusLabel"));
     QVERIFY(emptyDisplay && emptyStatus);
@@ -1423,7 +1426,7 @@ void TestBackend::qmlCramBoxDistributionIsCramOnlyAndHidesWhenEmpty() {
     QVERIFY(emptyStatus->property("text").toString().contains(QStringLiteral("No cards")));
 }
 
-void TestBackend::qmlCramBoxHighlightFollowsThemeChange() {
+void TestBackend::qmlCramLeitnerBoxHighlightFollowsThemeChange() {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
     QVERIFY(QDir(dir.path()).mkpath(QStringLiteral("theme")));
@@ -1441,9 +1444,9 @@ void TestBackend::qmlCramBoxHighlightFollowsThemeChange() {
     QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
 
     QCOMPARE(fixture.view->theme.green(), QString("#112233"));
-    QQuickItem *highlight = fixture.view->item(QStringLiteral("cramBoxCount1"));
+    QQuickItem *highlight = fixture.view->item(QStringLiteral("boxDistributionCount1"));
     QQuickItem *dot = fixture.view->item(QStringLiteral("studyFooterDot"));
-    QQuickItem *mutedCount = fixture.view->item(QStringLiteral("cramBoxCount2"));
+    QQuickItem *mutedCount = fixture.view->item(QStringLiteral("boxDistributionCount2"));
     QVERIFY(highlight && dot && mutedCount);
     QCOMPARE(highlight->property("color").value<QColor>(), QColor(QStringLiteral("#112233")));
     QCOMPARE(dot->property("color").value<QColor>(), QColor(QStringLiteral("#112233")));
@@ -1475,7 +1478,7 @@ void TestBackend::qmlGoodLabelUsesGoodCount() {
     QVERIFY(label);
     QCOMPARE(label->property("text").toString(), QString("0 reviewed · 0 Good"));
 
-    backend.flip();
+    backend.reveal();
     backend.rate(3);
     QCOMPARE(backend.property("good").toInt(), 1);
     QCOMPARE(label->property("text").toString(), QString("1 reviewed · 1 Good"));
@@ -1689,9 +1692,9 @@ void TestBackend::backendAppliesNewCardLimit() {
         QCOMPARE(backend.dueCount(), 2);
         QCOMPARE(backend.reviewSummary().newCardsOnStudyDay, 0);
 
-        backend.flip();
+        backend.reveal();
         backend.rate(3);
-        backend.flip();
+        backend.reveal();
         backend.rate(3);
         QCOMPARE(backend.reviewSummary().newCardsOnStudyDay, 2);
         QCOMPARE(backend.availableCount(), 0);
@@ -1708,7 +1711,7 @@ void TestBackend::backendAppliesNewCardLimit() {
     QCOMPARE(reopened.desiredRetention(), 0.85);
 }
 
-void TestBackend::backendRequeuesAgainInSameSession() {
+void TestBackend::backendKeepsPendingRepeatInSameSession() {
     QTemporaryDir dir;
     const QByteArray previousDelay = qgetenv("OMACARDS_AGAIN_DELAY_MS");
     qputenv("OMACARDS_AGAIN_DELAY_MS", "20");
@@ -1722,12 +1725,12 @@ void TestBackend::backendRequeuesAgainInSameSession() {
         backend.selectDeck("Repeats");
         QVERIFY(backend.question().contains("Q1"));
 
-        backend.flip();
+        backend.reveal();
         backend.rate(1); // Again: Q1 waits, Q2 is shown next.
         QVERIFY(backend.hasCard());
         QVERIFY(backend.question().contains("Q2"));
 
-        backend.flip();
+        backend.reveal();
         backend.rate(3); // Good: the waiting Q1 comes back after the break.
         QVERIFY(backend.waitingForRepeat());
         QTRY_VERIFY_WITH_TIMEOUT(backend.question().contains("Q1"), 2000);
@@ -1744,7 +1747,7 @@ void TestBackend::backendRequeuesAgainInSameSession() {
         QCOMPARE(againCard.value("reps").toInt(), 1);
         QVERIFY(againCard.value("due").toLongLong() > QDateTime::currentMSecsSinceEpoch());
 
-        backend.flip();
+        backend.reveal();
         backend.rate(3);
         QVERIFY(!backend.hasCard());
     }
@@ -1765,7 +1768,7 @@ void TestBackend::unreadableDeckKeepsSchedulingState() {
         QVERIFY(backend.createDeck("Keep", &error));
         QVERIFY(backend.createCard("Keep", "Q1", "A1", "basic", {}, &error));
         backend.selectDeck("Keep");
-        backend.flip();
+        backend.reveal();
         backend.rate(3);
 
         Store store(database);
@@ -1882,13 +1885,13 @@ void TestBackend::refreshKeepsPendingAgainRepeat() {
         QVERIFY(backend.createCard("Repeats", "Q1", "A1", "basic", {}, &error));
         QVERIFY(backend.createCard("Repeats", "Q2", "A2", "basic", {}, &error));
         backend.selectDeck("Repeats");
-        backend.flip();
+        backend.reveal();
         backend.rate(1);
         QVERIFY(backend.question().contains("Q2"));
 
         backend.refresh(); // same path the file watcher uses
         QVERIFY(backend.question().contains("Q2"));
-        backend.flip();
+        backend.reveal();
         backend.rate(3);
         QTRY_VERIFY_WITH_TIMEOUT(backend.question().contains("Q1"), 2000);
     }
@@ -1913,7 +1916,7 @@ void TestBackend::deckSwitchStartsFreshSession() {
         QVERIFY(backend.createCard("Second", "Q3", "A3", "basic", {}, &error));
 
         backend.selectDeck("First");
-        backend.flip();
+        backend.reveal();
         backend.rate(1); // Q1 waits; Q2 is current.
         QVERIFY(backend.question().contains("Q2"));
 
@@ -1935,7 +1938,7 @@ void TestBackend::deckSwitchStartsFreshSession() {
         qputenv("OMACARDS_AGAIN_DELAY_MS", previousDelay);
 }
 
-void TestBackend::deckSwitchKeepsModeAndResetsCramBox() {
+void TestBackend::deckSwitchKeepsModeAndResetsLeitnerBox() {
     QTemporaryDir dir;
     Backend backend(dir.path(), dir.filePath("state.db"));
     QString error;
@@ -1947,14 +1950,14 @@ void TestBackend::deckSwitchKeepsModeAndResetsCramBox() {
 
     backend.selectDeck("First");
     backend.setMode("cram");
-    backend.flip();
+    backend.reveal();
     backend.rate(3);
-    QCOMPARE(backend.currentBox(), 2);
+    QCOMPARE(backend.currentLeitnerBox(), 2);
     QCOMPARE(backend.reviewed(), 1);
 
     backend.selectDeck("Second");
     QCOMPARE(backend.mode(), QString("cram"));
-    QCOMPARE(backend.currentBox(), 1);
+    QCOMPARE(backend.currentLeitnerBox(), 1);
     QCOMPARE(backend.reviewed(), 0);
     QVERIFY(backend.question().contains("Q3"));
 }
@@ -1988,7 +1991,7 @@ void TestBackend::statsSummaryKeepsContract() {
     QVERIFY(backend.createDeck("Stats", &error));
     QVERIFY(backend.createCard("Stats", "Q1", "A1", "basic", {}, &error));
     backend.selectDeck("Stats");
-    backend.flip();
+    backend.reveal();
     backend.rate(3);
 
     const QVariantMap summary = backend.statsSummary();
@@ -2043,7 +2046,7 @@ void TestBackend::setModeBoundarySemantics() {
     // Unknown text normalizes to review, but the raw argument differs from the
     // canonical mode, so both boundaries run: the session resets counters and
     // emits modeChanged before statsChanged, then the facade rebuilds.
-    backend.flip();
+    backend.reveal();
     QVERIFY(backend.showingAnswer());
     backend.rate(3);
     QCOMPARE(backend.reviewed(), 1);
@@ -2062,7 +2065,7 @@ void TestBackend::setModeBoundarySemantics() {
     QCOMPARE(order.first(), QStringLiteral("mode"));
     QVERIFY(order.contains(QStringLiteral("stats")));
 
-    backend.flip();
+    backend.reveal();
     backend.rate(3);
     QCOMPARE(backend.reviewed(), 1);
     modeChanged.clear();
@@ -2091,7 +2094,7 @@ void TestBackend::setModeBoundarySemantics() {
     QVERIFY(order.isEmpty());
 
     // A real switch resets the session counters and emits modeChanged first.
-    backend.flip();
+    backend.reveal();
     backend.rate(3);
     QCOMPARE(backend.reviewed(), 1);
     QCOMPARE(backend.good(), 1);
@@ -2385,7 +2388,7 @@ void TestBackend::selectionUpdatesRecencyOnlyOnExplicitChoice() {
     QCOMPARE(namesOf(), afterSelection);
 
     backend.setMode("cram");
-    backend.flip();
+    backend.reveal();
     backend.rate(3);
     backend.refresh();
     QCOMPARE(namesOf(), afterSelection);
@@ -2430,7 +2433,7 @@ void TestBackend::emptySessionHelpersAndStatsText() {
 
     QSignalSpy cardChanged(&backend, &Backend::cardChanged);
     QSignalSpy statusChanged(&backend, &Backend::statusChanged);
-    backend.flip();
+    backend.reveal();
     backend.showNext();
     QCOMPARE(cardChanged.count(), 0);
     QCOMPARE(statusChanged.count(), 0);
@@ -2443,11 +2446,11 @@ void TestBackend::emptySessionHelpersAndStatsText() {
     QVERIFY(backend.createCard("Stats", "Q1", "A1", "basic", {}, &error));
     backend.selectDeck("Stats");
     backend.setMode("cram");
-    backend.flip();
+    backend.reveal();
     backend.rate(3);
     QCOMPARE(backend.reviewed(), 1);
     QCOMPARE(backend.good(), 1);
-    QCOMPARE(backend.currentBox(), 2);
+    QCOMPARE(backend.currentLeitnerBox(), 2);
     QCOMPARE(backend.statsText(), QString("1 reviewed · 100% Good"));
 }
 
@@ -2506,7 +2509,7 @@ void TestBackend::qmlStudyShowsMathPlaceholderUntilSvgArrives() {
     auto *answer = fixture.item(QStringLiteral("studyAnswerLabel"));
     QVERIFY(question);
     QVERIFY(answer);
-    fixture.backend.flip();
+    fixture.backend.reveal();
     fixture.settle();
     QVERIFY(answer->isVisible());
 
