@@ -264,7 +264,7 @@ MathRenderer::~MathRenderer() {
 }
 
 MathRenderer::Engine MathRenderer::detect() const {
-    // Workers can detect while the UI thread is still presenting a card.
+    // Workers can detect while the UI thread is still presenting a Flashcard.
     QMutexLocker lock(&m_detectMutex);
     if (m_engine != Engine::None)
         return m_engine;
@@ -381,7 +381,7 @@ void MathRenderer::prefetch(const QString &text, const QString &ink, double scal
     if (!hasRenderer())
         return;
     // Ink no longer affects which file is rendered; it stays on the request so
-    // a queued render can emit the right data URI for the card being shown.
+    // a queued render can emit the right data URI for the Flashcard being shown.
     for (const QString &expression : expressionsIn(text)) {
         const QString path = mathSvgPath(expression);
         if (QFileInfo::exists(path))

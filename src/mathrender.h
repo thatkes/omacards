@@ -18,7 +18,7 @@ constexpr double kAnswer = 1.6;
 
 // Renders inline LaTeX into rich text. When a TeX toolchain is installed the
 // expression becomes a cached SVG; otherwise a Unicode approximation keeps the
-// card readable. Rendering is bounded so a broken TeX install cannot hang the UI.
+// Flashcard readable. Rendering is bounded so a broken TeX install cannot hang the UI.
 class MathRenderer : public QObject {
     Q_OBJECT
 

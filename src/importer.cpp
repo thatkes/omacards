@@ -175,6 +175,7 @@ bool csv(const QString &path, const QString &deckName, Result *result, QString *
         return false;
     }
     const auto first = splitDelimited(rows.first(), delimiter);
+    // "front" is an external Anki CSV header alias; keep accepting it.
     const bool hasHeader = !first.isEmpty() && (first.first().contains("question", Qt::CaseInsensitive) ||
                                                 first.first().contains("front", Qt::CaseInsensitive));
     if (hasHeader)
@@ -282,26 +283,26 @@ bool apkg(const QString &path, const QString &deckName, const QString &decksDir,
         if (fields.isEmpty())
             continue;
         const bool cloze = clozeColumn && query.value(2).toInt() == 1;
-        QString front = stripHtml(fields.at(0));
-        QString back = !cloze && fields.size() > 1 ? stripHtml(fields.at(1)) : QString();
+        QString question = stripHtml(fields.at(0));
+        QString answer = !cloze && fields.size() > 1 ? stripHtml(fields.at(1)) : QString();
         if (cloze) {
             static const QRegularExpression clozeNumber(R"re(\{\{c\d+::(.*?)::[^}]*\}\})re");
-            front = replaceRegex(front, clozeNumber, [](const QRegularExpressionMatch &match) {
+            question = replaceRegex(question, clozeNumber, [](const QRegularExpressionMatch &match) {
                 return QStringLiteral("{{c1::%1}}").arg(match.captured(1));
             });
         }
-        front = rewriteAnkiMedia(front, media);
+        question = rewriteAnkiMedia(question, media);
         if (!cloze) {
             static const QRegularExpression imageSrc(R"re(<img\b[^>]*\bsrc="([^"]+)"[^>]*>)re");
-            back = replaceRegex(back, imageSrc, [&](const QRegularExpressionMatch &match) {
+            answer = replaceRegex(answer, imageSrc, [&](const QRegularExpressionMatch &match) {
                 return QStringLiteral("<img src=\"%1\">").arg(media.value(match.captured(1), match.captured(1)));
             });
         }
-        if (front.isEmpty())
+        if (question.isEmpty())
             continue;
         CardDraft draft;
-        draft.question = front;
-        draft.answer = back;
+        draft.question = question;
+        draft.answer = answer;
         draft.type = cloze ? QStringLiteral("cloze") : QStringLiteral("basic");
         draft.tags = query.value(1).toString().simplified().split(' ', Qt::SkipEmptyParts);
         result->cards << draft;
