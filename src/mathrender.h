@@ -82,7 +82,6 @@ private:
         QString expression;
         QString ink;
         double scale = 1.0;
-        QSize size;
     };
 
     void enqueueExpression(const RenderRequest &request);

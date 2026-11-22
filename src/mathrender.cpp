@@ -371,7 +371,7 @@ QString MathRenderer::renderWithPlaceholders(const QString &text, const QString 
                 return renderExpression(expression, ink, scale);
             const QString key = QFileInfo(path).completeBaseName();
             const QSize size = reservedMathSize(expression, scale, path);
-            enqueueExpression({key, expression, ink, scale, size});
+            enqueueExpression({key, expression, ink, scale});
             return mathPlaceholderTag(key, size);
         },
         true);
@@ -386,8 +386,7 @@ void MathRenderer::prefetch(const QString &text, const QString &ink, double scal
         const QString path = mathKey(expression);
         if (QFileInfo::exists(path))
             continue;
-        enqueueExpression(
-            {QFileInfo(path).completeBaseName(), expression, ink, scale, reservedMathSize(expression, scale, path)});
+        enqueueExpression({QFileInfo(path).completeBaseName(), expression, ink, scale});
     }
 }
 
