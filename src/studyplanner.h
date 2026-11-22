@@ -29,10 +29,10 @@ public:
     };
 
     struct Availability {
-        QVector<Card> due;   // ordered by due date, then id
-        QVector<Card> fresh; // deck-file order, up to the daily cap
+        QVector<Card> due;      // ordered by due date, then id
+        QVector<Card> newCards; // deck-file order, up to the daily cap
         QVector<int> duePerDeck;
-        QVector<int> freshPerDeck;
+        QVector<int> newPerDeck;
         QVector<int> dueIncludingNewPerDeck; // totalDue in CLI stats includes new cards
     };
 

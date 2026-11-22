@@ -57,7 +57,7 @@ StudyPlanner::Availability StudyPlanner::availability(const QString &deckName) c
     Availability result;
     const QVector<Deck> &allDecks = decks();
     result.duePerDeck.resize(allDecks.size());
-    result.freshPerDeck.resize(allDecks.size());
+    result.newPerDeck.resize(allDecks.size());
     result.dueIncludingNewPerDeck.resize(allDecks.size());
     if (!m_snapshotValid)
         return result;
@@ -83,8 +83,8 @@ StudyPlanner::Availability StudyPlanner::availability(const QString &deckName) c
                 ++result.dueIncludingNewPerDeck[deckIndex];
             if (state.reps == 0) {
                 if (remainingNew > 0) {
-                    result.fresh << card;
-                    ++result.freshPerDeck[deckIndex];
+                    result.newCards << card;
+                    ++result.newPerDeck[deckIndex];
                     --remainingNew;
                 }
             } else if (due) {
@@ -112,30 +112,30 @@ int StudyPlanner::countDue(const QString &deckName) const {
 
 int StudyPlanner::availableCount(const QString &deckName) const {
     const Availability available = availability(deckName);
-    return available.due.size() + available.fresh.size();
+    return available.due.size() + available.newCards.size();
 }
 
 int StudyPlanner::newCount() const {
-    return availability().fresh.size();
+    return availability().newCards.size();
 }
 
 int StudyPlanner::deckDue(int deckIndex) const {
     if (deckIndex < 0)
         return 0;
     const Availability available = availability();
-    return available.duePerDeck.value(deckIndex) + available.freshPerDeck.value(deckIndex);
+    return available.duePerDeck.value(deckIndex) + available.newPerDeck.value(deckIndex);
 }
 
 int StudyPlanner::deckNew(int deckIndex) const {
     if (deckIndex < 0)
         return 0;
-    return availability().freshPerDeck.value(deckIndex);
+    return availability().newPerDeck.value(deckIndex);
 }
 
 QVector<Card> StudyPlanner::dueCards(const QString &deckName) const {
     const Availability available = availability(deckName);
     QVector<Card> cards = available.due;
-    cards << available.fresh;
+    cards << available.newCards;
     return cards;
 }
 
@@ -145,7 +145,7 @@ void StudyPlanner::reviewIds(const QString &deckName, QStringList *dueIds, QStri
     // new cards then follow in deck-file order up to the daily limit.
     for (const Card &card : available.due)
         dueIds->append(card.id);
-    for (const Card &card : available.fresh)
+    for (const Card &card : available.newCards)
         newIds->append(card.id);
 }
 
@@ -160,7 +160,7 @@ QVariantList StudyPlanner::deckSummaries(const QString &currentDeck) const {
         entry.insert("description", deck.description);
         entry.insert("cards", deck.cards.size());
         entry.insert("due", available.duePerDeck.value(i));
-        entry.insert("new", available.freshPerDeck.value(i));
+        entry.insert("new", available.newPerDeck.value(i));
         entry.insert("active", deck.name == currentDeck);
         result << entry;
     }

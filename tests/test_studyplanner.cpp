@@ -94,13 +94,13 @@ void TestStudyPlanner::noDecksIsSafe() {
 
     const StudyPlanner::Availability all = planner.availability();
     QVERIFY(all.due.isEmpty());
-    QVERIFY(all.fresh.isEmpty());
+    QVERIFY(all.newCards.isEmpty());
     QVERIFY(all.duePerDeck.isEmpty());
-    QVERIFY(all.freshPerDeck.isEmpty());
+    QVERIFY(all.newPerDeck.isEmpty());
     QVERIFY(all.dueIncludingNewPerDeck.isEmpty());
     const StudyPlanner::Availability filtered = planner.availability("Missing");
     QVERIFY(filtered.due.isEmpty());
-    QVERIFY(filtered.fresh.isEmpty());
+    QVERIFY(filtered.newCards.isEmpty());
 
     QCOMPARE(planner.countDue(), 0);
     QCOMPARE(planner.countDue("Missing"), 0);
@@ -229,12 +229,12 @@ void TestStudyPlanner::refreshBrokenStoreInvalidatesSnapshot() {
 
     const StudyPlanner::Availability available = planner.availability();
     QVERIFY(available.due.isEmpty());
-    QVERIFY(available.fresh.isEmpty());
+    QVERIFY(available.newCards.isEmpty());
     QCOMPARE(available.duePerDeck.size(), decks.size()); // sized before the validity check
-    QCOMPARE(available.freshPerDeck.size(), decks.size());
+    QCOMPARE(available.newPerDeck.size(), decks.size());
     QCOMPARE(available.dueIncludingNewPerDeck.size(), decks.size());
     QCOMPARE(available.duePerDeck.at(0), 0);
-    QCOMPARE(available.freshPerDeck.at(0), 0);
+    QCOMPARE(available.newPerDeck.at(0), 0);
     QCOMPARE(planner.countDue(), 0);
     QCOMPARE(planner.availableCount(), 0);
     QCOMPARE(planner.newCount(), 0);
@@ -250,7 +250,7 @@ void TestStudyPlanner::refreshBrokenStoreInvalidatesSnapshot() {
     QVERIFY(runSql(database, QStringLiteral("planner-restore-cards"), QString::fromLatin1(kCreateCardsSql)));
     QVERIFY(planner.refresh(&storeError));
     QCOMPARE(storeError, failedRefreshError); // still not cleared on success
-    QCOMPARE(planner.newCount(), 1);          // the dropped sidecar row makes the card fresh again
+    QCOMPARE(planner.newCount(), 1);          // the dropped sidecar row makes the card new again
 }
 
 void TestStudyPlanner::configureLimitsAndCounts() {
@@ -260,21 +260,21 @@ void TestStudyPlanner::configureLimitsAndCounts() {
     QVERIFY(store.open(&error));
 
     const qint64 base = QDateTime::currentMSecsSinceEpoch() - 3 * 86400000LL;
-    const Card freshA1 = makeCard("fresh-a1", "Fresh A1", "a", "Alpha");
+    const Card newA1 = makeCard("new-a1", "New A1", "a", "Alpha");
     const Card dueB = makeCard("due-b", "Due B", "b", "Alpha");
-    const Card freshA2 = makeCard("fresh-a2", "Fresh A2", "a", "Alpha");
+    const Card newA2 = makeCard("new-a2", "New A2", "a", "Alpha");
     const Card dueA = makeCard("due-a", "Due A", "a", "Alpha");
     const Card future = makeCard("future", "Future", "f", "Alpha");
-    const Card freshB1 = makeCard("fresh-b1", "Fresh B1", "b", "Beta");
+    const Card newB1 = makeCard("new-b1", "New B1", "b", "Beta");
     const Card dueC = makeCard("due-c", "Due C", "c", "Beta");
-    const Card freshB2 = makeCard("fresh-b2", "Fresh B2", "b", "Beta");
+    const Card newB2 = makeCard("new-b2", "New B2", "b", "Beta");
 
     Deck alpha;
     alpha.name = "Alpha";
-    alpha.cards << freshA1 << dueB << freshA2 << dueA << future;
+    alpha.cards << newA1 << dueB << newA2 << dueA << future;
     Deck beta;
     beta.name = "Beta";
-    beta.cards << freshB1 << dueC << freshB2;
+    beta.cards << newB1 << dueC << newB2;
     const QVector<Deck> decks{alpha, beta};
 
     saveState(store, dueC, base, 1);
@@ -291,13 +291,13 @@ void TestStudyPlanner::configureLimitsAndCounts() {
 
     const StudyPlanner::Availability all = planner.availability();
     QCOMPARE(idsOf(all.due), QStringList({"due-c", "due-a", "due-b"}));
-    QCOMPARE(idsOf(all.fresh), QStringList({"fresh-a1", "fresh-a2", "fresh-b1"}));
+    QCOMPARE(idsOf(all.newCards), QStringList({"new-a1", "new-a2", "new-b1"}));
     QCOMPARE(all.duePerDeck.size(), 2);
     QCOMPARE(all.duePerDeck.at(0), 2);
     QCOMPARE(all.duePerDeck.at(1), 1);
-    QCOMPARE(all.freshPerDeck.size(), 2);
-    QCOMPARE(all.freshPerDeck.at(0), 2);
-    QCOMPARE(all.freshPerDeck.at(1), 1);
+    QCOMPARE(all.newPerDeck.size(), 2);
+    QCOMPARE(all.newPerDeck.at(0), 2);
+    QCOMPARE(all.newPerDeck.at(1), 1);
     QCOMPARE(all.dueIncludingNewPerDeck.size(), 2);
     QCOMPARE(all.dueIncludingNewPerDeck.at(0), 4); // new cards count as due=0 too
     QCOMPARE(all.dueIncludingNewPerDeck.at(1), 3);
@@ -318,24 +318,24 @@ void TestStudyPlanner::configureLimitsAndCounts() {
 
     // A filter still reports one entry per deck, with only the selected deck
     // filled in. The new-card budget restarts per availability() call, so both
-    // Beta fresh cards are available even though the unfiltered view spent its
-    // budget on Alpha's fresh cards first.
+    // Beta new cards are available even though the unfiltered view spent its
+    // budget on Alpha's new cards first.
     const StudyPlanner::Availability betaOnly = planner.availability("Beta");
     QCOMPARE(idsOf(betaOnly.due), QStringList({"due-c"}));
-    QCOMPARE(idsOf(betaOnly.fresh), QStringList({"fresh-b1", "fresh-b2"}));
+    QCOMPARE(idsOf(betaOnly.newCards), QStringList({"new-b1", "new-b2"}));
     QCOMPARE(betaOnly.duePerDeck.size(), 2);
     QCOMPARE(betaOnly.duePerDeck.at(0), 0);
     QCOMPARE(betaOnly.duePerDeck.at(1), 1);
-    QCOMPARE(betaOnly.freshPerDeck.size(), 2);
-    QCOMPARE(betaOnly.freshPerDeck.at(0), 0);
-    QCOMPARE(betaOnly.freshPerDeck.at(1), 2);
+    QCOMPARE(betaOnly.newPerDeck.size(), 2);
+    QCOMPARE(betaOnly.newPerDeck.at(0), 0);
+    QCOMPARE(betaOnly.newPerDeck.at(1), 2);
     QCOMPARE(betaOnly.dueIncludingNewPerDeck.size(), 2);
     QCOMPARE(betaOnly.dueIncludingNewPerDeck.at(0), 0);
     QCOMPARE(betaOnly.dueIncludingNewPerDeck.at(1), 3);
     QCOMPARE(planner.countDue("Beta"), 3);
     QCOMPARE(planner.availableCount("Beta"), 3);
 
-    QCOMPARE(idsOf(planner.dueCards()), QStringList({"due-c", "due-a", "due-b", "fresh-a1", "fresh-a2", "fresh-b1"}));
+    QCOMPARE(idsOf(planner.dueCards()), QStringList({"due-c", "due-a", "due-b", "new-a1", "new-a2", "new-b1"}));
 }
 
 void TestStudyPlanner::futureReviewsAreNotAvailable() {
