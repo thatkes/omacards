@@ -23,4 +23,7 @@ private slots:
     void switchingToCramClearsPendingRepeat();
     void statsTextAndMathEngine();
     void setMathColorsEmitsOnlyOnChange();
+    void prefetchQueuesTheNextThreeCardsWithoutChangingOrder();
+    void prefetchResultIsIgnoredForCardsAlreadyLeftBehind();
+    void themeChangeRequeuesUpcomingCards();
 };

@@ -34,6 +34,7 @@ public:
     void setStatus(const QString &status);
     void reportError(const QString &message);
     void setMathColors(const QString &questionColor, const QString &answerColor);
+    void applyMathRenderResult(const QString &key, const QString &html);
 
     void flip();
     bool rate(Rating rating, double desiredRetention);
@@ -74,6 +75,7 @@ private:
     void answerCram(Rating rating);
     void answerReview(Rating rating, double desiredRetention);
     void refreshDueCount();
+    void queueMathPrefetch();
 
     DeckRepository &m_decks;
     StudyPlanner &m_planner;

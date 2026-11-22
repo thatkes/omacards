@@ -59,4 +59,6 @@ private slots:
     void missingDeckFallbackPersistsAndSelectorAgrees();
     void emptySessionHelpersAndStatsText();
     void setDeckDescriptionAndQmlErrorSignals();
+    void qmlStudyShowsMathPlaceholderUntilSvgArrives();
+    void qmlStudyUsesCachedSvgWithoutPlaceholder();
 };

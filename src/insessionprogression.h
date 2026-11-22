@@ -35,6 +35,9 @@ public:
     void buildCram(const QVector<Card> &orderedCards);
 
     NextResult next(qint64 now);
+    // Read-only look at the next cards; used for prefetching only. It never
+    // consumes a Card, changes a deadline or advances a Leitner box.
+    QStringList upcoming(int limit) const;
     int currentBox() const { return m_currentBox; }
     // Box distribution of the live Cram queue, in Box 1 to Box 5 order.
     QVector<int> boxCounts() const;

@@ -33,6 +33,7 @@
 #include "config.h"
 #include "deck.h"
 #include "fsrs.h"
+#include "mathrender.h"
 #include "store.h"
 #include "theme.h"
 
@@ -2382,4 +2383,65 @@ void TestBackend::setDeckDescriptionAndQmlErrorSignals() {
     empty.addCard("Q", "A");
     QCOMPARE(emptyErrors.count(), 1);
     QVERIFY(!empty.status().isEmpty());
+}
+
+void TestBackend::qmlStudyShowsMathPlaceholderUntilSvgArrives() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString bin = dir.filePath("bin");
+    const QString svg = QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10pt\" height=\"5pt\" "
+                                       "viewBox=\"0 0 10 5\"><g fill=\"rgb(0%, 0%, 0%)\"/></svg>");
+    QVERIFY(writeFakePdfToolchain(bin, svg, QStringLiteral("sleep 1\n")));
+
+    TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
+    PathPrependGuard pathGuard(bin);
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    QVERIFY(fixture.createCard(QStringLiteral("What is \\(x^2\\)?"), QStringLiteral("A \\(y^2\\)")));
+    fixture.selectDeck();
+    QVERIFY(fixture.loadWindow());
+    QVERIFY(fixture.enterStudy(QStringLiteral("review")));
+
+    auto *question = fixture.view->item(QStringLiteral("studyQuestionLabel"));
+    QVERIFY(question);
+    const QString text = question->property("text").toString();
+    QVERIFY2(text.contains(QStringLiteral("<!--omacards-math:")), qPrintable(text));
+    QVERIFY(!text.contains(QStringLiteral("<img src='file://")));
+
+    QTRY_VERIFY_WITH_TIMEOUT(!question->property("text").toString().contains(QStringLiteral("<!--omacards-math:")),
+                             5000);
+    QVERIFY(question->property("text").toString().contains(QStringLiteral("<img src='file://")));
+    QVERIFY(!question->property("text").toString().contains(QStringLiteral("font-family: monospace")));
+}
+
+void TestBackend::qmlStudyUsesCachedSvgWithoutPlaceholder() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString bin = dir.filePath("bin");
+    const QString cache = dir.filePath("cache/omacards/math");
+    const QString svg = QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10pt\" height=\"5pt\" "
+                                       "viewBox=\"0 0 10 5\"><g fill=\"rgb(0%, 0%, 0%)\"/></svg>");
+    QVERIFY(writeFakePdfToolchain(bin, svg));
+
+    TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
+    PathPrependGuard pathGuard(bin);
+    MathRenderer prewarm(cache);
+    QVERIFY(prewarm.hasRenderer());
+    QVERIFY(prewarm.renderExpression("x^2", QStringLiteral("#000000"), MathScale::kQuestion)
+                .startsWith(QStringLiteral("<img ")));
+
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    QVERIFY(fixture.createCard(QStringLiteral("What is \\(x^2\\)?"), QStringLiteral("plain answer")));
+    fixture.selectDeck();
+    QVERIFY(fixture.loadWindow());
+    QVERIFY(fixture.enterStudy(QStringLiteral("review")));
+
+    auto *question = fixture.view->item(QStringLiteral("studyQuestionLabel"));
+    QVERIFY(question);
+    const QString text = question->property("text").toString();
+    QVERIFY(text.contains(QStringLiteral("<img src='file://")));
+    QVERIFY(!text.contains(QStringLiteral("<!--omacards-math:")));
 }

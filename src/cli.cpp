@@ -11,6 +11,7 @@
 #include "mathrender.h"
 #include "ratingrecording.h"
 #include "store.h"
+#include "theme.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -56,7 +57,7 @@ bool isHeadlessCommand(const QString &command) {
     static const QStringList commands{
         "check",       "decks",       "cards",    "search", "add-deck", "add-cards", "add-card", "edit-card",
         "delete-card", "delete-deck", "import",   "due",    "review",   "cram",      "preview",  "skill",
-        "stats",       "config",      "use-deck", "help",   "--help",   "-h",
+        "stats",       "config",      "use-deck", "help",   "--help",   "-h",        "warm",
     };
     return commands.contains(command);
 }
@@ -379,6 +380,7 @@ QString usage() {
                           "  omacards cards [--deck D] [--json]\n"
                           "  omacards search TERM [--deck D] [--json]\n"
                           "  omacards preview --deck D [--card ID] [--format text|html] [--json]\n"
+                          "  omacards warm --deck D [--json]          Render a Deck's math SVGs ahead of study\n"
                           "  omacards add-deck NAME [--description TEXT] [--json]\n"
                           "  omacards add-cards --deck NAME [--description TEXT] [--input FILE|-] [--json]\n"
                           "  omacards add-card -q Q -a A [-d D] [--type cloze] [--tags a,b] [--json]\n"
@@ -420,6 +422,57 @@ int run(const QStringList &arguments) {
 
     auto ownedBackend = Backend::fromEnvironment();
     Backend &backend = *ownedBackend;
+
+    // `warm` reads Deck files only. Skipping initialize() keeps the study
+    // session from presenting a card (and queueing its math) in a headless
+    // process, and leaves the selected Deck and study order untouched.
+    if (options.command == "warm") {
+        const bool json = options.json;
+        if (options.deck.isEmpty())
+            return fail(QObject::tr("Use --deck / -d"), json);
+        const QVector<Deck> warmDecks = DeckIO::loadAll(backend.decksDirectory());
+        const QString targetPath = resolveDeckPath(warmDecks, backend.decksDirectory(), options.deck);
+        if (targetPath.isEmpty())
+            return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
+
+        QVector<Deck> targets;
+        for (const Deck &deck : warmDecks) {
+            if (deck.path == targetPath)
+                targets << deck;
+        }
+        if (targets.isEmpty()) {
+            QString loadError;
+            targets << DeckIO::load(targetPath, &loadError);
+        }
+        const QVector<Card> cards = allCards(targets, {});
+        if (cards.isEmpty())
+            return failEmptyDeck(options.deck, deckIssueReport(backend.decksDirectory(), targetPath), json);
+
+        Theme theme;
+        MathRenderer renderer;
+        int rendered = 0;
+        int cached = 0;
+        for (const Card &card : cards) {
+            int fieldCached = 0;
+            rendered +=
+                renderer.warm(DeckIO::displayQuestion(card), theme.foreground(), MathScale::kQuestion, &fieldCached);
+            cached += fieldCached;
+            fieldCached = 0;
+            rendered += renderer.warm(DeckIO::displayAnswer(card), theme.accent(), MathScale::kAnswer, &fieldCached);
+            cached += fieldCached;
+        }
+
+        QJsonObject object;
+        object.insert("ok", true);
+        object.insert("deck", options.deck);
+        object.insert("rendered", rendered);
+        object.insert("cached", cached);
+        const QString human =
+            QObject::tr("Warmed %1: %2 rendered · %3 cached").arg(options.deck).arg(rendered).arg(cached);
+        write(object, json, human);
+        return 0;
+    }
+
     QString error;
     if (!backend.initialize(&error))
         return fail(error, options.json);
