@@ -1,0 +1,37 @@
+#!/bin/sh
+set -eu
+
+status=0
+
+check_subject() {
+    label=$1
+    subject=$2
+    count=$(printf '%s' "$subject" | awk '{ print length($0) }')
+    if [ "$count" -gt 50 ]; then
+        printf '%s: commit subject over 50 characters (%s)\n' "$label" "$count" >&2
+        status=1
+    fi
+}
+
+if [ "${1:-}" = "--stdin" ]; then
+    line=0
+    while IFS= read -r subject || [ -n "$subject" ]; do
+        line=$((line + 1))
+        [ -n "$subject" ] || continue
+        check_subject "stdin line $line" "$subject"
+    done
+else
+    if [ $# -lt 1 ]; then
+        printf 'usage: %s <message-file|--stdin>\n' "$0" >&2
+        exit 2
+    fi
+    subject=$(awk '
+      /^#/ { next }
+      /^[[:space:]]*$/ && !found { next }
+      !found { print; found = 1 }
+    ' "$1")
+    [ -n "$subject" ] || exit 0
+    check_subject "$1" "$subject"
+fi
+
+exit "$status"

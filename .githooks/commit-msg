@@ -3,6 +3,7 @@ set -euo pipefail
 
 # Git strips comment lines before creating the commit. Check the message
 # itself so an explanatory comment never blocks an otherwise valid commit.
+status=0
 awk '
   /^#/ { next }
   length($0) > 72 {
@@ -10,4 +11,8 @@ awk '
     bad = 1
   }
   END { exit bad }
-' "$1"
+' "$1" || status=1
+
+root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+"$root/bin/check-commit-subject" "$1" || status=1
+exit "$status"

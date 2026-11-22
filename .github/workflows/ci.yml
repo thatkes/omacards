@@ -12,6 +12,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check commit subjects
+        run: |
+          git fetch --no-tags origin main >/dev/null 2>&1 || true
+          if ! git rev-parse --verify --quiet origin/main >/dev/null; then
+            printf 'origin/main unavailable; skipping commit subject check\n'
+            exit 0
+          fi
+          if [ -z "$(git log --format=%s origin/main..HEAD)" ]; then
+            printf 'No commits in origin/main..HEAD; skipping subject check\n'
+            exit 0
+          fi
+          git log --format=%s origin/main..HEAD | ./bin/check-commit-subject --stdin
 
       - name: Install Qt 6
         run: |
