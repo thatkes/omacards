@@ -6,4 +6,5 @@ cd "$ROOT"
 ./bin/check-local-only-files
 ./bin/check-skill-install
 ./tests/test_check_test_summary.sh
+./tests/test_check_skill_install.sh
 clang-format --dry-run --Werror src/*.h src/*.cpp tests/*.h tests/*.cpp
