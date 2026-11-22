@@ -616,9 +616,21 @@ void TestCli::checkJsonKeyContract() {
     const QJsonObject result = runCli({"check", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
     QVERIFY(result.value(QStringLiteral("ok")).toBool());
-    QStringList expected{"ok",       "version",  "decks",     "cards",     "due",
-                         "totalDue", "newToday", "newPerDay", "retention", "dayStartHour",
-                         "math",     "decksDir", "database",  "issues",    "issueCounts"};
+    QStringList expected{"ok",
+                         "version",
+                         "decks",
+                         "cards",
+                         "due",
+                         "totalDue",
+                         "newCardsOnStudyDay",
+                         "newCardAllowance",
+                         "retention",
+                         "dayStartHour",
+                         "math",
+                         "decksDir",
+                         "database",
+                         "issues",
+                         "issueCounts"};
     expected.sort();
     QCOMPARE(sortedKeys(result), expected);
     QCOMPARE(result.value(QStringLiteral("version")).toString(), QString("0.1.0"));
@@ -770,27 +782,31 @@ void TestCli::readCommandJsonContracts() {
 
     const QJsonObject stats = runCli({"stats", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
-    QStringList expectedStats{"ok",        "totalReviews", "today",    "todayGood", "streakDays", "newToday",
-                              "newPerDay", "due",          "totalDue", "cards",     "decks"};
+    QStringList expectedStats{
+        "ok",  "totalRatings", "studyDayRatings", "studyDayGood", "streak", "newCardsOnStudyDay", "newCardAllowance",
+        "due", "totalDue",     "cards",           "decks"};
     expectedStats.sort();
     QCOMPARE(sortedKeys(stats), expectedStats);
-    QCOMPARE(stats.value(QStringLiteral("today")).toInt(), 1);
-    QCOMPARE(stats.value(QStringLiteral("todayGood")).toInt(), 1);
+    QCOMPARE(stats.value(QStringLiteral("studyDayRatings")).toInt(), 1);
+    QCOMPARE(stats.value(QStringLiteral("studyDayGood")).toInt(), 1);
     const QString statsHuman = runCliText({"stats"}, decks, database, &code);
     QCOMPARE(code, 0);
+    QVERIFY2(statsHuman.contains(QStringLiteral("Ratings on Study day: 1")), qPrintable(statsHuman));
     QVERIFY2(statsHuman.contains(QStringLiteral("100% Good")), qPrintable(statsHuman));
+    QVERIFY2(statsHuman.contains(QStringLiteral("1-day Streak")), qPrintable(statsHuman));
     QVERIFY2(!statsHuman.contains(QStringLiteral("correct")), qPrintable(statsHuman));
     QCOMPARE(stats.value(QStringLiteral("cards")).toInt(), 3);
     QCOMPARE(stats.value(QStringLiteral("decks")).toInt(), 2);
 
     const QJsonObject config = runCli({"config", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
-    QStringList expectedConfig{"ok", "newPerDay", "retention", "dayStartHour", "newToday", "newRemaining"};
+    QStringList expectedConfig{"ok",           "newCardAllowance",   "retention",
+                               "dayStartHour", "newCardsOnStudyDay", "newRemaining"};
     expectedConfig.sort();
     QCOMPARE(sortedKeys(config), expectedConfig);
-    QCOMPARE(config.value(QStringLiteral("newToday")).toInt(), 1);
+    QCOMPARE(config.value(QStringLiteral("newCardsOnStudyDay")).toInt(), 1);
     QCOMPARE(config.value(QStringLiteral("newRemaining")).toInt(),
-             config.value(QStringLiteral("newPerDay")).toInt() - 1);
+             config.value(QStringLiteral("newCardAllowance")).toInt() - 1);
 }
 
 void TestCli::useDeckCommandContract() {
@@ -1061,25 +1077,27 @@ void TestCli::cramCommandContract() {
     int code = -1;
     const QJsonObject four = runCli({"cram", "--deck", "Cram", "--steps", "4", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
-    QCOMPARE(sortedKeys(four), QStringList({"box", "good", "ok", "reviews"}));
-    QCOMPARE(four.value(QStringLiteral("reviews")).toInt(), 4);
+    QCOMPARE(sortedKeys(four), QStringList({"good", "leitnerBox", "ok", "ratings"}));
+    QCOMPARE(four.value(QStringLiteral("ratings")).toInt(), 4);
     QCOMPARE(four.value(QStringLiteral("good")).toInt(), 3);
     QVERIFY(!four.contains(QStringLiteral("correct")));
-    // Exact box values pin the CLI output contract; Leitner progression
+    QVERIFY(!four.contains(QStringLiteral("reviews")));
+    QVERIFY(!four.contains(QStringLiteral("box")));
+    // Exact Leitner box values pin the CLI output contract; progression
     // rules stay in the InSessionProgression suite.
-    QCOMPARE(four.value(QStringLiteral("box")).toInt(), 1);
+    QCOMPARE(four.value(QStringLiteral("leitnerBox")).toInt(), 1);
 
     const QJsonObject two = runCli({"cram", "--deck", "Cram", "--steps", "2", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
-    QCOMPARE(two.value(QStringLiteral("reviews")).toInt(), 2);
+    QCOMPARE(two.value(QStringLiteral("ratings")).toInt(), 2);
     QCOMPARE(two.value(QStringLiteral("good")).toInt(), 2);
-    QCOMPARE(two.value(QStringLiteral("box")).toInt(), 3);
+    QCOMPARE(two.value(QStringLiteral("leitnerBox")).toInt(), 3);
 
     const QJsonObject eight = runCli({"cram", "--deck", "Cram", "--steps", "8", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
-    QCOMPARE(eight.value(QStringLiteral("reviews")).toInt(), 8);
+    QCOMPARE(eight.value(QStringLiteral("ratings")).toInt(), 8);
     QCOMPARE(eight.value(QStringLiteral("good")).toInt(), 6);
-    QCOMPARE(eight.value(QStringLiteral("box")).toInt(), 1);
+    QCOMPARE(eight.value(QStringLiteral("leitnerBox")).toInt(), 1);
 
     // Repeating step counts in a different order must reproduce each result.
     const QJsonObject repeatedEight =
@@ -1096,7 +1114,7 @@ void TestCli::cramCommandContract() {
 
     const QJsonObject clamped = runCli({"cram", "--deck", "Cram", "--steps", "0", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
-    QCOMPARE(clamped.value(QStringLiteral("reviews")).toInt(), 1);
+    QCOMPARE(clamped.value(QStringLiteral("ratings")).toInt(), 1);
 
     const QJsonObject none = runCli({"cram", "--deck", "Unknown", "--json"}, decks, database, &code);
     QCOMPARE(code, 1);
@@ -1545,7 +1563,7 @@ void TestCli::configValidationAndPersistence() {
         runCli({"config", "--new-per-day", "0", "--retention", "0.99", "--day-start-hour", "23", "--json"}, decks,
                database, &code);
     QCOMPARE(code, 0);
-    QCOMPARE(boundaries.value(QStringLiteral("newPerDay")).toInt(), 0);
+    QCOMPARE(boundaries.value(QStringLiteral("newCardAllowance")).toInt(), 0);
     QCOMPARE(boundaries.value(QStringLiteral("retention")).toDouble(), 0.99);
     QCOMPARE(boundaries.value(QStringLiteral("dayStartHour")).toInt(), 23);
 
@@ -1554,7 +1572,7 @@ void TestCli::configValidationAndPersistence() {
     QCOMPARE(code, 0);
     const QJsonObject reread = runCli({"config", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
-    QCOMPARE(reread.value(QStringLiteral("newPerDay")).toInt(), 5);
+    QCOMPARE(reread.value(QStringLiteral("newCardAllowance")).toInt(), 5);
     QCOMPARE(reread.value(QStringLiteral("retention")).toDouble(), 0.70);
     QCOMPARE(reread.value(QStringLiteral("dayStartHour")).toInt(), 0);
 
@@ -1575,7 +1593,7 @@ void TestCli::configValidationAndPersistence() {
     QCOMPARE(code, 0);
     const QJsonObject budget = runCli({"config", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
-    QCOMPARE(budget.value(QStringLiteral("newToday")).toInt(), 1);
+    QCOMPARE(budget.value(QStringLiteral("newCardsOnStudyDay")).toInt(), 1);
     QCOMPARE(budget.value(QStringLiteral("newRemaining")).toInt(), 4);
 }
 

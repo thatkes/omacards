@@ -9,10 +9,10 @@
 
 struct ReviewSummary {
     int total = 0;
-    int today = 0;
-    int todayGood = 0;
-    int streakDays = 0;
-    int newToday = 0;
+    int studyDayRatings = 0;
+    int studyDayGood = 0;
+    int streak = 0;
+    int newCardsOnStudyDay = 0;
 };
 
 // The SQLite sidecar. Deck files own card content; this database owns only

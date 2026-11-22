@@ -539,8 +539,8 @@ int run(const QStringList &arguments) {
         object.insert("cards", total);
         object.insert("due", due);
         object.insert("totalDue", backend.countDue(options.deck));
-        object.insert("newToday", backend.reviewSummary().newToday);
-        object.insert("newPerDay", backend.newPerDay());
+        object.insert("newCardsOnStudyDay", backend.reviewSummary().newCardsOnStudyDay);
+        object.insert("newCardAllowance", backend.newPerDay());
         object.insert("retention", backend.desiredRetention());
         object.insert("dayStartHour", backend.dayStartHour());
         object.insert("math", backend.mathEngine());
@@ -652,15 +652,15 @@ int run(const QStringList &arguments) {
         const ReviewSummary summary = backend.reviewSummary();
         QJsonObject object;
         object.insert("ok", true);
-        object.insert("newPerDay", backend.newPerDay());
+        object.insert("newCardAllowance", backend.newPerDay());
         object.insert("retention", backend.desiredRetention());
         object.insert("dayStartHour", backend.dayStartHour());
-        object.insert("newToday", summary.newToday);
-        object.insert("newRemaining", qMax(0, backend.newPerDay() - summary.newToday));
+        object.insert("newCardsOnStudyDay", summary.newCardsOnStudyDay);
+        object.insert("newRemaining", qMax(0, backend.newPerDay() - summary.newCardsOnStudyDay));
         write(object, json,
               QObject::tr("New cards/day: %1 · reviewed new today: %2 · desired retention: %3% · day starts at %4")
                   .arg(backend.newPerDay())
-                  .arg(summary.newToday)
+                  .arg(summary.newCardsOnStudyDay)
                   .arg(qRound(backend.desiredRetention() * 100))
                   .arg(QStringLiteral("%1:00").arg(backend.dayStartHour(), 2, 10, QLatin1Char('0'))));
         return 0;
@@ -670,22 +670,23 @@ int run(const QStringList &arguments) {
         const ReviewSummary summary = backend.reviewSummary();
         QJsonObject object;
         object.insert("ok", true);
-        object.insert("totalReviews", summary.total);
-        object.insert("today", summary.today);
-        object.insert("todayGood", summary.todayGood);
-        object.insert("streakDays", summary.streakDays);
-        object.insert("newToday", summary.newToday);
-        object.insert("newPerDay", backend.newPerDay());
+        object.insert("totalRatings", summary.total);
+        object.insert("studyDayRatings", summary.studyDayRatings);
+        object.insert("studyDayGood", summary.studyDayGood);
+        object.insert("streak", summary.streak);
+        object.insert("newCardsOnStudyDay", summary.newCardsOnStudyDay);
+        object.insert("newCardAllowance", backend.newPerDay());
         object.insert("due", backend.availableCount());
         object.insert("totalDue", backend.countDue());
         object.insert("cards", allCards(decks, {}).size());
         object.insert("decks", decks.size());
-        const int accuracy = summary.today > 0 ? qRound(100.0 * summary.todayGood / summary.today) : 0;
+        const int accuracy =
+            summary.studyDayRatings > 0 ? qRound(100.0 * summary.studyDayGood / summary.studyDayRatings) : 0;
         write(object, json,
-              QObject::tr("%1 reviews today · %2% Good · %3 day streak · %4 due")
-                  .arg(summary.today)
+              QObject::tr("Ratings on Study day: %1 · %2% Good · %3-day Streak · %4 due")
+                  .arg(summary.studyDayRatings)
                   .arg(accuracy)
-                  .arg(summary.streakDays)
+                  .arg(summary.streak)
                   .arg(backend.availableCount()));
         return 0;
     }
@@ -1031,9 +1032,9 @@ int run(const QStringList &arguments) {
         }
         QJsonObject object;
         object.insert("ok", true);
-        object.insert("reviews", steps);
+        object.insert("ratings", steps);
         object.insert("good", good);
-        object.insert("box", progression.currentBox()); // already 1-based
+        object.insert("leitnerBox", progression.currentBox()); // already 1-based
         write(object, json,
               QObject::tr("%1 reviews · %2 Good · box %3").arg(steps).arg(good).arg(progression.currentBox()));
         return 0;

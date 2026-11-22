@@ -37,9 +37,9 @@ void TestStore::storeRoundTripsState() {
     store.logReview("card-2", 1, today - 86400000LL, state, 1);
     const ReviewSummary summary = store.summary();
     QCOMPARE(summary.total, 3);
-    QCOMPARE(summary.today, 2);
-    QCOMPARE(summary.todayGood, 2);
-    QCOMPARE(summary.streakDays, 2);
+    QCOMPARE(summary.studyDayRatings, 2);
+    QCOMPARE(summary.studyDayGood, 2);
+    QCOMPARE(summary.streak, 2);
 }
 
 void TestStore::storeRemembersSettings() {
@@ -71,7 +71,7 @@ void TestStore::storeCountsNewCardsToday() {
     store.logReview("new-1", 3, now, state, 1, true); // same card twice
     store.logReview("old-1", 3, now, state, 1, false);
     QCOMPARE(store.newCardsToday(), 1);
-    QCOMPARE(store.summary().newToday, 1);
+    QCOMPARE(store.summary().newCardsOnStudyDay, 1);
 
     store.logReview("new-2", 1, now, state, 1, true);
     QCOMPARE(store.newCardsToday(), 2);
@@ -93,8 +93,8 @@ void TestStore::storeUsesConfiguredDayStart() {
     const int midnight = store.newCardsToday(0);
     const int atThree = store.newCardsToday(3);
     QCOMPARE(midnight + atThree, 1);
-    QCOMPARE(store.summary(0).newToday, midnight);
-    QCOMPARE(store.summary(3).newToday, atThree);
+    QCOMPARE(store.summary(0).newCardsOnStudyDay, midnight);
+    QCOMPARE(store.summary(3).newCardsOnStudyDay, atThree);
 }
 
 void TestStore::openInvalidPathSetsError() {
@@ -174,10 +174,10 @@ void TestStore::unopenedStoreIsInert() {
 
     const ReviewSummary summary = store.summary();
     QCOMPARE(summary.total, 0);
-    QCOMPARE(summary.today, 0);
-    QCOMPARE(summary.todayGood, 0);
-    QCOMPARE(summary.streakDays, 0);
-    QCOMPARE(summary.newToday, 0);
+    QCOMPARE(summary.studyDayRatings, 0);
+    QCOMPARE(summary.studyDayGood, 0);
+    QCOMPARE(summary.streak, 0);
+    QCOMPARE(summary.newCardsOnStudyDay, 0);
     QVERIFY(store.lastError().isEmpty());
 
     // Pin the current behaviour: only newCardsToday() reports a closed DB.
@@ -269,8 +269,8 @@ void TestStore::removeExceptKeepsReviewsLog() {
     // Reviews are intentionally not pruned with the cards.
     const ReviewSummary summary = store.summary();
     QCOMPARE(summary.total, 3);
-    QCOMPARE(summary.today, 3);
-    QCOMPARE(summary.todayGood, 2);
+    QCOMPARE(summary.studyDayRatings, 3);
+    QCOMPARE(summary.studyDayGood, 2);
 }
 
 void TestStore::migratesLegacyReviewsSchema() {
@@ -347,10 +347,10 @@ void TestStore::summaryStreakBreaksOnMissingDay() {
 
     const ReviewSummary summary = store.summary();
     QCOMPARE(summary.total, 3);
-    QCOMPARE(summary.today, 1);
-    QCOMPARE(summary.todayGood, 1);
+    QCOMPARE(summary.studyDayRatings, 1);
+    QCOMPARE(summary.studyDayGood, 1);
     // The two-day-old gap stops the streak before the third review.
-    QCOMPARE(summary.streakDays, 2);
+    QCOMPARE(summary.streak, 2);
 }
 
 void TestStore::summaryStreakSurvivesDayWithoutReviews() {
@@ -367,9 +367,9 @@ void TestStore::summaryStreakSurvivesDayWithoutReviews() {
 
     const ReviewSummary summary = store.summary();
     QCOMPARE(summary.total, 1);
-    QCOMPARE(summary.today, 0);
-    QCOMPARE(summary.todayGood, 0);
-    QCOMPARE(summary.streakDays, 1);
+    QCOMPARE(summary.studyDayRatings, 0);
+    QCOMPARE(summary.studyDayGood, 0);
+    QCOMPARE(summary.streak, 1);
 }
 
 void TestStore::summaryCountsOnlyGood() {
@@ -387,8 +387,8 @@ void TestStore::summaryCountsOnlyGood() {
 
     const ReviewSummary summary = store.summary();
     QCOMPARE(summary.total, 4);
-    QCOMPARE(summary.today, 4);
-    QCOMPARE(summary.todayGood, 1);
+    QCOMPARE(summary.studyDayRatings, 4);
+    QCOMPARE(summary.studyDayGood, 1);
 }
 
 void TestStore::summaryUsesStudyDayForReviewDates() {
@@ -409,9 +409,9 @@ void TestStore::summaryUsesStudyDayForReviewDates() {
 
     const ReviewSummary summary = store.summary(dayStart);
     QCOMPARE(summary.total, 2);
-    QCOMPARE(summary.today, 1);
-    QCOMPARE(summary.todayGood, 1);
-    QCOMPARE(summary.streakDays, 2);
+    QCOMPARE(summary.studyDayRatings, 1);
+    QCOMPARE(summary.studyDayGood, 1);
+    QCOMPARE(summary.streak, 2);
 }
 
 void TestStore::settingFallbackAndUpsert() {

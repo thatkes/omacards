@@ -1484,6 +1484,10 @@ void TestBackend::qmlGoodLabelUsesGoodCount() {
     const QVariantMap stats = view.window->property("statsData").toMap();
     QCOMPARE(stats.value("sessionGood").toInt(), 1);
     QVERIFY(!stats.contains("sessionCorrect"));
+    QCOMPARE(stats.value("studyDayRatings").toInt(), 1);
+    QCOMPARE(stats.value("studyDayGood").toInt(), 1);
+    QCOMPARE(stats.value("totalRatings").toInt(), 1);
+    QVERIFY(!stats.contains("today"));
 }
 
 void TestBackend::qmlSettingsRowsFitTheirContent() {
@@ -1683,13 +1687,13 @@ void TestBackend::backendAppliesNewCardLimit() {
         backend.setNewPerDay(2);
         QCOMPARE(backend.availableCount(), 2);
         QCOMPARE(backend.dueCount(), 2);
-        QCOMPARE(backend.reviewSummary().newToday, 0);
+        QCOMPARE(backend.reviewSummary().newCardsOnStudyDay, 0);
 
         backend.flip();
         backend.rate(3);
         backend.flip();
         backend.rate(3);
-        QCOMPARE(backend.reviewSummary().newToday, 2);
+        QCOMPARE(backend.reviewSummary().newCardsOnStudyDay, 2);
         QCOMPARE(backend.availableCount(), 0);
         QCOMPARE(backend.dueCount(), 0);
 
@@ -1990,9 +1994,21 @@ void TestBackend::statsSummaryKeepsContract() {
     const QVariantMap summary = backend.statsSummary();
     QStringList keys = summary.keys();
     keys.sort();
-    QStringList expected{"accuracy",        "cards",      "dayStartHour", "decks",     "due",
-                         "newAvailable",    "newPerDay",  "newToday",     "retention", "sessionGood",
-                         "sessionReviewed", "streakDays", "today",        "todayGood", "totalReviews"};
+    QStringList expected{"accuracy",
+                         "cards",
+                         "dayStartHour",
+                         "decks",
+                         "due",
+                         "newAvailable",
+                         "newCardAllowance",
+                         "newCardsOnStudyDay",
+                         "retention",
+                         "sessionGood",
+                         "sessionReviewed",
+                         "streak",
+                         "studyDayRatings",
+                         "studyDayGood",
+                         "totalRatings"};
     expected.sort();
     QCOMPARE(keys, expected);
     QCOMPARE(summary.value("cards").toInt(), backend.totalCards());
@@ -2001,7 +2017,7 @@ void TestBackend::statsSummaryKeepsContract() {
     QCOMPARE(summary.value("sessionReviewed").toInt(), backend.reviewed());
     QCOMPARE(summary.value("sessionGood").toInt(), backend.good());
     QCOMPARE(backend.reviewSummary().total, 1); // one GUI rating appends one review
-    QCOMPARE(summary.value("todayGood").toInt(), 1);
+    QCOMPARE(summary.value("studyDayGood").toInt(), 1);
 }
 
 void TestBackend::setModeBoundarySemantics() {
@@ -2273,13 +2289,13 @@ void TestBackend::deckSummariesAndSearchFilterByDeck() {
     backend.selectDeck("Alpha");
     QVariantList summaries = backend.deckSummaries();
     QCOMPARE(summaries.size(), 2);
-    QVERIFY(summaries.at(0).toMap().value("active").toBool());
-    QVERIFY(!summaries.at(1).toMap().value("active").toBool());
+    QVERIFY(summaries.at(0).toMap().value("isCurrent").toBool());
+    QVERIFY(!summaries.at(1).toMap().value("isCurrent").toBool());
 
     backend.selectDeck("Beta");
     summaries = backend.deckSummaries();
-    QVERIFY(!summaries.at(0).toMap().value("active").toBool());
-    QVERIFY(summaries.at(1).toMap().value("active").toBool());
+    QVERIFY(!summaries.at(0).toMap().value("isCurrent").toBool());
+    QVERIFY(summaries.at(1).toMap().value("isCurrent").toBool());
 
     QCOMPARE(backend.availableCount("Alpha"), 2);
     QCOMPARE(backend.availableCount("Beta"), 1);
