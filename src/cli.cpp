@@ -525,6 +525,7 @@ int run(const QStringList &arguments) {
         if (options.format != QLatin1String("text") && options.format != QLatin1String("html"))
             return fail(QObject::tr("--format must be text or html"), json);
         QVector<Card> cards = allCards(decks, options.deck);
+        const bool deckHasNoCards = cards.isEmpty();
         if (!options.card.isEmpty()) {
             QVector<Card> filtered;
             for (const Card &card : cards)
@@ -535,7 +536,7 @@ int run(const QStringList &arguments) {
         if (cards.isEmpty()) {
             // A --card miss keeps the old message; only an existing Deck file
             // that yields no Cards gets the empty-Deck diagnostic.
-            if (options.card.isEmpty()) {
+            if (deckHasNoCards) {
                 const QString targetPath = resolveDeckPath(decks, backend.decksDirectory(), options.deck);
                 if (!targetPath.isEmpty() && QFileInfo::exists(targetPath))
                     return failEmptyDeck(options.deck, deckIssueReport(backend.decksDirectory(), targetPath), json);

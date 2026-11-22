@@ -1302,6 +1302,27 @@ oops: not a key
     QVERIFY(emptyText.isEmpty());
     QCOMPARE(QString::fromUtf8(stderrOutput), QStringLiteral("Deck Empty has no Cards\nomacards check --deck Empty\n"));
 
+    // A --card filter does not hide an existing zero-Card Deck's Deck issues.
+    const QJsonObject emptyFiltered =
+        runCli({"preview", "--deck", "Empty", "--card", "nope", "--json"}, decks, database, &code, &stderrOutput);
+    QCOMPARE(code, 1);
+    QVERIFY(stderrOutput.isEmpty());
+    QCOMPARE(sortedKeys(emptyFiltered), failureKeys);
+    QVERIFY(!emptyFiltered.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(emptyFiltered.value(QStringLiteral("error")).toString(), QStringLiteral("Deck Empty has no Cards"));
+    QCOMPARE(emptyFiltered.value(QStringLiteral("deck")).toString(), QStringLiteral("Empty"));
+    QVERIFY(emptyFiltered.value(QStringLiteral("issues")).toArray().isEmpty());
+    const QJsonObject emptyFilteredCounts = emptyFiltered.value(QStringLiteral("issueCounts")).toObject();
+    QCOMPARE(sortedKeys(emptyFilteredCounts), QStringList({"error", "warning"}));
+    QCOMPARE(emptyFilteredCounts.value(QStringLiteral("error")).toInt(), 0);
+    QCOMPARE(emptyFilteredCounts.value(QStringLiteral("warning")).toInt(), 0);
+    QCOMPARE(emptyFiltered.value(QStringLiteral("hint")).toString(), QStringLiteral("omacards check --deck Empty"));
+    const QString emptyFilteredText =
+        runCliText({"preview", "--deck", "Empty", "--card", "nope"}, decks, database, &code, &stderrOutput);
+    QCOMPARE(code, 1);
+    QVERIFY(emptyFilteredText.isEmpty());
+    QCOMPARE(QString::fromUtf8(stderrOutput), QStringLiteral("Deck Empty has no Cards\nomacards check --deck Empty\n"));
+
     // The hint uses the supplied name, quoted only when it has whitespace,
     // even when the Deck file and header use different names.
     const QJsonObject quoted =
