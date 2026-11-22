@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+if [ ! -x "$ROOT/build/omacards" ]; then
+    "$ROOT/bin/build"
+fi
 mkdir -p "$ROOT/build/tests"
 cd "$ROOT/build/tests"
 qmake6 "$ROOT/tests/omacards_tests.pro"
@@ -10,6 +13,7 @@ status=0
 QT_QPA_PLATFORM=offscreen ./omacards_tests "$@" > "$LOG" 2>&1 || status=$?
 cat "$LOG"
 awk '
+  /^(FAIL|QFATAL)/ { failures = failures $0 "\n" }
   /^Totals:/ {
     passed += $2
     failed += $4
@@ -19,6 +23,8 @@ awk '
   }
   END {
     printf "ALL: %d passed, %d failed, %d skipped, %d blacklisted across %d suites\n", passed, failed, skipped, blacklisted, suites
+    if (failures != "")
+      printf "\nFailures:\n%s", failures
   }
 ' "$LOG"
 exit "$status"
