@@ -25,7 +25,7 @@ public:
         return {};
     }
     QHash<QString, QString> hashes() const override { return {}; }
-    int newCardsToday(int) const override { return 0; }
+    int newCardsOnStudyDay(int) const override { return 0; }
     QString lastError() const override { return m_error; }
 
     void failReads(const QString &error) { m_readError = error; }

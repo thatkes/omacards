@@ -58,7 +58,7 @@ omacards review -c <card-id> -r 3 --json
 omacards cram --deck Spanish --steps 20 --json
 omacards stats --json
 omacards config --json
-omacards config --new-per-day 10 --day-start-hour 3 --retention 0.9 --json
+omacards config --new-card-allowance 10 --day-start-hour 3 --retention 0.9 --json
 omacards skill install
 ```
 
@@ -187,7 +187,8 @@ scripts. Fix line-numbered Deck issues and re-run until the deck is clean.
 ## Scheduling settings
 
 `omacards config` reads the New-card allowance, the Day-start hour and Desired
-retention. Use `--new-per-day N`, `--day-start-hour H` (0–23, default 0) and
+retention. Use `--new-card-allowance N` (`--new-per-day N` is an accepted alias),
+`--day-start-hour H` (0–23, default 0) and
 `--retention R` (0.70–0.99) to change them. A card is due once the Study day
 containing its FSRS due time has begun: with `--day-start-hour 3`, a card due at
 22:00 waits until 03:00 the next Study day. The same boundary governs Ratings on

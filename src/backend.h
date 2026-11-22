@@ -48,7 +48,7 @@ class Backend : public QObject {
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyChanged)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyChanged)
     Q_PROPERTY(QString currentCardId READ currentCardId NOTIFY cardChanged)
-    Q_PROPERTY(int newPerDay READ newPerDay WRITE setNewPerDay NOTIFY settingsChanged)
+    Q_PROPERTY(int newCardAllowance READ newCardAllowance WRITE setNewCardAllowance NOTIFY settingsChanged)
     Q_PROPERTY(double desiredRetention READ desiredRetention WRITE setDesiredRetention NOTIFY settingsChanged)
     Q_PROPERTY(int dayStartHour READ dayStartHour WRITE setDayStartHour NOTIFY settingsChanged)
     Q_PROPERTY(QString decksDirectory READ decksDirectory CONSTANT)
@@ -98,7 +98,7 @@ public:
     QString currentCardId() const { return m_session.currentCardId(); }
     bool canUndo() const { return m_history.canUndo(); }
     bool canRedo() const { return m_history.canRedo(); }
-    int newPerDay() const { return m_newPerDay; }
+    int newCardAllowance() const { return m_newCardAllowance; }
     double desiredRetention() const { return m_desiredRetention; }
     int dayStartHour() const { return m_dayStartHour; }
     int availableCount(const QString &deckName = {}) const { return m_planner.availableCount(deckName); }
@@ -152,7 +152,7 @@ public slots:
                                 const QString &type, const QString &tags);
     Q_INVOKABLE void importFrom(const QString &path, const QString &deckName = {});
     Q_INVOKABLE void setCardFilter(const QString &filter);
-    Q_INVOKABLE void setNewPerDay(int count);
+    Q_INVOKABLE void setNewCardAllowance(int count);
     Q_INVOKABLE void setDesiredRetention(double retention);
     Q_INVOKABLE void setDayStartHour(int hour);
     Q_INVOKABLE void undo();
@@ -192,7 +192,7 @@ private:
     StorePlannerAdapter m_plannerStore;
     StudyPlanner m_planner;
     StudySession m_session;
-    int m_newPerDay = Config::kDefaultNewPerDay;
+    int m_newCardAllowance = Config::kDefaultNewPerDay;
     double m_desiredRetention = Config::kDefaultRetention;
     int m_dayStartHour = Config::kDefaultDayStartHour;
     QString m_currentDeck;

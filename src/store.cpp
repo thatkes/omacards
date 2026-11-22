@@ -60,6 +60,18 @@ bool Store::open(QString *error) {
         }
     }
 
+    // Older databases stored the new-card allowance under new_per_day. Copy
+    // the value forward on load, without replacing a canonical key that is
+    // already there, and keep the old key for not-yet-migrated consumers.
+    if (!query.exec(QStringLiteral("INSERT INTO settings (key, value) SELECT 'new_card_allowance', value FROM settings "
+                                   "WHERE key = 'new_per_day' AND NOT EXISTS "
+                                   "(SELECT 1 FROM settings WHERE key = 'new_card_allowance')"))) {
+        m_lastError = query.lastError().text();
+        if (error)
+            *error = m_lastError;
+        return false;
+    }
+
     // Older databases predate the new_card column. Keep them readable instead
     // of dropping the review history.
     bool hasNewCard = false;
@@ -137,8 +149,8 @@ void Store::save(const QString &cardId, const QString &hash, const FsrsState &st
         m_lastError = query.lastError().text();
 }
 
-void Store::logReview(const QString &cardId, int rating, qint64 at, const FsrsState &state, int intervalDays,
-                      bool wasNew) {
+void Store::recordRating(const QString &cardId, int rating, qint64 at, const FsrsState &state, int intervalDays,
+                         bool wasNew) {
     if (!m_db.isOpen())
         return;
     QSqlQuery query(m_db);
@@ -203,7 +215,7 @@ ReviewSummary Store::summary(int dayStartHour) const {
                 ++result.studyDayGood;
         }
     }
-    result.newCardsOnStudyDay = countNewCardsToday(dayStartHour);
+    result.newCardsOnStudyDay = countNewCardsOnStudyDay(dayStartHour);
 
     // A streak survives until the next study day begins, so a user who has
     // not reviewed yet still sees the previous day's total.
@@ -217,14 +229,14 @@ ReviewSummary Store::summary(int dayStartHour) const {
     return result;
 }
 
-int Store::newCardsToday(int dayStartHour) const {
-    const int count = countNewCardsToday(dayStartHour);
+int Store::newCardsOnStudyDay(int dayStartHour) const {
+    const int count = countNewCardsOnStudyDay(dayStartHour);
     if (m_lastError.isEmpty() && !m_db.isOpen())
         m_lastError = QStringLiteral("State database is not open");
     return count;
 }
 
-int Store::countNewCardsToday(int dayStartHour) const {
+int Store::countNewCardsOnStudyDay(int dayStartHour) const {
     if (!m_db.isOpen())
         return 0;
     QSqlQuery query(m_db);

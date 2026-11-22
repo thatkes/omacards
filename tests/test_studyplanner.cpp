@@ -419,21 +419,21 @@ void TestStudyPlanner::refreshRecomputesNewAllowanceFromReviewHistory() {
 
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const FsrsState reviewed = Fsrs::review(Fsrs::initial(), 3, now).state;
-    store.logReview(first.id, 3, now, reviewed, 3, true);
+    store.recordRating(first.id, 3, now, reviewed, 3, true);
     QVERIFY(planner.refresh(&error));
     QCOMPARE(planner.newCount(), 2);
 
-    store.logReview(second.id, 3, now, reviewed, 3, true);
+    store.recordRating(second.id, 3, now, reviewed, 3, true);
     QVERIFY(planner.refresh(&error));
     QCOMPARE(planner.newCount(), 1);
 
     // A later review of an already rated Card does not spend the allowance.
-    store.logReview(first.id, 3, now + 1000, reviewed, 3, false);
+    store.recordRating(first.id, 3, now + 1000, reviewed, 3, false);
     QVERIFY(planner.refresh(&error));
     QCOMPARE(planner.newCount(), 1);
 }
 
-void TestStudyPlanner::updateNewBudgetTracksLoggedReviews() {
+void TestStudyPlanner::updateNewBudgetTracksRecordedRatings() {
     QTemporaryDir dir;
     const QString database = dir.filePath("state.db");
     Store store(database);
@@ -454,13 +454,13 @@ void TestStudyPlanner::updateNewBudgetTracksLoggedReviews() {
 
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const FsrsState state = Fsrs::review(Fsrs::initial(), 3, now).state;
-    store.logReview("new-a", 3, now, state, 1, true);
-    store.logReview("new-a", 3, now + 1, state, 1, true); // DISTINCT: same card twice
+    store.recordRating("new-a", 3, now, state, 1, true);
+    store.recordRating("new-a", 3, now + 1, state, 1, true); // DISTINCT: same card twice
     planner.updateNewBudget(&error);
     QVERIFY(error.isEmpty());
     QCOMPARE(planner.newCount(), 2);
 
-    store.logReview("new-b", 3, now, state, 1, true);
+    store.recordRating("new-b", 3, now, state, 1, true);
     planner.updateNewBudget(&error);
     QVERIFY(error.isEmpty());
     QCOMPARE(planner.newCount(), 1);
@@ -663,10 +663,10 @@ void TestStudyPlanner::statsSummaryNumericContract() {
 
     const qint64 todayStart = QDateTime(QDate::currentDate(), QTime(0, 0)).toMSecsSinceEpoch() + 3600000;
     const FsrsState state = Fsrs::review(Fsrs::initial(), 3, todayStart).state;
-    store.logReview("today-good", 3, todayStart, state, 3);
-    store.logReview("today-wrong", 1, todayStart + 1000, state, 1);
-    store.logReview("yesterday", 3, todayStart - 86400000LL, state, 3);
-    store.logReview("logged-new", 3, todayStart + 2000, state, 1, true);
+    store.recordRating("today-good", 3, todayStart, state, 3);
+    store.recordRating("today-wrong", 1, todayStart + 1000, state, 1);
+    store.recordRating("yesterday", 3, todayStart - 86400000LL, state, 3);
+    store.recordRating("logged-new", 3, todayStart + 2000, state, 1, true);
 
     PlannerWithStore planner(store);
     planner.setDecks(decks);

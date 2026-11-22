@@ -21,8 +21,8 @@ public:
         virtual QHash<QString, FsrsState> states() const = 0;
         virtual QHash<QString, QString> hashes() const = 0;
         virtual void save(const QString &cardId, const QString &hash, const FsrsState &state) = 0;
-        virtual void logReview(const QString &cardId, int rating, qint64 at, const FsrsState &state, int intervalDays,
-                               bool wasNew) = 0;
+        virtual void recordRating(const QString &cardId, int rating, qint64 at, const FsrsState &state,
+                                  int intervalDays, bool wasNew) = 0;
         virtual QString lastError() const = 0;
     };
 
@@ -53,8 +53,8 @@ public:
     QHash<QString, FsrsState> states() const override;
     QHash<QString, QString> hashes() const override;
     void save(const QString &cardId, const QString &hash, const FsrsState &state) override;
-    void logReview(const QString &cardId, int rating, qint64 at, const FsrsState &state, int intervalDays,
-                   bool wasNew) override;
+    void recordRating(const QString &cardId, int rating, qint64 at, const FsrsState &state, int intervalDays,
+                      bool wasNew) override;
     QString lastError() const override;
 
 private:

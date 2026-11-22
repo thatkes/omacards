@@ -16,8 +16,8 @@ check_literal() {
 }
 
 check_literal src/cli.cpp 'Cannot read scheduling state: %1'
-check_literal src/cli.cpp 'Cannot save review: %1'
+check_literal src/cli.cpp 'Cannot record rating: %1'
 check_literal tests/test_cli.cpp 'Cannot read scheduling state: '
-check_literal tests/test_cli.cpp 'Cannot save review: '
+check_literal tests/test_cli.cpp 'Cannot record rating: '
 
 exit "$status"

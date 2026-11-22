@@ -29,7 +29,7 @@ private slots:
     void checkDeckScoping();
     void readCommandJsonContracts();
     void useDeckCommandContract();
-    void decksActiveCommandContract();
+    void decksCurrentCommandContract();
     void reviewCommandContract();
     void reviewWrapsStoreErrors();
     void reviewWrapsWriteStoreErrors();

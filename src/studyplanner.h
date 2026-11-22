@@ -24,7 +24,7 @@ public:
         virtual void clearError() = 0;
         virtual QHash<QString, FsrsState> states() const = 0;
         virtual QHash<QString, QString> hashes() const = 0;
-        virtual int newCardsToday(int dayStartHour) const = 0;
+        virtual int newCardsOnStudyDay(int dayStartHour) const = 0;
         virtual QString lastError() const = 0;
     };
 
@@ -39,7 +39,7 @@ public:
     explicit StudyPlanner(StoreAdapter &store);
 
     void setDecks(const QVector<Deck> &decks) { m_decks = &decks; }
-    void configure(int newPerDay, int dayStartHour);
+    void configure(int newCardAllowance, int dayStartHour);
 
     bool refresh(QString *storeError = nullptr);
     void updateNewBudget(QString *storeError = nullptr);
@@ -83,7 +83,7 @@ private:
     const QVector<Deck> *m_decks = nullptr;
     StudySnapshot m_snapshot;
     bool m_snapshotValid = false;
-    int m_newPerDay = 0;
+    int m_newCardAllowance = 0;
     int m_dayStartHour = 0;
 };
 
@@ -95,7 +95,7 @@ public:
     void clearError() override;
     QHash<QString, FsrsState> states() const override;
     QHash<QString, QString> hashes() const override;
-    int newCardsToday(int dayStartHour) const override;
+    int newCardsOnStudyDay(int dayStartHour) const override;
     QString lastError() const override;
 
 private:

@@ -13,7 +13,7 @@ private slots:
     void configureLimitsAndCounts();
     void futureReviewsAreNotAvailable();
     void refreshRecomputesNewAllowanceFromReviewHistory();
-    void updateNewBudgetTracksLoggedReviews();
+    void updateNewBudgetTracksRecordedRatings();
     void reviewIdsFollowAvailabilityOrder();
     void cardListFiltersAndFormats();
     void deckSummariesReportCounts();
