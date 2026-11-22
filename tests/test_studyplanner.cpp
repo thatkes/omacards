@@ -78,6 +78,27 @@ QStringList idsOf(const QVector<Card> &cards) {
     return ids;
 }
 
+// Stub at the planner's Store seam: a failing read is visible only through
+// lastError(), exactly as it is with the real Store.
+class PlannerStoreStub : public StudyPlanner::StoreAdapter {
+public:
+    void clearError() override { m_error.clear(); }
+    QHash<QString, FsrsState> states() const override {
+        if (!m_readError.isEmpty())
+            m_error = m_readError;
+        return {};
+    }
+    QHash<QString, QString> hashes() const override { return {}; }
+    int newCardsToday(int) const override { return 0; }
+    QString lastError() const override { return m_error; }
+
+    void failReads(const QString &error) { m_readError = error; }
+
+private:
+    QString m_readError;
+    mutable QString m_error;
+};
+
 } // namespace
 
 void TestStudyPlanner::noDecksIsSafe() {
@@ -87,7 +108,8 @@ void TestStudyPlanner::noDecksIsSafe() {
     QVERIFY(store.open(&error));
     QVERIFY(error.isEmpty());
 
-    StudyPlanner planner(store);
+    StorePlannerAdapter adapter(store);
+    StudyPlanner planner(adapter);
     planner.configure(5, 3); // setDecks() is deliberately never called
 
     const StudyPlanner::Availability all = planner.availability();
@@ -123,7 +145,7 @@ void TestStudyPlanner::noDecksIsSafe() {
     QVERIFY(planner.deckSummaries(QString()).isEmpty());
     QVERIFY(planner.cardList(QString(), "needle", "new", "due").isEmpty());
 
-    const QVariantMap stats = planner.statsSummary(0, 0, 0, 0, 0, Config::kDefaultRetention);
+    const QVariantMap stats = planner.statsSummary(store.summary(0), 0, 0, 0, 0, 0, Config::kDefaultRetention);
     QCOMPARE(stats.value("accuracy").toInt(), 0);
     QCOMPARE(stats.value("newAvailable").toInt(), 0);
     QCOMPARE(stats.value("streakDays").toInt(), 0);
@@ -155,7 +177,8 @@ void TestStudyPlanner::refreshReadsStatesAndHashes() {
     store.save(stored.id, DeckIO::contentHash(stored), saved);
     store.save(stale.id, QStringLiteral("wrong-hash"), saved); // state with a mismatched hash
 
-    StudyPlanner planner(store);
+    StorePlannerAdapter adapter(store);
+    StudyPlanner planner(adapter);
     planner.setDecks(decks);
     planner.configure(20, 0);
 
@@ -183,6 +206,16 @@ void TestStudyPlanner::refreshReadsStatesAndHashes() {
     QCOMPARE(planner.availableCount(), 3);
 }
 
+void TestStudyPlanner::refreshReadFailureCanBeInjectedAtStoreAdapter() {
+    PlannerStoreStub stub;
+    stub.failReads(QStringLiteral("planner read boom"));
+    StudyPlanner planner(stub);
+
+    QString storeError;
+    QVERIFY(!planner.refresh(&storeError));
+    QCOMPARE(storeError, QStringLiteral("planner read boom"));
+}
+
 void TestStudyPlanner::refreshBrokenStoreInvalidatesSnapshot() {
     QTemporaryDir dir;
     const QString database = dir.filePath("state.db");
@@ -197,7 +230,8 @@ void TestStudyPlanner::refreshBrokenStoreInvalidatesSnapshot() {
     const QVector<Deck> decks{deck};
     saveState(store, card, QDateTime::currentMSecsSinceEpoch() - 86400000LL, 2);
 
-    StudyPlanner planner(store);
+    StorePlannerAdapter adapter(store);
+    StudyPlanner planner(adapter);
     planner.setDecks(decks);
     planner.configure(5, 0);
     QString storeError;
@@ -268,7 +302,8 @@ void TestStudyPlanner::configureLimitsAndCounts() {
     saveState(store, dueB, base + 1000, 2); // same due as due-a: id breaks the tie
     saveState(store, future, QDateTime::currentMSecsSinceEpoch() + 3 * 86400000LL, 1);
 
-    StudyPlanner planner(store);
+    StorePlannerAdapter adapter(store);
+    StudyPlanner planner(adapter);
     planner.setDecks(decks);
     planner.configure(3, 0);
     QVERIFY(planner.refresh(&error));
@@ -344,7 +379,8 @@ void TestStudyPlanner::futureReviewsAreNotAvailable() {
     saveState(store, future, futureDue, 1);
     saveState(store, zero, 0, 1); // a reviewed card pinned to the epoch
 
-    StudyPlanner planner(store);
+    StorePlannerAdapter adapter(store);
+    StudyPlanner planner(adapter);
     planner.setDecks(decks);
     planner.configure(10, 3);
     QVERIFY(planner.refresh(&error));
@@ -387,7 +423,8 @@ void TestStudyPlanner::refreshRecomputesNewAllowanceFromReviewHistory() {
     deck.cards << first << second << third;
     const QVector<Deck> decks{deck};
 
-    StudyPlanner planner(store);
+    StorePlannerAdapter adapter(store);
+    StudyPlanner planner(adapter);
     planner.setDecks(decks);
     planner.configure(3, 0);
     QVERIFY(planner.refresh(&error));
@@ -422,7 +459,8 @@ void TestStudyPlanner::updateNewBudgetTracksLoggedReviews() {
                << makeCard("new-c", "C", "c", "Budget");
     const QVector<Deck> decks{deck};
 
-    StudyPlanner planner(store);
+    StorePlannerAdapter adapter(store);
+    StudyPlanner planner(adapter);
     planner.setDecks(decks);
     planner.configure(3, 0);
     QVERIFY(planner.refresh(&error));
@@ -476,7 +514,8 @@ void TestStudyPlanner::reviewIdsFollowAvailabilityOrder() {
     saveState(store, deck.cards.at(1), base, 1);
     saveState(store, deck.cards.at(3), base, 1); // same due, lower id comes first
 
-    StudyPlanner planner(store);
+    StorePlannerAdapter adapter(store);
+    StudyPlanner planner(adapter);
     planner.setDecks(decks);
     planner.configure(2, 0);
     QVERIFY(planner.refresh(&error));
@@ -528,7 +567,8 @@ void TestStudyPlanner::cardListFiltersAndFormats() {
     saveState(store, reviewed, dueMs, 1);
     saveState(store, future, futureDue, 1);
 
-    StudyPlanner planner(store);
+    StorePlannerAdapter adapter(store);
+    StudyPlanner planner(adapter);
     planner.setDecks(decks);
     planner.configure(20, 0);
     QVERIFY(planner.refresh(&error));
@@ -588,7 +628,8 @@ void TestStudyPlanner::deckSummariesReportCounts() {
     const QVector<Deck> decks{alpha, beta};
     saveState(store, alpha.cards.at(1), QDateTime::currentMSecsSinceEpoch() - 86400000LL, 1);
 
-    StudyPlanner planner(store);
+    StorePlannerAdapter adapter(store);
+    StudyPlanner planner(adapter);
     planner.setDecks(decks);
     planner.configure(1, 0);
     QVERIFY(planner.refresh(&error));
@@ -644,12 +685,13 @@ void TestStudyPlanner::statsSummaryNumericContract() {
     store.logReview("yesterday", 3, todayStart - 86400000LL, state, 3);
     store.logReview("logged-new", 3, todayStart + 2000, state, 1, true);
 
-    StudyPlanner planner(store);
+    StorePlannerAdapter adapter(store);
+    StudyPlanner planner(adapter);
     planner.setDecks(decks);
     planner.configure(2, 0);
     QVERIFY(planner.refresh(&error));
 
-    const QVariantMap summary = planner.statsSummary(7, 3, 1, 4, 3, 0.85);
+    const QVariantMap summary = planner.statsSummary(store.summary(0), 7, 3, 1, 4, 3, 0.85);
     QStringList keys = summary.keys();
     QStringList expected{"accuracy",        "cards",      "dayStartHour", "decks",     "due",
                          "newAvailable",    "newPerDay",  "newToday",     "retention", "sessionGood",
@@ -678,9 +720,10 @@ void TestStudyPlanner::statsSummaryNumericContract() {
     QTemporaryDir emptyDir;
     Store emptyStore(emptyDir.filePath("state.db"));
     QVERIFY(emptyStore.open(&error));
-    StudyPlanner emptyPlanner(emptyStore);
+    StorePlannerAdapter emptyAdapter(emptyStore);
+    StudyPlanner emptyPlanner(emptyAdapter);
     emptyPlanner.configure(2, 0);
-    const QVariantMap empty = emptyPlanner.statsSummary(0, 0, 0, 0, 0, 0.9);
+    const QVariantMap empty = emptyPlanner.statsSummary(emptyStore.summary(0), 0, 0, 0, 0, 0, 0.9);
     QCOMPARE(empty.value("accuracy").toInt(), 0);
     QCOMPARE(empty.value("streakDays").toInt(), 0);
     QCOMPARE(empty.value("totalReviews").toInt(), 0);

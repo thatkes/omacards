@@ -6,7 +6,7 @@
 #include <QVariantMap>
 #include <algorithm>
 
-StudyPlanner::StudyPlanner(Store &store) : m_store(store) {}
+StudyPlanner::StudyPlanner(StoreAdapter &store) : m_store(store) {}
 
 void StudyPlanner::configure(int newPerDay, int dayStartHour) {
     m_newPerDay = newPerDay;
@@ -203,9 +203,8 @@ QVariantList StudyPlanner::cardList(const QString &currentDeck, const QString &f
     return list;
 }
 
-QVariantMap StudyPlanner::statsSummary(int dueCount, int totalCards, int deckCount, int sessionReviewed,
-                                       int sessionGood, double desiredRetention) const {
-    const ReviewSummary summary = m_store.summary(m_dayStartHour);
+QVariantMap StudyPlanner::statsSummary(const ReviewSummary &summary, int dueCount, int totalCards, int deckCount,
+                                       int sessionReviewed, int sessionGood, double desiredRetention) const {
     QVariantMap result;
     result.insert("totalReviews", summary.total);
     result.insert("today", summary.today);
@@ -223,4 +222,26 @@ QVariantMap StudyPlanner::statsSummary(int dueCount, int totalCards, int deckCou
     result.insert("sessionReviewed", sessionReviewed);
     result.insert("sessionGood", sessionGood);
     return result;
+}
+
+StorePlannerAdapter::StorePlannerAdapter(Store &store) : m_store(store) {}
+
+void StorePlannerAdapter::clearError() {
+    m_store.clearError();
+}
+
+QHash<QString, FsrsState> StorePlannerAdapter::states() const {
+    return m_store.states();
+}
+
+QHash<QString, QString> StorePlannerAdapter::hashes() const {
+    return m_store.hashes();
+}
+
+int StorePlannerAdapter::newCardsToday(int dayStartHour) const {
+    return m_store.newCardsToday(dayStartHour);
+}
+
+QString StorePlannerAdapter::lastError() const {
+    return m_store.lastError();
 }

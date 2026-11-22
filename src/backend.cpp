@@ -34,7 +34,7 @@ Backend::Backend(const QString &decksDirectory, const QString &databasePath, QOb
     : QObject(parent), m_store(databasePath.isEmpty() ? defaultDatabasePath() : databasePath), m_ratingStore(m_store),
       m_ratings(m_ratingStore),
       m_deckRepo(decksDirectory.isEmpty() ? defaultDecksDirectory() : decksDirectory, m_store, m_history, this),
-      m_planner(m_store), m_session(m_deckRepo, m_planner, m_ratings, this) {
+      m_plannerStore(m_store), m_planner(m_plannerStore), m_session(m_deckRepo, m_planner, m_ratings, this) {
     connect(&m_deckRepo, &DeckRepository::reloadRequested, this, &Backend::refresh);
     connect(&m_deckRepo, &DeckRepository::errorOccurred, &m_session, &StudySession::reportError);
     connect(&m_deckRepo, &DeckRepository::historyChanged, this, &Backend::historyChanged);

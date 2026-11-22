@@ -8,6 +8,7 @@ class TestStudyPlanner : public QObject {
 private slots:
     void noDecksIsSafe();
     void refreshReadsStatesAndHashes();
+    void refreshReadFailureCanBeInjectedAtStoreAdapter();
     void refreshBrokenStoreInvalidatesSnapshot();
     void configureLimitsAndCounts();
     void futureReviewsAreNotAvailable();

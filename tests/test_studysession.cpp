@@ -25,6 +25,7 @@ struct SessionFixture {
     Store store;
     FileHistory history;
     DeckRepository repo;
+    StorePlannerAdapter plannerStore;
     StudyPlanner planner;
     StoreRatingAdapter ratingStore;
     RatingRecording ratings;
@@ -32,8 +33,8 @@ struct SessionFixture {
     QString current;
 
     SessionFixture()
-        : store(dir.filePath("state.db")), repo(dir.filePath("decks"), store, history), planner(store),
-          ratingStore(store), ratings(ratingStore), session(repo, planner, ratings) {}
+        : store(dir.filePath("state.db")), repo(dir.filePath("decks"), store, history), plannerStore(store),
+          planner(plannerStore), ratingStore(store), ratings(ratingStore), session(repo, planner, ratings) {}
 };
 
 // Counts what the session hands to Rating recording; scheduling semantics stay
