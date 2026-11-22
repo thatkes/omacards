@@ -8,6 +8,7 @@ class TestInSessionProgression : public QObject {
 private slots:
     void nextResultCarriesKindCardWaitAndLeitnerBox();
     void reviewOrderComesFromNextResults();
+    void upcomingPeeksWithoutConsuming();
     void pendingRepeatWaitComesFromNextResult();
     void nextResultUsesSmallestPendingDeadline();
     void rebuildPreservesAbsolutePendingDeadlines();

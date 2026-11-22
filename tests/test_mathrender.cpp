@@ -1,8 +1,10 @@
 #include <QtTest>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QUrl>
 
 #include "test_mathrender.h"
 #include "test_support.h"
@@ -82,6 +84,26 @@ base=${base%.tex}
 printf '%s\n' '%PDF-1.4' > "$out/$base.pdf"
 )sh")
                                          : QStringLiteral("\nexit 1\n");
+    const QString cairoBody = svgWriterBody(svg, QStringLiteral(R"sh(
+svg=
+for arg do svg="$arg"; done
+)sh"));
+    return writeFakeTool(binDir, "tectonic", tectonicBody) && writeFakeTool(binDir, "pdftocairo", cairoBody);
+}
+
+bool writePartlyFailingPdfToolchain(const QString &binDir, const QString &svg) {
+    const QString tectonicBody = QStringLiteral(R"sh(
+out=
+tex=
+for arg do
+    case "$arg" in --outdir=*) out=${arg#--outdir=} ;; esac
+    tex="$arg"
+done
+grep -q 'bad-' "$tex" && exit 1
+base=${tex##*/}
+base=${base%.tex}
+printf '%s\n' '%PDF-1.4' > "$out/$base.pdf"
+)sh");
     const QString cairoBody = svgWriterBody(svg, QStringLiteral(R"sh(
 svg=
 for arg do svg="$arg"; done
@@ -464,6 +486,94 @@ void TestMathRender::cachedSvgSkipsSecondToolchainRun() {
     const QString log = QString::fromUtf8(logFile.readAll());
     QVERIFY(log.count("tectonic --untrusted") == 1);
     QVERIFY(log.count("pdftocairo -svg") == 1);
+}
+
+void TestMathRender::warmRendersMissingExpressionsAndSkipsHits() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString bin = dir.filePath("bin");
+    const QString cache = dir.filePath("cache");
+    const QString argsLog = dir.filePath("args.log");
+    QVERIFY(QDir().mkpath(cache));
+    QVERIFY(writeFakePdfToolchain(bin, kPtSvg));
+
+    PathPrependGuard pathGuard(bin);
+    ScopedEnv argsGuard("OMACARDS_TEST_ARGS", argsLog);
+    MathRenderer renderer(cache);
+    QVERIFY(renderer.hasRenderer());
+
+    // Repeating an expression must still produce one render per cache key.
+    const QString text = QStringLiteral("\\(x^2\\) and \\(y^2\\) and \\(x^2\\)");
+    int cached = -1;
+    QCOMPARE(renderer.warm(text, "#123456", 2.0, &cached), 2);
+    QCOMPARE(cached, 0);
+
+    const QString xPath = renderer.cachedSvgPath("x^2", "#123456", 2.0);
+    const QString yPath = renderer.cachedSvgPath("y^2", "#123456", 2.0);
+    QVERIFY(xPath.startsWith(cache + "/eq4-"));
+    QVERIFY(yPath.startsWith(cache + "/eq4-"));
+    QVERIFY(xPath != yPath);
+    // Warming writes the same file names and SVG layout as a live render.
+    QVERIFY(renderer.renderExpression("x^2", "#123456", 2.0).contains(QUrl::fromLocalFile(xPath).toString()));
+
+    QCOMPARE(renderer.warm(text, "#123456", 2.0, &cached), 0);
+    QCOMPARE(cached, 2); // two distinct SVGs were already cached
+
+    QFile logFile(argsLog);
+    QVERIFY(logFile.open(QIODevice::ReadOnly));
+    const QString log = QString::fromUtf8(logFile.readAll());
+    QCOMPARE(log.count("tectonic --untrusted"), 2);
+    QCOMPARE(log.count("pdftocairo -svg"), 2);
+}
+
+void TestMathRender::liveRenderAndPrefetchShareOneCacheEntry() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString bin = dir.filePath("bin");
+    const QString cache = dir.filePath("cache");
+    const QString argsLog = dir.filePath("args.log");
+    QVERIFY(QDir().mkpath(cache));
+    QVERIFY(writeFakePdfToolchain(bin, kPtSvg, QStringLiteral("sleep 0.2\n")));
+
+    PathPrependGuard pathGuard(bin);
+    ScopedEnv argsGuard("OMACARDS_TEST_ARGS", argsLog);
+    MathRenderer renderer(cache);
+    QVERIFY(renderer.hasRenderer());
+
+    // Whichever caller claims the key first renders it; the other must skip.
+    renderer.prefetch("\\(x^2\\)", "#123456", 2.0);
+    renderer.renderExpression("x^2", "#123456", 2.0);
+    const QString path = renderer.mathKey("x^2", "#123456", 2.0);
+    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(path), 5000);
+
+    QFile logFile(argsLog);
+    QVERIFY(logFile.open(QIODevice::ReadOnly));
+    const QString log = QString::fromUtf8(logFile.readAll());
+    QCOMPARE(log.count("tectonic --untrusted"), 1);
+    QCOMPARE(log.count("pdftocairo -svg"), 1);
+}
+
+void TestMathRender::failedQueuedRendersDoNotBlockLaterPrefetches() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString bin = dir.filePath("bin");
+    const QString cache = dir.filePath("cache");
+    const QString argsLog = dir.filePath("args.log");
+    QVERIFY(QDir().mkpath(bin));
+    QVERIFY(QDir().mkpath(cache));
+    QVERIFY(writePartlyFailingPdfToolchain(bin, kPtSvg));
+
+    PathPrependGuard pathGuard(bin);
+    ScopedEnv argsGuard("OMACARDS_TEST_ARGS", argsLog);
+    MathRenderer renderer(cache);
+    QVERIFY(renderer.hasRenderer());
+
+    // The two failing keys occupy the worker slots; the third must still run.
+    renderer.prefetch("\\(bad-one\\) \\(bad-two\\) \\(good\\)", "#123456", 2.0);
+    const QString goodPath = renderer.mathKey("good", "#123456", 2.0);
+    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(goodPath), 5000);
+    QVERIFY(!QFileInfo::exists(renderer.mathKey("bad-one", "#123456", 2.0)));
+    QVERIFY(!QFileInfo::exists(renderer.mathKey("bad-two", "#123456", 2.0)));
 }
 
 void TestMathRender::invalidInkNormalizesToBlack() {

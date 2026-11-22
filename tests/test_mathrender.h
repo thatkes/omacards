@@ -17,4 +17,7 @@ private slots:
     void pdftocairoPixelUnitsScaleImageAndSvg();
     void cachedSvgSkipsSecondToolchainRun();
     void invalidInkNormalizesToBlack();
+    void warmRendersMissingExpressionsAndSkipsHits();
+    void liveRenderAndPrefetchShareOneCacheEntry();
+    void failedQueuedRendersDoNotBlockLaterPrefetches();
 };

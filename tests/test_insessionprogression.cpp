@@ -55,6 +55,25 @@ void TestInSessionProgression::reviewOrderComesFromNextResults() {
     QCOMPARE(progression.currentBox(), 0);
 }
 
+void TestInSessionProgression::upcomingPeeksWithoutConsuming() {
+    InSessionProgression review;
+    review.buildReview({"a", "b", "c"}, {"new"}, {{"b", 4000}});
+    const QHash<QString, qint64> pendingBefore = review.pendingRepeats();
+
+    QCOMPARE(review.upcoming(2), QStringList({"a", "b"}));
+    QCOMPARE(review.upcoming(0), QStringList());
+    QCOMPARE(review.pendingRepeats(), pendingBefore);
+    QCOMPARE(review.next(1000).cardId, QStringLiteral("a"));
+    QCOMPARE(review.upcoming(2), QStringList({"b", "c"}));
+
+    InSessionProgression cram;
+    cram.buildCram(cardsWithIds({"c1", "c2", "c3"}));
+    QCOMPARE(cram.upcoming(2), QStringList({"c1", "c2"}));
+    QCOMPARE(cram.next(0).cardId, QStringLiteral("c1"));
+    cram.advanceCram(QStringLiteral("c1"), Rating::Good);
+    QCOMPARE(cram.upcoming(2), QStringList({"c2", "c3"}));
+}
+
 void TestInSessionProgression::pendingRepeatWaitComesFromNextResult() {
     InSessionProgression progression;
     progression.buildReview({QStringLiteral("a"), QStringLiteral("b")});

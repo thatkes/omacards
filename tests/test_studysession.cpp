@@ -1,6 +1,9 @@
 #include <QtTest>
 
 #include <QByteArray>
+#include <QCoreApplication>
+#include <QFile>
+#include <QFileInfo>
 #include <QSignalSpy>
 #include <QStringList>
 #include <QTemporaryDir>
@@ -18,6 +21,8 @@
 #include "store.h"
 #include "studyplanner.h"
 #include "studysession.h"
+
+using namespace TestSupport;
 
 namespace {
 
@@ -132,6 +137,24 @@ bool prepareSession(SessionFixture &fixture, const QString &deckName, const QStr
 
 // StudySession reads the delay in its constructor, so the variable must be set
 // before the fixture is built. RAII keeps it safe even if an assertion fails.
+const QString kTinySvg = QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10pt\" height=\"5pt\" "
+                                        "viewBox=\"0 0 10 5\"><g fill=\"rgb(0%, 0%, 0%)\"/></svg>");
+
+QString toolchainLog(const QString &logPath) {
+    QFile log(logPath);
+    return log.open(QIODevice::ReadOnly) ? QString::fromUtf8(log.readAll()) : QString();
+}
+
+int tectonicRenders(const QString &logPath) {
+    // Two workers can interleave their appends, so count the .tex argument
+    // rather than a whole command line.
+    return toolchainLog(logPath).count(QStringLiteral(".tex"));
+}
+
+QString cacheKey(const QString &path) {
+    return QFileInfo(path).completeBaseName();
+}
+
 class AgainDelayGuard {
 public:
     AgainDelayGuard() : m_previous(qgetenv("OMACARDS_AGAIN_DELAY_MS")) {}
@@ -594,4 +617,104 @@ void TestStudySession::setMathColorsEmitsOnlyOnChange() {
 
     fixture.session.setMathColors("#000000", "#000000"); // back to the defaults
     QCOMPARE(cardSpy.count(), 2);
+}
+
+void TestStudySession::prefetchQueuesTheNextThreeCardsWithoutChangingOrder() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString bin = dir.filePath("bin");
+    const QString cache = dir.filePath("cache/omacards/math");
+    const QString argsLog = dir.filePath("args.log");
+    QVERIFY(writeFakePdfToolchain(bin, kTinySvg));
+
+    TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
+    TestSupport::ScopedEnv argsEnv("OMACARDS_TEST_ARGS", argsLog);
+    TestSupport::PathPrependGuard pathGuard(bin);
+    SessionFixture fixture;
+    QString error;
+    QVERIFY(prepareSession(fixture, "Prefetch", {"plain", "\\(x1\\)", "\\(x2\\)", "\\(x3\\)", "\\(x4\\)"}, &error));
+    QVERIFY(error.isEmpty());
+    QCOMPARE(fixture.session.question(), QStringLiteral("plain"));
+
+    // Only the next three cards are warmed; the first card has no math and x4
+    // is too far away. Question and Answer use different scales, so each card
+    // contributes two cache entries and two renders.
+    QTRY_VERIFY_WITH_TIMEOUT(tectonicRenders(argsLog) >= 6, 5000);
+    QCOMPARE(tectonicRenders(argsLog), 6);
+    MathRenderer renderer(cache);
+    for (const QString expression : {"x1", "x2", "x3"}) {
+        QVERIFY(QFileInfo::exists(renderer.mathKey(expression, "#000000", MathScale::kQuestion)));
+        QVERIFY(QFileInfo::exists(renderer.mathKey(expression, "#000000", MathScale::kAnswer)));
+    }
+    QVERIFY(!QFileInfo::exists(renderer.mathKey("x4", "#000000", MathScale::kQuestion)));
+
+    // Warming is a read-only peek: ratings still meet the cards in order.
+    for (const QString expression : {"x1", "x2", "x3", "x4"}) {
+        QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
+        QTRY_VERIFY_WITH_TIMEOUT(fixture.session.question().contains(expression) &&
+                                     !fixture.session.question().contains(QStringLiteral("<!--omacards-math:")) &&
+                                     !fixture.session.question().contains(QStringLiteral("font-family: monospace")),
+                                 5000);
+    }
+}
+
+void TestStudySession::prefetchResultIsIgnoredForCardsAlreadyLeftBehind() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString bin = dir.filePath("bin");
+    const QString cache = dir.filePath("cache/omacards/math");
+    const QString argsLog = dir.filePath("args.log");
+    QVERIFY(writeFakePdfToolchain(bin, kTinySvg));
+
+    TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
+    TestSupport::ScopedEnv argsEnv("OMACARDS_TEST_ARGS", argsLog);
+    TestSupport::PathPrependGuard pathGuard(bin);
+    SessionFixture fixture;
+    QString error;
+    QVERIFY(prepareSession(fixture, "Stale", {"\\(x^2\\)", "plain"}, &error));
+    MathRenderer renderer(cache);
+    const QString key = cacheKey(renderer.mathKey("x^2", "#000000", MathScale::kQuestion));
+    QVERIFY(fixture.session.question().contains(QStringLiteral("<!--omacards-math:%1-->").arg(key)));
+
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
+    QCOMPARE(fixture.session.question(), QStringLiteral("plain"));
+    const QString questionBefore = fixture.session.question();
+
+    fixture.session.applyMathRenderResult(key, QStringLiteral("<img src='stale' width='1' height='1'>"));
+    QCOMPARE(fixture.session.question(), questionBefore);
+
+    // The worker's real result is equally stale once the card has changed.
+    QCoreApplication::processEvents();
+    QCOMPARE(fixture.session.question(), questionBefore);
+}
+
+void TestStudySession::themeChangeRequeuesUpcomingCards() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString bin = dir.filePath("bin");
+    const QString cache = dir.filePath("cache/omacards/math");
+    const QString argsLog = dir.filePath("args.log");
+    QVERIFY(writeFakePdfToolchain(bin, kTinySvg));
+
+    TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
+    TestSupport::ScopedEnv argsEnv("OMACARDS_TEST_ARGS", argsLog);
+    TestSupport::PathPrependGuard pathGuard(bin);
+    SessionFixture fixture;
+    QString error;
+    QVERIFY(prepareSession(fixture, "Theme", {"plain", "\\(x^2\\)"}, &error));
+    QTRY_VERIFY_WITH_TIMEOUT(tectonicRenders(argsLog) >= 2, 5000);
+
+    MathRenderer renderer(cache);
+    QVERIFY(QFileInfo::exists(renderer.mathKey("x^2", "#000000", MathScale::kQuestion)));
+    QVERIFY(QFileInfo::exists(renderer.mathKey("x^2", "#000000", MathScale::kAnswer)));
+
+    QSignalSpy cardSpy(&fixture.session, &StudySession::cardChanged);
+    fixture.session.setMathColors("#112233", "#445566");
+    QCOMPARE(cardSpy.count(), 1);
+
+    const QString questionKey = renderer.mathKey("x^2", "#112233", MathScale::kQuestion);
+    const QString answerKey = renderer.mathKey("x^2", "#445566", MathScale::kAnswer);
+    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(questionKey), 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(answerKey), 5000);
+    QVERIFY(tectonicRenders(argsLog) >= 4);
 }

@@ -2,20 +2,15 @@
 
 #include <QDateTime>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 
 #include <algorithm>
-
-namespace {
-// TeX typesets at 12pt (~16px at 96dpi) while the QML labels use 30px/24px.
-// Scaling the SVG keeps inline math legible next to the surrounding text.
-constexpr double kQuestionMathScale = 2.0;
-constexpr double kAnswerMathScale = 1.6;
-} // namespace
 
 StudySession::StudySession(DeckRepository &decks, StudyPlanner &planner, RatingRecording &ratings, QObject *parent)
     : QObject(parent), m_decks(decks), m_planner(planner), m_ratings(ratings), m_repeatDelayMs(Config::againDelayMs()) {
     m_repeatTimer.setSingleShot(true);
     connect(&m_repeatTimer, &QTimer::timeout, this, &StudySession::presentCard);
+    connect(&m_math, &MathRenderer::mathRendered, this, &StudySession::applyMathRenderResult);
 }
 
 void StudySession::setMode(const QString &mode) {
@@ -34,6 +29,7 @@ void StudySession::rebuild(const QString &deckName) {
     // rebuilt from scratch and clears them instead.
     const QHash<QString, qint64> pending = m_progression.pendingRepeats();
     m_repeatTimer.stop();
+    m_math.clearPendingMath();
     m_currentId.clear();
 
     const Deck *deck = m_decks.deckByName(deckName);
@@ -79,12 +75,31 @@ void StudySession::setMathColors(const QString &questionColor, const QString &an
         return;
     m_questionInk = questionColor;
     m_answerInk = answerColor;
+    m_math.clearPendingMath();
     const Card *card = m_decks.cardById(m_currentId);
     if (!card)
         return;
-    m_question = m_math.render(DeckIO::displayQuestion(*card), m_questionInk, kQuestionMathScale);
-    m_answer = m_math.render(DeckIO::displayAnswer(*card), m_answerInk, kAnswerMathScale);
+    m_question = m_math.renderWithPlaceholders(DeckIO::displayQuestion(*card), m_questionInk, MathScale::kQuestion);
+    m_answer = m_math.renderWithPlaceholders(DeckIO::displayAnswer(*card), m_answerInk, MathScale::kAnswer);
     emit cardChanged();
+    queueMathPrefetch();
+}
+
+void StudySession::applyMathRenderResult(const QString &key, const QString &html) {
+    const QString marker = MathRenderer::mathPlaceholderMarker(key);
+    // The marker is followed by the neutral span that reserves the slot. Both
+    // must go, or the finished image keeps an empty box in front of it.
+    const QRegularExpression placeholder(QRegularExpression::escape(marker) + QStringLiteral(".*?</span>"));
+    bool changed = false;
+    for (QString *field : {&m_question, &m_answer}) {
+        if (!field->contains(placeholder))
+            continue;
+        field->replace(placeholder, html);
+        changed = true;
+    }
+    // Results from cards already left behind have no marker in the live text.
+    if (changed)
+        emit cardChanged();
 }
 
 void StudySession::flip() {
@@ -192,8 +207,8 @@ void StudySession::presentCard() {
         presentCard();
         return;
     }
-    m_question = m_math.render(DeckIO::displayQuestion(*card), m_questionInk, kQuestionMathScale);
-    m_answer = m_math.render(DeckIO::displayAnswer(*card), m_answerInk, kAnswerMathScale);
+    m_question = m_math.renderWithPlaceholders(DeckIO::displayQuestion(*card), m_questionInk, MathScale::kQuestion);
+    m_answer = m_math.renderWithPlaceholders(DeckIO::displayAnswer(*card), m_answerInk, MathScale::kAnswer);
 
     if (m_mode == StudyMode::Review) {
         const FsrsState state = m_planner.stateFor(*card);
@@ -207,6 +222,17 @@ void StudySession::presentCard() {
     }
     emit statsChanged();
     emit cardChanged();
+    queueMathPrefetch();
+}
+
+void StudySession::queueMathPrefetch() {
+    for (const QString &id : m_progression.upcoming(3)) {
+        const Card *card = m_decks.cardById(id);
+        if (!card)
+            continue;
+        m_math.prefetch(DeckIO::displayQuestion(*card), m_questionInk, MathScale::kQuestion);
+        m_math.prefetch(DeckIO::displayAnswer(*card), m_answerInk, MathScale::kAnswer);
+    }
 }
 
 void StudySession::refreshDueCount() {

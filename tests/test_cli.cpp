@@ -18,6 +18,8 @@
 #include "config.h"
 #include "deck.h"
 #include "domain.h"
+#include "mathrender.h"
+#include "theme.h"
 
 using namespace TestSupport;
 
@@ -27,6 +29,16 @@ QStringList sortedKeys(const QJsonObject &object) {
     keys.sort();
     return keys;
 }
+
+int toolchainRenders(const QString &logPath) {
+    QFile log(logPath);
+    if (!log.open(QIODevice::ReadOnly))
+        return 0;
+    return QString::fromUtf8(log.readAll()).count(QStringLiteral(".tex"));
+}
+
+const QString kCliTinySvg = QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10pt\" height=\"5pt\" "
+                                           "viewBox=\"0 0 10 5\"><g fill=\"rgb(0%, 0%, 0%)\"/></svg>");
 
 QString checkDeckIssueLine(const QJsonObject &issue) {
     return QStringLiteral("%1:%2 %3: %4 (%5)")
@@ -558,9 +570,9 @@ oops: not a key
 
 void TestCli::headlessCommandDetectionIsComplete() {
     const QStringList commands{
-        "check",     "decks",       "cards",       "search", "add-deck", "add-cards", "add-card",
-        "edit-card", "delete-card", "delete-deck", "import", "due",      "review",    "cram",
-        "preview",   "skill",       "stats",       "config", "help",     "--help",    "-h",
+        "check",       "decks",       "cards",  "search", "add-deck", "add-cards", "add-card", "edit-card",
+        "delete-card", "delete-deck", "import", "due",    "review",   "cram",      "preview",  "skill",
+        "stats",       "config",      "help",   "--help", "-h",       "warm",
     };
     for (const QString &command : commands)
         QVERIFY2(Cli::needsOffscreen({command}), qPrintable(command));
@@ -1461,6 +1473,98 @@ void TestCli::configValidationAndPersistence() {
     QCOMPARE(code, 0);
     QCOMPARE(budget.value(QStringLiteral("newToday")).toInt(), 1);
     QCOMPARE(budget.value(QStringLiteral("newRemaining")).toInt(), 4);
+}
+
+void TestCli::warmReportsRenderedAndCached() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    const QString bin = dir.filePath("bin");
+    const QString cacheHome = dir.filePath("cache");
+    const QString cache = cacheHome + "/omacards/math";
+    const QString argsLog = dir.filePath("args.log");
+    const QString themeDir = dir.filePath("theme");
+    QVERIFY(QDir().mkpath(decks));
+    QVERIFY(QDir().mkpath(themeDir + "/theme"));
+    QVERIFY(writeFile(decks + "/Warm.txt", R"deck(# Deck: Warm
+---
+Q: What is \(x^2\)?
+A: It is \(y^2\).
+)deck"));
+    QVERIFY(writeFile(themeDir + "/theme/colors.toml", R"theme(foreground = "#112233"
+accent = "#445566"
+)theme"));
+    QVERIFY(writeFakePdfToolchain(bin, kCliTinySvg));
+
+    EnvGuard env(decks, database);
+    TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", cacheHome);
+    TestSupport::ScopedEnv argsEnv("OMACARDS_TEST_ARGS", argsLog);
+    TestSupport::ScopedEnv themeEnv("OMACARDS_THEME_DIR", themeDir);
+    TestSupport::ScopedEnv hyprEnv("HYPRLAND_INSTANCE_SIGNATURE", {});
+    PathPrependGuard pathGuard(bin);
+
+    int code = -1;
+    const QJsonObject first = runCli({"warm", "--deck", "Warm", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(sortedKeys(first), QStringList({"cached", "deck", "ok", "rendered"}));
+    QVERIFY(first.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(first.value(QStringLiteral("deck")).toString(), QStringLiteral("Warm"));
+    QCOMPARE(first.value(QStringLiteral("rendered")).toInt(), 2);
+    QCOMPARE(first.value(QStringLiteral("cached")).toInt(), 0);
+    QCOMPARE(toolchainRenders(argsLog), 2);
+
+    MathRenderer verifier(cache);
+    QVERIFY(QFileInfo::exists(verifier.mathKey("x^2", "#112233", MathScale::kQuestion)));
+    QVERIFY(QFileInfo::exists(verifier.mathKey("y^2", "#445566", MathScale::kAnswer)));
+    // Warming must not create or select study state as a side effect.
+    QVERIFY(!QFileInfo::exists(database));
+
+    QFile::remove(argsLog);
+    const QString text = runCliText({"warm", "--deck", "Warm"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(text, QStringLiteral("Warmed Warm: 0 rendered · 2 cached\n"));
+    QCOMPARE(toolchainRenders(argsLog), 0);
+
+    const QJsonObject second = runCli({"warm", "--deck", "Warm", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(second.value(QStringLiteral("rendered")).toInt(), 0);
+    QCOMPARE(second.value(QStringLiteral("cached")).toInt(), 2);
+}
+
+void TestCli::warmRejectsUnknownAndEmptyDecks() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    QVERIFY(writeFile(decks + "/Empty.txt", "# Deck: Empty\n"));
+    EnvGuard env(decks, database);
+
+    int code = -1;
+    QByteArray stderrOutput;
+    const QJsonObject missing = runCli({"warm", "--deck", "Missing", "--json"}, decks, database, &code, &stderrOutput);
+    QCOMPARE(code, 1);
+    QVERIFY(stderrOutput.isEmpty());
+    QCOMPARE(sortedKeys(missing), QStringList({"error", "ok"}));
+    QCOMPARE(missing.value(QStringLiteral("error")).toString(), QStringLiteral("No such deck: Missing"));
+
+    const QString missingText = runCliText({"warm", "--deck", "Missing"}, decks, database, &code, &stderrOutput);
+    QCOMPARE(code, 1);
+    QVERIFY(missingText.isEmpty());
+    QCOMPARE(QString::fromUtf8(stderrOutput), QStringLiteral("No such deck: Missing\n"));
+
+    const QJsonObject empty = runCli({"warm", "--deck", "Empty", "--json"}, decks, database, &code, &stderrOutput);
+    QCOMPARE(code, 1);
+    QVERIFY(stderrOutput.isEmpty());
+    QCOMPARE(sortedKeys(empty), QStringList({"deck", "error", "hint", "issueCounts", "issues", "ok"}));
+    QCOMPARE(empty.value(QStringLiteral("error")).toString(), QStringLiteral("Deck Empty has no Cards"));
+    QCOMPARE(empty.value(QStringLiteral("hint")).toString(), QStringLiteral("omacards check --deck Empty"));
+
+    const QString emptyText = runCliText({"warm", "--deck", "Empty"}, decks, database, &code, &stderrOutput);
+    QCOMPARE(code, 1);
+    QVERIFY(emptyText.isEmpty());
+    QCOMPARE(QString::fromUtf8(stderrOutput), QStringLiteral("Deck Empty has no Cards\nomacards check --deck Empty\n"));
 }
 
 void TestCli::flagEqualsFormsMatchSeparateArgs() {

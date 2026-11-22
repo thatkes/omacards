@@ -46,4 +46,6 @@ private slots:
     void deckSummariesAndSearchFilterByDeck();
     void emptySessionHelpersAndStatsText();
     void setDeckDescriptionAndQmlErrorSignals();
+    void qmlStudyShowsMathPlaceholderUntilSvgArrives();
+    void qmlStudyUsesCachedSvgWithoutPlaceholder();
 };

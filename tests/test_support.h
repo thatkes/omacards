@@ -106,4 +106,74 @@ inline bool writeFile(const QString &path, const QByteArray &contents) {
     return file.open(QIODevice::WriteOnly) && file.write(contents) == contents.size();
 }
 
+// Saves and restores any environment variable a test changes. Math tests use
+// it for PATH, XDG_CACHE_HOME and the fake toolchain's argument log.
+class ScopedEnv {
+public:
+    ScopedEnv(const char *name, const QString &value) : m_name(name) {
+        m_previous = qgetenv(name);
+        m_present = !m_previous.isNull();
+        qputenv(name, value.toUtf8());
+    }
+
+    ~ScopedEnv() {
+        if (m_present)
+            qputenv(m_name.constData(), m_previous);
+        else
+            qunsetenv(m_name.constData());
+    }
+
+private:
+    QByteArray m_name;
+    QByteArray m_previous;
+    bool m_present = false;
+};
+
+class PathPrependGuard {
+public:
+    explicit PathPrependGuard(const QString &directory) : m_previous(qgetenv("PATH")) {
+        qputenv("PATH", (directory + ":" + QString::fromLocal8Bit(m_previous)).toLocal8Bit());
+    }
+
+    ~PathPrependGuard() { qputenv("PATH", m_previous); }
+
+private:
+    QByteArray m_previous;
+};
+
+// A deterministic TeX toolchain: tectonic writes a PDF, pdftocairo writes the
+// supplied SVG. Each invocation appends its argv to $OMACARDS_TEST_ARGS so a
+// test can count renders instead of measuring milliseconds.
+inline bool writeFakePdfToolchain(const QString &binDir, const QString &svg, const QString &delayScript = {}) {
+    if (!QDir().mkpath(binDir))
+        return false;
+    const auto writeTool = [&](const QString &name, const QString &body) {
+        const QString path = QDir(binDir).filePath(name);
+        const QString script = QStringLiteral("#!/bin/sh\n"
+                                              "printf '%s' '") +
+                               name +
+                               QStringLiteral("' >> \"$OMACARDS_TEST_ARGS\"\n"
+                                              "for arg do printf ' %s' \"$arg\" >> \"$OMACARDS_TEST_ARGS\"; done\n"
+                                              "printf '\\n' >> \"$OMACARDS_TEST_ARGS\"\n") +
+                               body;
+        return writeFile(path, script.toUtf8()) &&
+               QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner | QFile::ReadGroup |
+                                               QFile::ExeGroup | QFile::ReadOther | QFile::ExeOther);
+    };
+    const QString tectonic = QStringLiteral(R"sh(
+out=
+tex=
+for arg do
+    case "$arg" in --outdir=*) out=${arg#--outdir=} ;; esac
+    tex="$arg"
+done
+base=${tex##*/}
+base=${base%.tex}
+printf '%%PDF-1.4\n' > "$out/$base.pdf"
+)sh");
+    const QString cairo = QStringLiteral("svg=\nfor arg do svg=\"$arg\"; done\n") + delayScript +
+                          QStringLiteral("printf '%s\\n' '") + svg + QStringLiteral("' > \"$svg\"\n");
+    return writeTool(QStringLiteral("tectonic"), tectonic) && writeTool(QStringLiteral("pdftocairo"), cairo);
+}
+
 } // namespace TestSupport

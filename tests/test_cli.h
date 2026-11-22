@@ -41,4 +41,6 @@ private slots:
     void previewZeroCardDeckIssues();
     void configValidationAndPersistence();
     void flagEqualsFormsMatchSeparateArgs();
+    void warmReportsRenderedAndCached();
+    void warmRejectsUnknownAndEmptyDecks();
 };

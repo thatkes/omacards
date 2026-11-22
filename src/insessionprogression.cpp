@@ -68,6 +68,41 @@ InSessionProgression::NextResult InSessionProgression::next(qint64 now) {
     return result;
 }
 
+QStringList InSessionProgression::upcoming(int limit) const {
+    QStringList result;
+    if (limit <= 0)
+        return result;
+
+    if (!m_cramQueue.isEmpty()) {
+        // Pick the minimum one at a time so ties follow queue order, exactly
+        // as next() does when several cards have the same deadline.
+        QVector<bool> taken(m_cramQueue.size(), false);
+        while (result.size() < limit) {
+            int best = -1;
+            for (int i = 0; i < m_cramQueue.size(); ++i) {
+                if (taken.at(i))
+                    continue;
+                if (best < 0 || m_cramQueue.at(i).nextShowReview < m_cramQueue.at(best).nextShowReview)
+                    best = i;
+            }
+            if (best < 0)
+                break;
+            taken[best] = true;
+            result << m_cramQueue.at(best).cardId;
+        }
+        return result;
+    }
+
+    // Pending repeats stay in the queue, so they are part of the peek even
+    // while their deadline is in the future.
+    for (const QString &id : m_reviewQueue) {
+        if (result.size() >= limit)
+            break;
+        result << id;
+    }
+    return result;
+}
+
 qint64 InSessionProgression::pendingWait(qint64 now) const {
     qint64 next = 0;
     bool haveNext = false;

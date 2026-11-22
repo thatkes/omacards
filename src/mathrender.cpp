@@ -8,8 +8,13 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QMutex>
+#include <QMutexLocker>
+#include <QPointer>
 #include <QProcess>
+#include <QRunnable>
 #include <QRegularExpression>
+#include <QSet>
 #include <QSize>
 #include <QStandardPaths>
 #include <QUrl>
@@ -106,15 +111,116 @@ BraceGroup readGroup(const QString &text, int open) {
     group.end = text.size();
     return group;
 }
+
+QStringList expressionsIn(const QString &text) {
+    QStringList result;
+    auto matches = mathPattern().globalMatch(text);
+    while (matches.hasNext()) {
+        const QString expression = expressionAt(matches.next());
+        if (!result.contains(expression))
+            result << expression;
+    }
+    return result;
+}
+
+// The reserved box uses the same dimensions for the placeholder and the final
+// SVG, so swapping one for the other cannot move the surrounding text.
+QSize reservedMathSize(const QString &expression, double scale) {
+    const int characters = qBound(3, expression.trimmed().size(), 40);
+    return QSize(qRound(characters * 7.0 * scale / 1.6), qRound(18.0 * scale / 1.6));
+}
+
+QString mathPlaceholderTag(const QString &key, const QSize &size) {
+    const int spaces = qMax(2, size.width() / 7);
+    return MathRenderer::mathPlaceholderMarker(key) +
+           QStringLiteral("<span style='font-family: monospace; color: #888888;'>%1</span>")
+               .arg(QString(spaces, QChar::Nbsp));
+}
+
+QString sizedMathImage(const QString &path, const QString &expression, const QSize &size) {
+    return QStringLiteral("<img src='%1' alt='%2' width='%3' height='%4' align='middle' "
+                          "style='vertical-align: middle;'>")
+        .arg(QUrl::fromLocalFile(path).toString(), expression.toHtmlEscaped())
+        .arg(size.width())
+        .arg(size.height());
+}
+
+// One render per cache key, shared by live presentation, prefetching and the
+// warming command. A second caller skips the key instead of waiting for the
+// toolchain that is already running.
+QMutex &renderMutex() {
+    static QMutex mutex;
+    return mutex;
+}
+
+QSet<QString> &rendersInFlight() {
+    static QSet<QString> keys;
+    return keys;
+}
+
+bool claimRender(const QString &key) {
+    QMutexLocker lock(&renderMutex());
+    if (rendersInFlight().contains(key))
+        return false;
+    rendersInFlight().insert(key);
+    return true;
+}
+
+void releaseRender(const QString &key) {
+    QMutexLocker lock(&renderMutex());
+    rendersInFlight().remove(key);
+}
+
+struct RenderClaim {
+    QString key;
+    bool held = false;
+
+    ~RenderClaim() {
+        if (held)
+            releaseRender(key);
+    }
+};
 } // namespace
+
+// Runs the toolchain off the UI thread and posts the finished markup back to
+// the renderer's own thread. An empty result means the render failed; it still
+// has to release the key so later expressions can use the worker slot.
+class MathRenderRunnable : public QRunnable {
+public:
+    MathRenderRunnable(QPointer<MathRenderer> owner, const MathRenderer::RenderRequest &request)
+        : m_owner(owner), m_request(request) {}
+
+    void run() override {
+        MathRenderer *owner = m_owner.data();
+        if (!owner)
+            return;
+        const QString path = owner->renderRequest(m_request);
+        const QString html = path.isEmpty() ? QString() : sizedMathImage(path, m_request.expression, m_request.size);
+        QMetaObject::invokeMethod(
+            owner, [owner, key = m_request.key, html] { owner->finishRender(key, html); }, Qt::QueuedConnection);
+    }
+
+private:
+    QPointer<MathRenderer> m_owner;
+    MathRenderer::RenderRequest m_request;
+};
 
 MathRenderer::MathRenderer(const QString &cacheDirectory, QObject *parent)
     : QObject(parent),
       m_cache(cacheDirectory.isEmpty()
                   ? QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + "/omacards/math"
-                  : cacheDirectory) {}
+                  : cacheDirectory) {
+    m_pool.setMaxThreadCount(2);
+}
+
+MathRenderer::~MathRenderer() {
+    m_pool.clear();
+    m_pool.waitForDone();
+}
 
 MathRenderer::Engine MathRenderer::detect() const {
+    // Workers can detect while the UI thread is still presenting a card.
+    QMutexLocker lock(&m_detectMutex);
     if (m_engine != Engine::None)
         return m_engine;
     QDir().mkpath(m_cache);
@@ -172,6 +278,121 @@ QStringList MathRenderer::warnings(const QString &text) const {
 
 namespace {
 QSize svgPixelSize(const QString &path);
+QString normalizeInk(const QString &ink);
+} // namespace
+
+QString MathRenderer::mathKey(const QString &expression, const QString &ink, double scale) const {
+    // Ink and scale are part of the key so question/answer colors and label
+    // sizes never share a cached file. The prefix invalidates SVGs from the
+    // old unscaled/full-page renderers.
+    const QString key = expression + "\n" + normalizeInk(ink) + "\n" + QString::number(scale, 'f', 3);
+    const QString base =
+        "eq4-" +
+        QString::fromLatin1(QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha256).toHex().left(20));
+    return m_cache + "/" + base + ".svg";
+}
+
+QString MathRenderer::cachedSvgPath(const QString &expression, const QString &ink, double scale) const {
+    const QString path = mathKey(expression, ink, scale);
+    return QFileInfo::exists(path) ? path : QString();
+}
+
+int MathRenderer::warm(const QString &text, const QString &ink, double scale, int *cached) {
+    int rendered = 0;
+    if (cached)
+        *cached = 0;
+    QSet<QString> seen;
+    for (const QString &expression : expressionsIn(text)) {
+        const QString path = mathKey(expression, ink, scale);
+        if (seen.contains(path))
+            continue;
+        seen.insert(path);
+        if (QFileInfo::exists(path)) {
+            if (cached)
+                ++*cached;
+            continue;
+        }
+        if (renderExpression(expression, ink, scale).startsWith("<img "))
+            ++rendered;
+    }
+    return rendered;
+}
+
+QString MathRenderer::mathPlaceholderMarker(const QString &key) {
+    return QStringLiteral("<!--omacards-math:%1-->").arg(key);
+}
+
+QString MathRenderer::renderWithPlaceholders(const QString &text, const QString &ink, double scale) {
+    if (!hasRenderer())
+        return render(text, ink, scale);
+    return mapMath(
+        text,
+        [this, ink, scale](const QString &expression) {
+            const QString path = mathKey(expression, ink, scale);
+            if (QFileInfo::exists(path))
+                return renderExpression(expression, ink, scale);
+            const QString key = QFileInfo(path).completeBaseName();
+            const QSize size = reservedMathSize(expression, scale);
+            enqueueExpression({key, expression, ink, scale, size});
+            return mathPlaceholderTag(key, size);
+        },
+        true);
+}
+
+void MathRenderer::prefetch(const QString &text, const QString &ink, double scale) {
+    if (!hasRenderer())
+        return;
+    for (const QString &expression : expressionsIn(text)) {
+        const QString path = mathKey(expression, ink, scale);
+        if (QFileInfo::exists(path))
+            continue;
+        enqueueExpression(
+            {QFileInfo(path).completeBaseName(), expression, ink, scale, reservedMathSize(expression, scale)});
+    }
+}
+
+void MathRenderer::clearPendingMath() {
+    m_queue.clear();
+    m_queuedKeys.clear();
+}
+
+void MathRenderer::enqueueExpression(const RenderRequest &request) {
+    constexpr int kMaxQueued = 12;
+    if (QFileInfo::exists(mathKey(request.expression, request.ink, request.scale)))
+        return;
+    if (m_queuedKeys.contains(request.key) || m_activeKeys.contains(request.key))
+        return;
+    while (m_queue.size() >= kMaxQueued)
+        m_queuedKeys.remove(m_queue.dequeue().key);
+    m_queue.enqueue(request);
+    m_queuedKeys.insert(request.key);
+    startNextRender();
+}
+
+void MathRenderer::startNextRender() {
+    constexpr int kMaxActive = 2;
+    while (m_activeKeys.size() < kMaxActive && !m_queue.isEmpty()) {
+        const RenderRequest request = m_queue.dequeue();
+        m_queuedKeys.remove(request.key);
+        if (QFileInfo::exists(mathKey(request.expression, request.ink, request.scale)))
+            continue;
+        if (m_activeKeys.contains(request.key))
+            continue;
+        m_activeKeys.insert(request.key);
+        m_pool.start(new MathRenderRunnable(this, request));
+    }
+}
+
+QString MathRenderer::renderRequest(const RenderRequest &request) {
+    return renderLatex(request.expression, request.ink, request.scale);
+}
+
+void MathRenderer::finishRender(const QString &key, const QString &html) {
+    if (!m_activeKeys.remove(key))
+        return;
+    if (!html.isEmpty())
+        emit mathRendered(key, html);
+    startNextRender();
 }
 
 QString MathRenderer::renderExpression(const QString &expression, const QString &ink, double scale) const {
@@ -268,17 +489,16 @@ QString MathRenderer::renderLatex(const QString &expression, const QString &ink,
     if (detect() != Engine::LatexSvg)
         return {};
 
-    // Ink and scale are part of the key so question/answer colors and label
-    // sizes never share a cached file. The prefix invalidates SVGs from the
-    // old unscaled/full-page renderers.
-    const QString key = expression + "\n" + normalizeInk(ink) + "\n" + QString::number(scale, 'f', 3);
-    const QString base =
-        "eq4-" +
-        QString::fromLatin1(QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha256).toHex().left(20));
-    const QString svgPath = m_cache + "/" + base + ".svg";
+    const QString svgPath = mathKey(expression, ink, scale);
     if (QFileInfo::exists(svgPath))
         return svgPath;
 
+    RenderClaim claim{svgPath, false};
+    if (!claimRender(svgPath))
+        return {};
+    claim.held = true;
+
+    const QString base = QFileInfo(svgPath).completeBaseName();
     const QString texDir = m_cache + "/tex";
     QDir().mkpath(texDir);
     QFile::remove(svgPath);
