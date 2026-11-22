@@ -1220,10 +1220,10 @@ ApplicationWindow {
                                                 width: ListView.view.width
                                                 height: 58
                                                 radius: Math.min(8, theme.radius)
-                                                color: modelData.active
+                                                color: modelData.isCurrent
                                                        ? win.withAlpha(theme.accent, 0.14)
                                                        : hover.hovered ? win.raised : "transparent"
-                                                border.width: modelData.active ? 1 : 0
+                                                border.width: modelData.isCurrent ? 1 : 0
                                                 border.color: win.withAlpha(theme.accent, 0.5)
 
                                                 Rectangle {
@@ -1232,7 +1232,7 @@ ApplicationWindow {
                                                     anchors.bottom: parent.bottom
                                                     width: 3
                                                     radius: 2
-                                                    visible: modelData.active
+                                                    visible: modelData.isCurrent
                                                     color: theme.accent
                                                 }
 
@@ -2004,12 +2004,12 @@ ApplicationWindow {
 
                 Repeater {
                     model: [
-                        [qsTr("Reviews today"), (statsData.today || 0)],
+                        [qsTr("Reviews today"), (statsData.studyDayRatings || 0)],
                         [qsTr("Accuracy today"), (statsData.accuracy || 0) + "%"],
-                        [qsTr("New cards today"), qsTr("%1 of %2").arg(statsData.newToday || 0).arg(statsData.newPerDay || 0)],
+                        [qsTr("New cards today"), qsTr("%1 of %2").arg(statsData.newCardsOnStudyDay || 0).arg(statsData.newCardAllowance || 0)],
                         [qsTr("Due now"), (statsData.due || 0)],
-                        [qsTr("Streak"), qsTr("%1 days").arg(statsData.streakDays || 0)],
-                        [qsTr("Total reviews"), (statsData.totalReviews || 0)],
+                        [qsTr("Streak"), qsTr("%1 days").arg(statsData.streak || 0)],
+                        [qsTr("Total reviews"), (statsData.totalRatings || 0)],
                         [qsTr("Cards"), (statsData.cards || 0)],
                         [qsTr("Decks"), (statsData.decks || 0)],
                         [qsTr("This session"), qsTr("%1 reviews · %2 Good").arg(statsData.sessionReviewed || 0).arg(statsData.sessionGood || 0)]

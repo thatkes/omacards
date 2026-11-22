@@ -140,8 +140,8 @@ void TestStudyPlanner::noDecksIsSafe() {
     const QVariantMap stats = planner.statsSummary({store.summary(0), 0, 0, 0, 0, 0, Config::kDefaultRetention});
     QCOMPARE(stats.value("accuracy").toInt(), 0);
     QCOMPARE(stats.value("newAvailable").toInt(), 0);
-    QCOMPARE(stats.value("streakDays").toInt(), 0);
-    QCOMPARE(stats.value("newPerDay").toInt(), 5);
+    QCOMPARE(stats.value("streak").toInt(), 0);
+    QCOMPARE(stats.value("newCardAllowance").toInt(), 5);
     QCOMPARE(stats.value("dayStartHour").toInt(), 3);
 }
 
@@ -625,7 +625,7 @@ void TestStudyPlanner::deckSummariesReportCounts() {
     QCOMPARE(first.value("cards").toInt(), 3);
     QCOMPARE(first.value("due").toInt(), 1);
     QCOMPARE(first.value("new").toInt(), 1);
-    QVERIFY(first.value("active").toBool());
+    QVERIFY(first.value("isCurrent").toBool());
 
     const QVariantMap second = summaries.at(1).toMap();
     QCOMPARE(second.value("name").toString(), QString("Beta"));
@@ -633,20 +633,20 @@ void TestStudyPlanner::deckSummariesReportCounts() {
     QCOMPARE(second.value("cards").toInt(), 1);
     QCOMPARE(second.value("due").toInt(), 0);
     QCOMPARE(second.value("new").toInt(), 0);
-    QVERIFY(!second.value("active").toBool());
+    QVERIFY(!second.value("isCurrent").toBool());
 
-    QStringList expectedKeys{"active", "cards", "description", "due", "name", "new"};
+    QStringList expectedKeys{"cards", "description", "due", "isCurrent", "name", "new"};
     expectedKeys.sort();
     QStringList keys = first.keys();
     keys.sort();
     QCOMPARE(keys, expectedKeys);
 
     const QVariantList selected = planner.deckSummaries("Beta");
-    QVERIFY(!selected.at(0).toMap().value("active").toBool());
-    QVERIFY(selected.at(1).toMap().value("active").toBool());
+    QVERIFY(!selected.at(0).toMap().value("isCurrent").toBool());
+    QVERIFY(selected.at(1).toMap().value("isCurrent").toBool());
     const QVariantList none = planner.deckSummaries("Missing");
-    QVERIFY(!none.at(0).toMap().value("active").toBool());
-    QVERIFY(!none.at(1).toMap().value("active").toBool());
+    QVERIFY(!none.at(0).toMap().value("isCurrent").toBool());
+    QVERIFY(!none.at(1).toMap().value("isCurrent").toBool());
 }
 
 void TestStudyPlanner::statsSummaryNumericContract() {
@@ -675,24 +675,36 @@ void TestStudyPlanner::statsSummaryNumericContract() {
 
     const QVariantMap summary = planner.statsSummary({store.summary(0), 7, 3, 1, 4, 3, 0.85});
     QStringList keys = summary.keys();
-    QStringList expected{"accuracy",        "cards",      "dayStartHour", "decks",     "due",
-                         "newAvailable",    "newPerDay",  "newToday",     "retention", "sessionGood",
-                         "sessionReviewed", "streakDays", "today",        "todayGood", "totalReviews"};
+    QStringList expected{"accuracy",
+                         "cards",
+                         "dayStartHour",
+                         "decks",
+                         "due",
+                         "newAvailable",
+                         "newCardAllowance",
+                         "newCardsOnStudyDay",
+                         "retention",
+                         "sessionGood",
+                         "sessionReviewed",
+                         "streak",
+                         "studyDayRatings",
+                         "studyDayGood",
+                         "totalRatings"};
     keys.sort();
     expected.sort();
     QCOMPARE(keys, expected);
 
-    QCOMPARE(summary.value("totalReviews").toInt(), 4);
-    QCOMPARE(summary.value("today").toInt(), 3);
-    QCOMPARE(summary.value("todayGood").toInt(), 2);
-    QCOMPARE(summary.value("streakDays").toInt(), 2);
+    QCOMPARE(summary.value("totalRatings").toInt(), 4);
+    QCOMPARE(summary.value("studyDayRatings").toInt(), 3);
+    QCOMPARE(summary.value("studyDayGood").toInt(), 2);
+    QCOMPARE(summary.value("streak").toInt(), 2);
     QCOMPARE(summary.value("accuracy").toInt(), 67); // round(2/3 * 100)
     QCOMPARE(summary.value("due").toInt(), 7);
     QCOMPARE(summary.value("cards").toInt(), 3);
     QCOMPARE(summary.value("decks").toInt(), 1);
-    QCOMPARE(summary.value("newToday").toInt(), 1);
+    QCOMPARE(summary.value("newCardsOnStudyDay").toInt(), 1);
     QCOMPARE(summary.value("newAvailable").toInt(), 1); // 2 per day minus the one logged new card
-    QCOMPARE(summary.value("newPerDay").toInt(), 2);
+    QCOMPARE(summary.value("newCardAllowance").toInt(), 2);
     QCOMPARE(summary.value("retention").toInt(), 85);
     QCOMPARE(summary.value("dayStartHour").toInt(), 0);
     QCOMPARE(summary.value("sessionReviewed").toInt(), 4);
@@ -706,7 +718,7 @@ void TestStudyPlanner::statsSummaryNumericContract() {
     emptyPlanner.configure(2, 0);
     const QVariantMap empty = emptyPlanner.statsSummary({emptyStore.summary(0), 0, 0, 0, 0, 0, 0.9});
     QCOMPARE(empty.value("accuracy").toInt(), 0);
-    QCOMPARE(empty.value("streakDays").toInt(), 0);
-    QCOMPARE(empty.value("totalReviews").toInt(), 0);
+    QCOMPARE(empty.value("streak").toInt(), 0);
+    QCOMPARE(empty.value("totalRatings").toInt(), 0);
     QCOMPARE(empty.value("retention").toInt(), 90);
 }

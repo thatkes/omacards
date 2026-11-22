@@ -78,7 +78,7 @@ public:
     int newCount() const { return m_planner.newCount(); }
     int deckDue() const { return m_planner.deckDue(m_deckRepo.deckIndex(m_currentDeck)); }
     int deckNew() const { return m_planner.deckNew(m_deckRepo.deckIndex(m_currentDeck)); }
-    int streak() const { return m_store.summary(m_dayStartHour).streakDays; }
+    int streak() const { return m_store.summary(m_dayStartHour).streak; }
     int reviewed() const { return m_session.reviewed(); }
     int good() const { return m_session.good(); }
     int currentBox() const { return m_session.currentBox(); }

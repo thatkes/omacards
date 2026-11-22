@@ -198,12 +198,12 @@ ReviewSummary Store::summary(int dayStartHour) const {
         days.insert(day);
         ++result.total;
         if (day == today) {
-            ++result.today;
+            ++result.studyDayRatings;
             if (query.value(1).toInt() == 3)
-                ++result.todayGood;
+                ++result.studyDayGood;
         }
     }
-    result.newToday = countNewCardsToday(dayStartHour);
+    result.newCardsOnStudyDay = countNewCardsToday(dayStartHour);
 
     // A streak survives until the next study day begins, so a user who has
     // not reviewed yet still sees the previous day's total.
@@ -211,7 +211,7 @@ ReviewSummary Store::summary(int dayStartHour) const {
     if (!days.contains(cursor))
         cursor = cursor.addDays(-1);
     while (days.contains(cursor)) {
-        ++result.streakDays;
+        ++result.streak;
         cursor = cursor.addDays(-1);
     }
     return result;

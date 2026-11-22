@@ -161,7 +161,7 @@ QVariantList StudyPlanner::deckSummaries(const QString &currentDeck) const {
         entry.insert("cards", deck.cards.size());
         entry.insert("due", available.duePerDeck.value(i));
         entry.insert("new", available.newPerDeck.value(i));
-        entry.insert("active", deck.name == currentDeck);
+        entry.insert("isCurrent", deck.name == currentDeck);
         result << entry;
     }
     return result;
@@ -205,18 +205,19 @@ QVariantList StudyPlanner::cardList(const QString &currentDeck, const QString &f
 
 QVariantMap StudyPlanner::statsSummary(const StatsSummaryInputs &inputs) const {
     QVariantMap result;
-    result.insert("totalReviews", inputs.summary.total);
-    result.insert("today", inputs.summary.today);
-    result.insert("todayGood", inputs.summary.todayGood);
-    result.insert("streakDays", inputs.summary.streakDays);
-    result.insert("accuracy",
-                  inputs.summary.today > 0 ? qRound(100.0 * inputs.summary.todayGood / inputs.summary.today) : 0);
+    result.insert("totalRatings", inputs.summary.total);
+    result.insert("studyDayRatings", inputs.summary.studyDayRatings);
+    result.insert("studyDayGood", inputs.summary.studyDayGood);
+    result.insert("streak", inputs.summary.streak);
+    result.insert("accuracy", inputs.summary.studyDayRatings > 0
+                                  ? qRound(100.0 * inputs.summary.studyDayGood / inputs.summary.studyDayRatings)
+                                  : 0);
     result.insert("due", inputs.dueCount);
     result.insert("cards", inputs.totalCards);
     result.insert("decks", inputs.deckCount);
-    result.insert("newToday", inputs.summary.newToday);
+    result.insert("newCardsOnStudyDay", inputs.summary.newCardsOnStudyDay);
     result.insert("newAvailable", newCount());
-    result.insert("newPerDay", m_newPerDay);
+    result.insert("newCardAllowance", m_newPerDay);
     result.insert("retention", qRound(inputs.desiredRetention * 100));
     result.insert("dayStartHour", m_dayStartHour);
     result.insert("sessionReviewed", inputs.sessionReviewed);
