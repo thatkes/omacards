@@ -175,30 +175,41 @@ QString resolveDeckPath(const QVector<Deck> &decks, const QString &decksDirector
     return {};
 }
 
+void appendDeckIssue(DeckIssueReport *report, const DeckIssue &issue) {
+    QJsonObject entry;
+    entry.insert("path", issue.path);
+    if (!issue.card.isEmpty())
+        entry.insert("card", issue.card);
+    if (issue.line > 0)
+        entry.insert("line", issue.line);
+    entry.insert("severity", issue.severity);
+    entry.insert("message", issue.message);
+    entry.insert("hint", issue.hint);
+    report->entries << entry;
+    if (issue.severity == QLatin1String("error"))
+        ++report->errors;
+    else
+        ++report->warnings;
+    report->lines << QStringLiteral("%1:%2 %3: %4 (%5)")
+                         .arg(issue.path)
+                         .arg(issue.line)
+                         .arg(issue.severity, issue.message, issue.hint);
+}
+
 DeckIssueReport deckIssueReport(const QString &decksDirectory, const QString &targetPath) {
     DeckIssueReport report;
     for (const DeckIssue &issue : DeckIO::lint(decksDirectory)) {
         if (!targetPath.isEmpty() && issue.path != targetPath)
             continue;
-        QJsonObject entry;
-        entry.insert("path", issue.path);
-        if (!issue.card.isEmpty())
-            entry.insert("card", issue.card);
-        if (issue.line > 0)
-            entry.insert("line", issue.line);
-        entry.insert("severity", issue.severity);
-        entry.insert("message", issue.message);
-        entry.insert("hint", issue.hint);
-        report.entries << entry;
-        if (issue.severity == QLatin1String("error"))
-            ++report.errors;
-        else
-            ++report.warnings;
-        report.lines << QStringLiteral("%1:%2 %3: %4 (%5)")
-                            .arg(issue.path)
-                            .arg(issue.line)
-                            .arg(issue.severity, issue.message, issue.hint);
+        appendDeckIssue(&report, issue);
     }
+    return report;
+}
+
+DeckIssueReport deckIssueReportForFile(const QString &path) {
+    DeckIssueReport report;
+    for (const DeckIssue &issue : DeckIO::lintFile(path))
+        appendDeckIssue(&report, issue);
     return report;
 }
 
@@ -705,7 +716,9 @@ int run(const QStringList &arguments) {
             return fail(error, json);
 
         // Reloaded after the write so an implicitly created Deck has the same
-        // stored path that decks --json reports. Only this Deck is linted.
+        // stored path that decks --json reports. A Deck whose new content
+        // makes load() skip it has no stored path, so use the path createDeck
+        // wrote to. Only the written Deck is linted.
         QString writtenPath;
         for (const Deck &deck : backend.allDecks()) {
             if (deck.name == options.deck.trimmed()) {
@@ -713,7 +726,11 @@ int run(const QStringList &arguments) {
                 break;
             }
         }
-        const DeckIssueReport report = deckIssueReport(backend.decksDirectory(), writtenPath);
+        if (writtenPath.isEmpty()) {
+            writtenPath =
+                QDir(backend.decksDirectory()).filePath(DeckIO::safeFileName(options.deck.trimmed()) + ".txt");
+        }
+        const DeckIssueReport report = deckIssueReportForFile(writtenPath);
 
         QJsonArray idArray;
         for (const QString &id : ids)

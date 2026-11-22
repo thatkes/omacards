@@ -10,6 +10,8 @@ private slots:
     void addCardsCreatesDeckBulk();
     void addCardsJsonMetadataContract();
     void addCardsJsonCountsOnlyWrittenDeck();
+    void addCardsCountsOnlyWrittenDeckWhenReloadSkipsIt();
+    void addCardsIgnoresUnreadableOtherDeck();
     void addCardsMultilineRoundTrips();
     void addCardsKeepsExistingDescription();
     void addCardsRejectsInvalidInputWithoutWriting();

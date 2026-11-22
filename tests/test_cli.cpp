@@ -193,6 +193,84 @@ void TestCli::addCardsJsonCountsOnlyWrittenDeck() {
     QCOMPARE(mathAdded.value(QStringLiteral("issueCounts")).toObject().value(QStringLiteral("error")).toInt(), 0);
 }
 
+void TestCli::addCardsCountsOnlyWrittenDeckWhenReloadSkipsIt() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    EnvGuard env(decks, database);
+
+    // Other has a duplicate-question Warning. The newline in the new Card's
+    // tag makes load() skip the written Deck on reload, so the written path
+    // cannot come from allDecks(); lint must still stay on that one Deck.
+    QVERIFY(writeFile(QDir(decks).filePath(QStringLiteral("Other.txt")),
+                      "# Deck: Other\n---\nQ: same\nA: one\n---\nQ: same\nA: two\n"));
+    const QString input = dir.filePath("cards.json");
+    QVERIFY(writeFile(input, R"([{"question":"Fresh question","answer":"Fresh answer","tags":["x\nevil"]}])"));
+
+    int code = -1;
+    const QJsonObject added =
+        runCli({"add-cards", "--deck", "Weird", "--input", input, "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QStringList successKeys{"created", "deck", "ids", "issueCounts", "ok", "path"};
+    successKeys.sort();
+    QCOMPARE(sortedKeys(added), successKeys);
+    QCOMPARE(added.value(QStringLiteral("path")).toString(), QDir(decks).filePath(QStringLiteral("Weird.txt")));
+
+    const QJsonObject checked = runCli({"check", "--deck", "Weird", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(QJsonDocument(added.value(QStringLiteral("issueCounts")).toObject()).toJson(),
+             QJsonDocument(checked.value(QStringLiteral("issueCounts")).toObject()).toJson());
+    const QJsonObject counts = added.value(QStringLiteral("issueCounts")).toObject();
+    QCOMPARE(counts.value(QStringLiteral("error")).toInt(), 0);
+    QCOMPARE(counts.value(QStringLiteral("warning")).toInt(), 1);
+
+    const QJsonObject other = runCli({"check", "--deck", "Other", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(other.value(QStringLiteral("issueCounts")).toObject().value(QStringLiteral("warning")).toInt(), 1);
+}
+
+void TestCli::addCardsIgnoresUnreadableOtherDeck() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    EnvGuard env(decks, database);
+
+    const QString other = QDir(decks).filePath(QStringLiteral("Other.txt"));
+    QVERIFY(writeFile(other, "# Deck: Other\n---\nQ: other\nA: one\n"));
+    QVERIFY(QFile::setPermissions(other, QFile::Permission(0)));
+    if (QFileInfo(other).isReadable()) {
+        QFile::setPermissions(other, QFile::ReadOwner | QFile::WriteOwner);
+        QSKIP("file permissions are ignored for this user");
+    }
+
+    int code = -1;
+    const QJsonObject unreadable = runCli({"check", "--deck", "Other", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(unreadable.value(QStringLiteral("issueCounts")).toObject().value(QStringLiteral("error")).toInt(), 1);
+
+    const QString input = dir.filePath("cards.json");
+    QVERIFY(writeFile(input, R"([{"question":"Fresh question","answer":"Fresh answer","tags":["x\nevil"]}])"));
+    const QJsonObject added =
+        runCli({"add-cards", "--deck", "Weird", "--input", input, "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QStringList successKeys{"created", "deck", "ids", "issueCounts", "ok", "path"};
+    successKeys.sort();
+    QCOMPARE(sortedKeys(added), successKeys);
+    QCOMPARE(added.value(QStringLiteral("path")).toString(), QDir(decks).filePath(QStringLiteral("Weird.txt")));
+
+    const QJsonObject checked = runCli({"check", "--deck", "Weird", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(QJsonDocument(added.value(QStringLiteral("issueCounts")).toObject()).toJson(),
+             QJsonDocument(checked.value(QStringLiteral("issueCounts")).toObject()).toJson());
+    const QJsonObject counts = added.value(QStringLiteral("issueCounts")).toObject();
+    QCOMPARE(counts.value(QStringLiteral("error")).toInt(), 0);
+    QCOMPARE(counts.value(QStringLiteral("warning")).toInt(), 1);
+
+    QFile::setPermissions(other, QFile::ReadOwner | QFile::WriteOwner);
+}
+
 void TestCli::addCardsMultilineRoundTrips() {
     QTemporaryDir dir;
     const QString decks = dir.filePath("decks");
