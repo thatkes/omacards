@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+
+if [ "$#" -eq 0 ]; then
+    printf 'usage: %s <command> [args...]\n' "$0" >&2
+    exit 2
+fi
+
+tmp_root="${TMPDIR:-/tmp}"
+tmp="$(mktemp -d "$tmp_root/omacards-probe.XXXXXX")"
+trap 'rm -rf "$tmp"' 0
+
+export OMACARDS_DECKS_DIR="$tmp/decks"
+export OMACARDS_STATE_DB="$tmp/state.db"
+export XDG_CACHE_HOME="$tmp/cache"
+mkdir -p "$OMACARDS_DECKS_DIR" "$XDG_CACHE_HOME"
+
+if [ "$1" = omacards ]; then
+    binary="$ROOT/build/omacards"
+    if [ ! -x "$binary" ]; then
+        printf 'with-temp-env: %s is missing; run ./bin/build\n' "$binary" >&2
+        exit 127
+    fi
+    shift
+    set -- "$binary" "$@"
+fi
+
+"$@"
