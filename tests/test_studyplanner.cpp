@@ -79,6 +79,19 @@ QStringList idsOf(const QVector<Card> &cards) {
     return ids;
 }
 
+// StudyPlanner holds its StoreAdapter by reference. This owns the real adapter
+// beside the planner so a test only writes one setup line; the injectable stub
+// in test_support.h stays the seam for failed-refresh tests.
+struct PlannerAdapterOwner {
+    explicit PlannerAdapterOwner(Store &store) : adapter(store) {}
+    StorePlannerAdapter adapter;
+};
+
+class PlannerWithStore : private PlannerAdapterOwner, public StudyPlanner {
+public:
+    explicit PlannerWithStore(Store &store) : PlannerAdapterOwner(store), StudyPlanner(PlannerAdapterOwner::adapter) {}
+};
+
 } // namespace
 
 void TestStudyPlanner::noDecksIsSafe() {
@@ -88,8 +101,7 @@ void TestStudyPlanner::noDecksIsSafe() {
     QVERIFY(store.open(&error));
     QVERIFY(error.isEmpty());
 
-    StorePlannerAdapter adapter(store);
-    StudyPlanner planner(adapter);
+    PlannerWithStore planner(store);
     planner.configure(5, 3); // setDecks() is deliberately never called
 
     const StudyPlanner::Availability all = planner.availability();
@@ -157,8 +169,7 @@ void TestStudyPlanner::refreshReadsStatesAndHashes() {
     store.save(stored.id, DeckIO::contentHash(stored), saved);
     store.save(stale.id, QStringLiteral("wrong-hash"), saved); // state with a mismatched hash
 
-    StorePlannerAdapter adapter(store);
-    StudyPlanner planner(adapter);
+    PlannerWithStore planner(store);
     planner.setDecks(decks);
     planner.configure(20, 0);
 
@@ -210,8 +221,7 @@ void TestStudyPlanner::refreshBrokenStoreInvalidatesSnapshot() {
     const QVector<Deck> decks{deck};
     saveState(store, card, QDateTime::currentMSecsSinceEpoch() - 86400000LL, 2);
 
-    StorePlannerAdapter adapter(store);
-    StudyPlanner planner(adapter);
+    PlannerWithStore planner(store);
     planner.setDecks(decks);
     planner.configure(5, 0);
     QString storeError;
@@ -282,8 +292,7 @@ void TestStudyPlanner::configureLimitsAndCounts() {
     saveState(store, dueB, base + 1000, 2); // same due as due-a: id breaks the tie
     saveState(store, future, QDateTime::currentMSecsSinceEpoch() + 3 * 86400000LL, 1);
 
-    StorePlannerAdapter adapter(store);
-    StudyPlanner planner(adapter);
+    PlannerWithStore planner(store);
     planner.setDecks(decks);
     planner.configure(3, 0);
     QVERIFY(planner.refresh(&error));
@@ -359,8 +368,7 @@ void TestStudyPlanner::futureReviewsAreNotAvailable() {
     saveState(store, future, futureDue, 1);
     saveState(store, zero, 0, 1); // a reviewed card pinned to the epoch
 
-    StorePlannerAdapter adapter(store);
-    StudyPlanner planner(adapter);
+    PlannerWithStore planner(store);
     planner.setDecks(decks);
     planner.configure(10, 3);
     QVERIFY(planner.refresh(&error));
@@ -403,8 +411,7 @@ void TestStudyPlanner::refreshRecomputesNewAllowanceFromReviewHistory() {
     deck.cards << first << second << third;
     const QVector<Deck> decks{deck};
 
-    StorePlannerAdapter adapter(store);
-    StudyPlanner planner(adapter);
+    PlannerWithStore planner(store);
     planner.setDecks(decks);
     planner.configure(3, 0);
     QVERIFY(planner.refresh(&error));
@@ -439,8 +446,7 @@ void TestStudyPlanner::updateNewBudgetTracksLoggedReviews() {
                << makeCard("new-c", "C", "c", "Budget");
     const QVector<Deck> decks{deck};
 
-    StorePlannerAdapter adapter(store);
-    StudyPlanner planner(adapter);
+    PlannerWithStore planner(store);
     planner.setDecks(decks);
     planner.configure(3, 0);
     QVERIFY(planner.refresh(&error));
@@ -494,8 +500,7 @@ void TestStudyPlanner::reviewIdsFollowAvailabilityOrder() {
     saveState(store, deck.cards.at(1), base, 1);
     saveState(store, deck.cards.at(3), base, 1); // same due, lower id comes first
 
-    StorePlannerAdapter adapter(store);
-    StudyPlanner planner(adapter);
+    PlannerWithStore planner(store);
     planner.setDecks(decks);
     planner.configure(2, 0);
     QVERIFY(planner.refresh(&error));
@@ -547,8 +552,7 @@ void TestStudyPlanner::cardListFiltersAndFormats() {
     saveState(store, reviewed, dueMs, 1);
     saveState(store, future, futureDue, 1);
 
-    StorePlannerAdapter adapter(store);
-    StudyPlanner planner(adapter);
+    PlannerWithStore planner(store);
     planner.setDecks(decks);
     planner.configure(20, 0);
     QVERIFY(planner.refresh(&error));
@@ -608,8 +612,7 @@ void TestStudyPlanner::deckSummariesReportCounts() {
     const QVector<Deck> decks{alpha, beta};
     saveState(store, alpha.cards.at(1), QDateTime::currentMSecsSinceEpoch() - 86400000LL, 1);
 
-    StorePlannerAdapter adapter(store);
-    StudyPlanner planner(adapter);
+    PlannerWithStore planner(store);
     planner.setDecks(decks);
     planner.configure(1, 0);
     QVERIFY(planner.refresh(&error));
@@ -665,8 +668,7 @@ void TestStudyPlanner::statsSummaryNumericContract() {
     store.logReview("yesterday", 3, todayStart - 86400000LL, state, 3);
     store.logReview("logged-new", 3, todayStart + 2000, state, 1, true);
 
-    StorePlannerAdapter adapter(store);
-    StudyPlanner planner(adapter);
+    PlannerWithStore planner(store);
     planner.setDecks(decks);
     planner.configure(2, 0);
     QVERIFY(planner.refresh(&error));
@@ -700,8 +702,7 @@ void TestStudyPlanner::statsSummaryNumericContract() {
     QTemporaryDir emptyDir;
     Store emptyStore(emptyDir.filePath("state.db"));
     QVERIFY(emptyStore.open(&error));
-    StorePlannerAdapter emptyAdapter(emptyStore);
-    StudyPlanner emptyPlanner(emptyAdapter);
+    PlannerWithStore emptyPlanner(emptyStore);
     emptyPlanner.configure(2, 0);
     const QVariantMap empty = emptyPlanner.statsSummary({emptyStore.summary(0), 0, 0, 0, 0, 0, 0.9});
     QCOMPARE(empty.value("accuracy").toInt(), 0);
