@@ -4,24 +4,18 @@
 #include <QVector>
 
 #include "test_ratingrecording.h"
+#include "test_support.h"
 #include "deck.h"
 #include "domain.h"
 #include "fsrs.h"
 #include "ratingrecording.h"
 
+using namespace TestSupport;
+
 namespace {
 
 constexpr qint64 kNow = 1700000000000LL;
 constexpr qint64 kDayMs = 86400000LL;
-
-Card makeCard(const QString &id, const QString &question, const QString &answer) {
-    Card card;
-    card.id = id;
-    card.question = question;
-    card.answer = answer;
-    card.deck = QStringLiteral("Deck");
-    return card;
-}
 
 struct RecordedRating {
     QString cardId;

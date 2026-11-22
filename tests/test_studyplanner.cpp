@@ -18,21 +18,14 @@
 #include "store.h"
 #include "studyplanner.h"
 
+using namespace TestSupport;
+
 namespace {
 
 constexpr const char *kCreateCardsSql =
     "CREATE TABLE cards (id TEXT PRIMARY KEY, hash TEXT NOT NULL, stability REAL NOT NULL, "
     "difficulty REAL NOT NULL, due INTEGER NOT NULL, last_review INTEGER NOT NULL, "
     "reps INTEGER NOT NULL, lapses INTEGER NOT NULL)";
-
-Card makeCard(const QString &id, const QString &question, const QString &answer, const QString &deckName) {
-    Card card;
-    card.id = id;
-    card.question = question;
-    card.answer = answer;
-    card.deck = deckName;
-    return card;
-}
 
 // Run DDL through a second connection so the Store's sticky error is the only
 // signal the planner sees; the Store connection itself stays open.
