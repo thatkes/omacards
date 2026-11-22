@@ -28,7 +28,7 @@ QStringList sortedKeys(const QJsonObject &object) {
     return keys;
 }
 
-QString checkIssueLine(const QJsonObject &issue) {
+QString checkDeckIssueLine(const QJsonObject &issue) {
     return QStringLiteral("%1:%2 %3: %4 (%5)")
         .arg(issue.value(QStringLiteral("path")).toString())
         .arg(issue.value(QStringLiteral("line")).toInt())
@@ -1212,7 +1212,7 @@ void TestCli::previewJsonContracts() {
     QCOMPARE(sortedKeys(item), itemKeys);
 }
 
-void TestCli::previewZeroCardDeckDiagnostics() {
+void TestCli::previewZeroCardDeckIssues() {
     QTemporaryDir dir;
     const QString decks = dir.filePath("decks");
     const QString database = dir.filePath("state.db");
@@ -1274,13 +1274,13 @@ oops: not a key
     QVERIFY(sawWarning);
     QVERIFY(sawLine);
 
-    // Text mode puts the whole diagnostic on stderr and nothing on stdout.
+    // Text mode puts the whole Deck issue report on stderr and nothing on stdout.
     const QString brokenText = runCliText({"preview", "--deck", "Broken"}, decks, database, &code, &stderrOutput);
     QCOMPARE(code, 1);
     QVERIFY(brokenText.isEmpty());
     QStringList expectedLines{"Deck Broken has no Cards"};
     for (const QJsonValue &value : checkIssues)
-        expectedLines << checkIssueLine(value.toObject());
+        expectedLines << checkDeckIssueLine(value.toObject());
     expectedLines << QStringLiteral("omacards check --deck Broken");
     QCOMPARE(QString::fromUtf8(stderrOutput), expectedLines.join('\n') + '\n');
 

@@ -37,7 +37,7 @@ private slots:
     void editDeleteErrorContracts();
     void importJsonAndCsvContracts();
     void previewJsonContracts();
-    void previewZeroCardDeckDiagnostics();
+    void previewZeroCardDeckIssues();
     void configValidationAndPersistence();
     void flagEqualsFormsMatchSeparateArgs();
 };
