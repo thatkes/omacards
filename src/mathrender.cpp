@@ -321,7 +321,7 @@ QStringList MathRenderer::warnings(const QString &text) const {
     return result;
 }
 
-QString MathRenderer::mathKey(const QString &expression) const {
+QString MathRenderer::mathSvgPath(const QString &expression) const {
     // One neutral master per expression. The prefix invalidates the old
     // per-theme files without deleting them; they are simply never read.
     const QString base =
@@ -331,7 +331,7 @@ QString MathRenderer::mathKey(const QString &expression) const {
 }
 
 QString MathRenderer::cachedSvgPath(const QString &expression) const {
-    const QString path = mathKey(expression);
+    const QString path = mathSvgPath(expression);
     return QFileInfo::exists(path) ? path : QString();
 }
 
@@ -341,7 +341,7 @@ int MathRenderer::warm(const QString &text, int *cached) {
         *cached = 0;
     QSet<QString> seen;
     for (const QString &expression : expressionsIn(text)) {
-        const QString path = mathKey(expression);
+        const QString path = mathSvgPath(expression);
         if (seen.contains(path))
             continue;
         seen.insert(path);
@@ -366,7 +366,7 @@ QString MathRenderer::renderWithPlaceholders(const QString &text, const QString 
     return mapMath(
         text,
         [this, ink, scale](const QString &expression) {
-            const QString path = mathKey(expression);
+            const QString path = mathSvgPath(expression);
             if (QFileInfo::exists(path))
                 return renderExpression(expression, ink, scale);
             const QString key = QFileInfo(path).completeBaseName();
@@ -383,7 +383,7 @@ void MathRenderer::prefetch(const QString &text, const QString &ink, double scal
     // Ink no longer affects which file is rendered; it stays on the request so
     // a queued render can emit the right data URI for the card being shown.
     for (const QString &expression : expressionsIn(text)) {
-        const QString path = mathKey(expression);
+        const QString path = mathSvgPath(expression);
         if (QFileInfo::exists(path))
             continue;
         enqueueExpression({QFileInfo(path).completeBaseName(), expression, ink, scale});
@@ -401,7 +401,7 @@ void MathRenderer::clearPendingMath() {
 
 void MathRenderer::enqueueExpression(const RenderRequest &request) {
     constexpr int kMaxQueued = 12;
-    if (QFileInfo::exists(mathKey(request.expression)))
+    if (QFileInfo::exists(mathSvgPath(request.expression)))
         return;
     if (m_activeKeys.contains(request.key)) {
         // The slot is taken. Remember the first request for this generation so
@@ -427,7 +427,7 @@ void MathRenderer::startNextRender() {
     while (m_activeKeys.size() < kMaxActive && !m_queue.isEmpty()) {
         const RenderRequest request = m_queue.dequeue();
         m_queuedKeys.remove(request.key);
-        if (QFileInfo::exists(mathKey(request.expression)))
+        if (QFileInfo::exists(mathSvgPath(request.expression)))
             continue;
         if (m_activeKeys.contains(request.key))
             continue;
@@ -452,7 +452,7 @@ void MathRenderer::finishRender(const QString &key, const QString &html, quint64
         // The theme changed while this worker ran. Its SVG is neutral and now
         // cached, so renderExpression only rebuilds the data URI; no toolchain
         // runs on a theme switch.
-        result = QFileInfo::exists(mathKey(request.expression))
+        result = QFileInfo::exists(mathSvgPath(request.expression))
                      ? renderExpression(request.expression, request.ink, request.scale)
                      : QString();
     }
@@ -554,7 +554,7 @@ QString MathRenderer::renderLatex(const QString &expression) const {
     if (detect() != Engine::LatexSvg)
         return {};
 
-    const QString svgPath = mathKey(expression);
+    const QString svgPath = mathSvgPath(expression);
     if (QFileInfo::exists(svgPath))
         return svgPath;
 

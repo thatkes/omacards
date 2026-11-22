@@ -556,7 +556,7 @@ void TestMathRender::liveRenderAndPrefetchShareOneCacheEntry() {
     // Whichever caller claims the key first renders it; the other must skip.
     renderer.prefetch("\\(x^2\\)", "#123456", 2.0);
     renderer.renderExpression("x^2", "#123456", 2.0);
-    const QString path = renderer.mathKey("x^2");
+    const QString path = renderer.mathSvgPath("x^2");
     QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(path), 5000);
 
     QFile logFile(argsLog);
@@ -583,10 +583,10 @@ void TestMathRender::failedQueuedRendersDoNotBlockLaterPrefetches() {
 
     // The two failing keys occupy the worker slots; the third must still run.
     renderer.prefetch("\\(bad-one\\) \\(bad-two\\) \\(good\\)", "#123456", 2.0);
-    const QString goodPath = renderer.mathKey("good");
+    const QString goodPath = renderer.mathSvgPath("good");
     QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(goodPath), 5000);
-    QVERIFY(!QFileInfo::exists(renderer.mathKey("bad-one")));
-    QVERIFY(!QFileInfo::exists(renderer.mathKey("bad-two")));
+    QVERIFY(!QFileInfo::exists(renderer.mathSvgPath("bad-one")));
+    QVERIFY(!QFileInfo::exists(renderer.mathSvgPath("bad-two")));
 }
 
 void TestMathRender::invalidInkNormalizesToBlack() {

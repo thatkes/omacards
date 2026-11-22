@@ -679,8 +679,8 @@ void TestStudySession::prefetchQueuesTheNextThreeCardsWithoutChangingOrder() {
     QCOMPARE(tectonicRenders(argsLog), 3);
     MathRenderer renderer(cache);
     for (const QString expression : {"x1", "x2", "x3"})
-        QVERIFY(QFileInfo::exists(renderer.mathKey(expression)));
-    QVERIFY(!QFileInfo::exists(renderer.mathKey("x4")));
+        QVERIFY(QFileInfo::exists(renderer.mathSvgPath(expression)));
+    QVERIFY(!QFileInfo::exists(renderer.mathSvgPath("x4")));
 
     // Warming is a read-only peek: ratings still meet the cards in order.
     for (const QString expression : {"x1", "x2", "x3", "x4"}) {
@@ -707,7 +707,7 @@ void TestStudySession::prefetchResultIsIgnoredForCardsAlreadyLeftBehind() {
     QString error;
     QVERIFY(prepareSession(fixture, "Stale", {"\\(x^2\\)", "plain"}, &error));
     MathRenderer renderer(cache);
-    const QString key = cacheKey(renderer.mathKey("x^2"));
+    const QString key = cacheKey(renderer.mathSvgPath("x^2"));
     QVERIFY(fixture.session.question().contains(QStringLiteral("<!--omacards-math:%1-->").arg(key)));
 
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
@@ -739,8 +739,8 @@ void TestStudySession::themeChangeRecolorsFromCacheWithoutPrefetch() {
     QTRY_VERIFY_WITH_TIMEOUT(tectonicRenders(argsLog) >= 2, 5000);
 
     MathRenderer renderer(cache);
-    QVERIFY(QFileInfo::exists(renderer.mathKey("x^2")));
-    QVERIFY(QFileInfo::exists(renderer.mathKey("y^2")));
+    QVERIFY(QFileInfo::exists(renderer.mathSvgPath("x^2")));
+    QVERIFY(QFileInfo::exists(renderer.mathSvgPath("y^2")));
     const QStringList filesBefore = QDir(cache).entryList({"*.svg"});
     const QString questionBefore = fixture.session.question();
 

@@ -40,7 +40,7 @@ public:
 
     // Full path of the one neutral cached SVG for an expression. Inks and
     // scales are display concerns and never change the file name.
-    QString mathKey(const QString &expression) const;
+    QString mathSvgPath(const QString &expression) const;
     QString cachedSvgPath(const QString &expression) const;
 
     // Renders every uncached expression in `text` once, counting newly written
