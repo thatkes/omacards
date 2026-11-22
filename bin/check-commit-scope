@@ -1,0 +1,52 @@
+#!/bin/sh
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$ROOT"
+
+msg_file="${1:-}"
+if [ -z "$msg_file" ] || [ ! -f "$msg_file" ]; then
+    exit 0
+fi
+
+# Read the first subject line
+subject="$(sed -n '1p' "$msg_file")"
+
+# Only enforce for docs: commits
+case "$subject" in
+    docs:*)
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+
+# Gather staged files (added/copied/modified/renamed)
+staged="$(git diff --cached --name-only --diff-filter=ACMR || true)"
+if [ -z "$staged" ]; then
+    exit 0
+fi
+
+bad=""
+while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    case "$f" in
+        docs/*) ;;
+        GLOSSARY.md) ;;
+        AGENTS.md) ;;
+        README*|CHANGELOG*) ;;
+        */*) # files in subdirs other than docs/ are checked above
+            bad="${bad}${bad:+$'\n'}$f" ;;
+        *.md) ;; # root-level markdown
+        *)
+            bad="${bad}${bad:+$'\n'}$f" ;;
+    esac
+done <<EOF
+$staged
+EOF
+
+if [ -n "$bad" ]; then
+    printf 'commit-msg: docs: commit must only include docs files (docs/*, GLOSSARY.md, AGENTS.md, README*, CHANGELOG*, root *.md).\n' >&2
+    printf 'Staged files outside that allowlist:\n' >&2
+    printf '%s\n' "$bad" >&2
+    exit 1
+fi
