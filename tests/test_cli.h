@@ -9,6 +9,7 @@ private slots:
     void helpIsHeadless();
     void addCardsCreatesDeckBulk();
     void addCardsJsonMetadataContract();
+    void addCardsPathKeepsRelativeDecksDir();
     void addCardsJsonCountsOnlyWrittenDeck();
     void addCardsCountsOnlyWrittenDeckWhenReloadSkipsIt();
     void addCardsIgnoresUnreadableOtherDeck();

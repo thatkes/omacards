@@ -717,20 +717,11 @@ int run(const QStringList &arguments) {
             return fail(error, json);
 
         // Reloaded after the write so an implicitly created Deck has the same
-        // stored path that decks --json reports. A Deck whose new content
-        // makes load() skip it has no stored path, so use the path createDeck
-        // wrote to. Only the written Deck is linted.
-        QString writtenPath;
-        for (const Deck &deck : backend.allDecks()) {
-            if (deck.name == options.deck.trimmed()) {
-                writtenPath = deck.path;
-                break;
-            }
-        }
-        if (writtenPath.isEmpty()) {
-            writtenPath =
-                QDir(backend.decksDirectory()).filePath(DeckIO::safeFileName(options.deck.trimmed()) + ".txt");
-        }
+        // stored path that decks --json reports. resolveDeckPath's filename
+        // fallback covers a Deck that load() skips after the write; only the
+        // written Deck is linted.
+        const QString writtenPath =
+            resolveDeckPath(backend.allDecks(), backend.decksDirectory(), options.deck.trimmed());
         const DeckIssueReport report = deckIssueReportForFile(writtenPath);
 
         QJsonArray idArray;

@@ -137,6 +137,33 @@ void TestCli::addCardsJsonMetadataContract() {
     QCOMPARE(human, QStringLiteral("Added 2 cards to Calculus Series\n"));
 }
 
+void TestCli::addCardsPathKeepsRelativeDecksDir() {
+    QTemporaryDir work;
+    QVERIFY(work.isValid());
+    QTemporaryDir relativeDecks(QDir::current().filePath(QStringLiteral("add-cards-relative-XXXXXX")));
+    QVERIFY(relativeDecks.isValid());
+    const QString decks = QDir::current().relativeFilePath(relativeDecks.path());
+    QVERIFY(!QDir::isAbsolutePath(decks));
+    const QString database = work.filePath("state.db");
+    EnvGuard env(decks, database);
+
+    const QString input = work.filePath("cards.json");
+    QVERIFY(writeFile(input, R"([{"question":"Q1?","answer":"A1"}])"));
+
+    int code = -1;
+    const QJsonObject added =
+        runCli({"add-cards", "--deck", "Calculus Series", "--input", input, "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    const QString expectedPath = decks + QStringLiteral("/Calculus-Series.txt");
+    QCOMPARE(added.value(QStringLiteral("path")).toString(), expectedPath);
+
+    const QJsonObject listed = runCli({"decks", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    const QJsonArray listedDecks = listed.value(QStringLiteral("decks")).toArray();
+    QCOMPARE(listedDecks.size(), 1);
+    QCOMPARE(listedDecks.at(0).toObject().value(QStringLiteral("path")).toString(), expectedPath);
+}
+
 void TestCli::addCardsJsonCountsOnlyWrittenDeck() {
     QTemporaryDir dir;
     const QString decks = dir.filePath("decks");
