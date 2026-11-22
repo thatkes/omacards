@@ -53,7 +53,7 @@ tectonic --untrusted --outdir=/tmp/omacards-tex /tmp/omacards-tex/warm.tex
 
 ```
 ```
-This is a one-time, global download of Tectonic's TeX bundle (stored in `~/.cache/tectonic`) — not something you repeat per deck. Doing it ahead of time avoids a long pause on the first card that uses math. After that, normal renders use Tectonic's `--only-cached` mode, and each rendered expression is cached as an SVG under `~/.cache/omacards/math`. Restart omacards after installing so it detects the toolchain, and confirm with `omacards check --json` (`"math": "LaTeX (SVG)"`). Delete `~/.cache/omacards/math` to force a re-render.
+This is a one-time, global download of Tectonic's TeX bundle (stored in `~/.cache/tectonic`) — not something you repeat per deck. Doing it ahead of time avoids a long pause on the first card that uses math. After that, normal renders use Tectonic's `--only-cached` mode, and each expression is cached once as a neutral SVG under `~/.cache/omacards/math`. The active theme colors the SVG at display time, so switching themes needs no re-render. Restart omacards after installing so it detects the toolchain, and confirm with `omacards check --json` (`"math": "LaTeX (SVG)"`). Delete `~/.cache/omacards/math` to force a re-render.
 
 ## Keyboard shortcuts
 

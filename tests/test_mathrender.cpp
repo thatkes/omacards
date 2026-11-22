@@ -4,7 +4,6 @@
 #include <QFileInfo>
 #include <QStandardPaths>
 #include <QTemporaryDir>
-#include <QUrl>
 
 #include "test_mathrender.h"
 #include "test_support.h"
@@ -109,6 +108,20 @@ svg=
 for arg do svg="$arg"; done
 )sh"));
     return writeFakeTool(binDir, "tectonic", tectonicBody) && writeFakeTool(binDir, "pdftocairo", cairoBody);
+}
+
+// The renderer colors the cached master by emitting a data URI. Tests read the
+// SVG back out of that URI instead of inspecting rendered pixels.
+QString svgFromMathHtml(const QString &html) {
+    static const QString prefix = QStringLiteral("<img src='data:image/svg+xml;base64,");
+    const int start = html.indexOf(prefix);
+    if (start < 0)
+        return {};
+    const int end = html.indexOf('\'', start + prefix.size());
+    if (end < 0)
+        return {};
+    const QByteArray encoded = html.mid(start + prefix.size(), end - start - prefix.size()).toLocal8Bit();
+    return QString::fromUtf8(QByteArray::fromBase64(encoded));
 }
 
 bool writeDviToolchain(const QString &binDir, const QString &svg) {
@@ -224,35 +237,37 @@ void TestMathRender::tectonicRendererUsesSupportedFlags() {
     QVERIFY(tex.contains("\\pdfpagewidth=\\wd0"));
     QVERIFY(tex.contains("\\shipout\\vbox"));
 
-    // Ink is part of the cache key so themed equations do not reuse black SVGs.
-    MathRenderer themed(cache);
-    QVERIFY(themed.renderExpression("x^2", "#c0caf5").startsWith("<img "));
-    bool foundThemedSvg = false;
-    for (const QString &name : QDir(cache).entryList({"*.svg"})) {
-        QFile svg(cache + "/" + name);
-        if (!svg.open(QIODevice::ReadOnly))
-            continue;
-        const QString content = QString::fromUtf8(svg.readAll());
-        if (content.contains("#c0caf5") && !content.contains("rgb(0%, 0%, 0%)"))
-            foundThemedSvg = true;
-    }
-    QVERIFY(foundThemedSvg);
+    // One neutral master serves every ink and scale. The file keeps the
+    // toolchain's black fill; the ink appears only in the emitted data URI.
+    const QStringList neutralFiles = QDir(cache).entryList({"*.svg"});
+    QCOMPARE(neutralFiles.size(), 1);
+    QVERIFY(neutralFiles.first().startsWith("eq5-"));
+    QFile neutral(cache + "/" + neutralFiles.first());
+    QVERIFY(neutral.open(QIODevice::ReadOnly));
+    const QString neutralSvg = QString::fromUtf8(neutral.readAll());
+    QVERIFY(neutralSvg.contains("rgb(0%, 0%, 0%)"));
+    QVERIFY(neutralSvg.contains("width=\"26px\" height=\"14px\""));
 
-    // Scale enlarges the SVG itself and the <img> pixel dimensions so the
-    // 12pt TeX glyphs stay readable beside 24-30px QML labels.
-    const QString scaledHtml = themed.renderExpression("x^2", "#70d6ff", 2.0);
-    QVERIFY(scaledHtml.contains("width='27'"));
-    QVERIFY(scaledHtml.contains("height='13'"));
-    bool foundScaledSvg = false;
-    for (const QString &name : QDir(cache).entryList({"*.svg"})) {
-        QFile svg(cache + "/" + name);
-        if (!svg.open(QIODevice::ReadOnly))
-            continue;
-        const QString content = QString::fromUtf8(svg.readAll());
-        if (content.contains("#70d6ff") && content.contains("width=\"54px\" height=\"26px\""))
-            foundScaledSvg = true;
-    }
-    QVERIFY(foundScaledSvg);
+    MathRenderer themed(cache);
+    const QString themedHtml = themed.renderExpression("x^2", "#c0caf5", 2.0);
+    QVERIFY(themedHtml.startsWith("<img src='data:image/svg+xml;base64,"));
+    const QString themedSvg = svgFromMathHtml(themedHtml);
+    QVERIFY(themedSvg.contains("fill=\"#c0caf5\""));
+    QVERIFY(!themedSvg.contains("rgb(0%, 0%, 0%)"));
+    QCOMPARE(QDir(cache).entryList({"*.svg"}).size(), 1);
+    QFile afterThemed(cache + "/" + neutralFiles.first());
+    QVERIFY(afterThemed.open(QIODevice::ReadOnly));
+    QCOMPARE(QString::fromUtf8(afterThemed.readAll()), neutralSvg);
+
+    // Scale multiplies the cached SVG's logical size in the <img> dimensions;
+    // the SVG itself keeps one supersampled master size for every scale.
+    QVERIFY(themedHtml.contains("width='26'"));
+    QVERIFY(themedHtml.contains("height='14'"));
+    const QString smallHtml = themed.renderExpression("x^2", "#70d6ff", 1.0);
+    QVERIFY(smallHtml.contains("width='13'"));
+    QVERIFY(smallHtml.contains("height='7'"));
+    QVERIFY(svgFromMathHtml(smallHtml).contains("fill=\"#70d6ff\""));
+    QCOMPARE(QDir(cache).entryList({"*.svg"}).size(), 1);
 
     QFile logFile(argsLog);
     QVERIFY(logFile.open(QIODevice::ReadOnly));
@@ -449,6 +464,8 @@ void TestMathRender::pdftocairoPixelUnitsScaleImageAndSvg() {
     QVERIFY(renderer.hasRenderer());
 
     const QString html = renderer.renderExpression("x^2", QString(), 2.0);
+    QVERIFY(html.startsWith("<img src='data:image/svg+xml;base64,"));
+    QVERIFY(svgFromMathHtml(html).contains("fill=\"#000000\""));
     QVERIFY(html.contains("width='40'"));
     QVERIFY(html.contains("height='20'"));
 
@@ -457,7 +474,9 @@ void TestMathRender::pdftocairoPixelUnitsScaleImageAndSvg() {
     QFile svg(cache + "/" + svgs.first());
     QVERIFY(svg.open(QIODevice::ReadOnly));
     const QString svgText = QString::fromUtf8(svg.readAll());
-    QVERIFY(svgText.contains("width=\"80px\" height=\"40px\""));
+    // Supersampling happens once at generation time; scale changes only the
+    // <img> size, so a 20px SVG stays 40px in the file at every scale.
+    QVERIFY(svgText.contains("width=\"40px\" height=\"20px\""));
 }
 
 void TestMathRender::cachedSvgSkipsSecondToolchainRun() {
@@ -476,9 +495,15 @@ void TestMathRender::cachedSvgSkipsSecondToolchainRun() {
     QVERIFY(renderer.hasRenderer());
 
     const QString first = renderer.renderExpression("x^2", "#123456", 1.0);
-    const QString second = renderer.renderExpression("x^2", "#123456", 1.0);
-    QVERIFY(first.startsWith("<img "));
-    QCOMPARE(second, first);
+    const QString themed = renderer.renderExpression("x^2", "#abcdef", 2.0);
+    const QString scaled = renderer.renderExpression("x^2", QString(), 1.6);
+    QVERIFY(first.startsWith("<img src='data:image/svg+xml;base64,"));
+    QVERIFY(svgFromMathHtml(first).contains("fill=\"#123456\""));
+    QVERIFY(svgFromMathHtml(themed).contains("fill=\"#abcdef\""));
+    QVERIFY(svgFromMathHtml(scaled).contains("fill=\"#000000\""));
+    QVERIFY(first != themed);
+    QVERIFY(themed.contains("width='26'"));
+    QVERIFY(scaled.contains("width='21'"));
     QCOMPARE(QDir(cache).entryList({"*.svg"}).size(), 1);
 
     QFile logFile(argsLog);
@@ -505,18 +530,20 @@ void TestMathRender::warmRendersMissingExpressionsAndSkipsHits() {
     // Repeating an expression must still produce one render per cache key.
     const QString text = QStringLiteral("\\(x^2\\) and \\(y^2\\) and \\(x^2\\)");
     int cached = -1;
-    QCOMPARE(renderer.warm(text, "#123456", 2.0, &cached), 2);
+    QCOMPARE(renderer.warm(text, &cached), 2);
     QCOMPARE(cached, 0);
 
-    const QString xPath = renderer.cachedSvgPath("x^2", "#123456", 2.0);
-    const QString yPath = renderer.cachedSvgPath("y^2", "#123456", 2.0);
-    QVERIFY(xPath.startsWith(cache + "/eq4-"));
-    QVERIFY(yPath.startsWith(cache + "/eq4-"));
+    const QString xPath = renderer.cachedSvgPath("x^2");
+    const QString yPath = renderer.cachedSvgPath("y^2");
+    QVERIFY(xPath.startsWith(cache + "/eq5-"));
+    QVERIFY(yPath.startsWith(cache + "/eq5-"));
     QVERIFY(xPath != yPath);
-    // Warming writes the same file names and SVG layout as a live render.
-    QVERIFY(renderer.renderExpression("x^2", "#123456", 2.0).contains(QUrl::fromLocalFile(xPath).toString()));
+    // Warming writes the same neutral master a live render reads; the data
+    // URI carries the requested ink, so no themed file appears.
+    QVERIFY(renderer.renderExpression("x^2", "#123456", 2.0).contains("data:image/svg+xml;base64,"));
+    QCOMPARE(QDir(cache).entryList({"*.svg"}).size(), 2);
 
-    QCOMPARE(renderer.warm(text, "#123456", 2.0, &cached), 0);
+    QCOMPARE(renderer.warm(text, &cached), 0);
     QCOMPARE(cached, 2); // two distinct SVGs were already cached
 
     QFile logFile(argsLog);
@@ -543,7 +570,7 @@ void TestMathRender::liveRenderAndPrefetchShareOneCacheEntry() {
     // Whichever caller claims the key first renders it; the other must skip.
     renderer.prefetch("\\(x^2\\)", "#123456", 2.0);
     renderer.renderExpression("x^2", "#123456", 2.0);
-    const QString path = renderer.mathKey("x^2", "#123456", 2.0);
+    const QString path = renderer.mathKey("x^2");
     QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(path), 5000);
 
     QFile logFile(argsLog);
@@ -570,10 +597,10 @@ void TestMathRender::failedQueuedRendersDoNotBlockLaterPrefetches() {
 
     // The two failing keys occupy the worker slots; the third must still run.
     renderer.prefetch("\\(bad-one\\) \\(bad-two\\) \\(good\\)", "#123456", 2.0);
-    const QString goodPath = renderer.mathKey("good", "#123456", 2.0);
+    const QString goodPath = renderer.mathKey("good");
     QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(goodPath), 5000);
-    QVERIFY(!QFileInfo::exists(renderer.mathKey("bad-one", "#123456", 2.0)));
-    QVERIFY(!QFileInfo::exists(renderer.mathKey("bad-two", "#123456", 2.0)));
+    QVERIFY(!QFileInfo::exists(renderer.mathKey("bad-one")));
+    QVERIFY(!QFileInfo::exists(renderer.mathKey("bad-two")));
 }
 
 void TestMathRender::invalidInkNormalizesToBlack() {
@@ -590,13 +617,15 @@ void TestMathRender::invalidInkNormalizesToBlack() {
     EnvVarGuard argsGuard("OMACARDS_TEST_ARGS", argsLog.toUtf8());
     MathRenderer renderer(cache);
     QVERIFY(renderer.hasRenderer());
-    QVERIFY(renderer.renderExpression("x^2", "not-a-color").startsWith("<img "));
+    const QString html = renderer.renderExpression("x^2", "not-a-color");
+    QVERIFY(html.startsWith("<img src='data:image/svg+xml;base64,"));
+    QVERIFY(svgFromMathHtml(html).contains("fill=\"#000000\""));
 
     const QStringList svgs = QDir(cache).entryList({"*.svg"});
     QCOMPARE(svgs.size(), 1);
     QFile svg(cache + "/" + svgs.first());
     QVERIFY(svg.open(QIODevice::ReadOnly));
     const QString svgText = QString::fromUtf8(svg.readAll());
-    QVERIFY(svgText.contains("fill=\"#000000\""));
-    QVERIFY(!svgText.contains("rgb("));
+    QVERIFY(svgText.contains("rgb(0%, 0%, 0%)")); // the master stays neutral
+    QVERIFY(!svgText.contains("#000000"));
 }

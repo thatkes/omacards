@@ -60,5 +60,6 @@ private slots:
     void emptySessionHelpersAndStatsText();
     void setDeckDescriptionAndQmlErrorSignals();
     void qmlStudyShowsMathPlaceholderUntilSvgArrives();
+    void qmlStudyRecolorsCachedSvgWhenThemeChanges();
     void qmlStudyUsesCachedSvgWithoutPlaceholder();
 };

@@ -40,6 +40,18 @@ int toolchainRenders(const QString &logPath) {
 const QString kCliTinySvg = QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10pt\" height=\"5pt\" "
                                            "viewBox=\"0 0 10 5\"><g fill=\"rgb(0%, 0%, 0%)\"/></svg>");
 
+QString svgFromMathHtml(const QString &html) {
+    static const QString prefix = QStringLiteral("<img src='data:image/svg+xml;base64,");
+    const int start = html.indexOf(prefix);
+    if (start < 0)
+        return {};
+    const int end = html.indexOf('\'', start + prefix.size());
+    if (end < 0)
+        return {};
+    const QByteArray encoded = html.mid(start + prefix.size(), end - start - prefix.size()).toLocal8Bit();
+    return QString::fromUtf8(QByteArray::fromBase64(encoded));
+}
+
 QString checkDeckIssueLine(const QJsonObject &issue) {
     return QStringLiteral("%1:%2 %3: %4 (%5)")
         .arg(issue.value(QStringLiteral("path")).toString())
@@ -1329,12 +1341,37 @@ void TestCli::previewJsonContracts() {
     QCOMPARE(code, 0);
     QCOMPARE(one.value(QStringLiteral("items")).toArray().size(), 1);
 
+    // HTML preview has no theme, so math must be emitted in black regardless
+    // of the colors the app happens to use.
+    const QString bin = dir.filePath("bin");
+    QVERIFY(writeFakePdfToolchain(bin, kCliTinySvg));
+    TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
+    TestSupport::ScopedEnv argsEnv("OMACARDS_TEST_ARGS", dir.filePath("args.log"));
+    PathPrependGuard pathGuard(bin);
+    {
+        auto owned = Backend::fromEnvironment();
+        QString error;
+        QVERIFY(owned->initialize(&error));
+        QVERIFY(owned->createCard("P", "\\(z^2\\)", "plain", "basic", {}, &error));
+    }
+
     const QJsonObject html = runCli({"preview", "--deck", "P", "--format", "html", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
-    const QJsonObject item = html.value(QStringLiteral("items")).toArray().at(0).toObject();
+    const QJsonArray htmlItems = html.value(QStringLiteral("items")).toArray();
+    QCOMPARE(htmlItems.size(), 3);
+    const QJsonObject item = htmlItems.at(0).toObject();
     QStringList itemKeys{"id", "questionHtml", "answerHtml"};
     itemKeys.sort();
     QCOMPARE(sortedKeys(item), itemKeys);
+
+    QString mathHtml;
+    for (const QJsonValue &value : htmlItems) {
+        const QString question = value.toObject().value(QStringLiteral("questionHtml")).toString();
+        if (question.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")))
+            mathHtml = question;
+    }
+    QVERIFY(!mathHtml.isEmpty());
+    QVERIFY(svgFromMathHtml(mathHtml).contains("fill=\"#000000\""));
 }
 
 void TestCli::previewZeroCardDeckIssues() {
@@ -1575,7 +1612,7 @@ void TestCli::warmReportsRenderedAndCached() {
     QVERIFY(QDir().mkpath(themeDir + "/theme"));
     QVERIFY(writeFile(decks + "/Warm.txt", R"deck(# Deck: Warm
 ---
-Q: What is \(x^2\)?
+Q: What is \(x^2\) and \(x^2\)?
 A: It is \(y^2\).
 )deck"));
     QVERIFY(writeFile(themeDir + "/theme/colors.toml", R"theme(foreground = "#112233"
@@ -1601,11 +1638,20 @@ accent = "#445566"
     QCOMPARE(toolchainRenders(argsLog), 2);
 
     MathRenderer verifier(cache);
-    QVERIFY(QFileInfo::exists(verifier.mathKey("x^2", "#112233", MathScale::kQuestion)));
-    QVERIFY(QFileInfo::exists(verifier.mathKey("y^2", "#445566", MathScale::kAnswer)));
+    const QString xPath = verifier.mathKey("x^2");
+    QVERIFY(QFileInfo::exists(xPath));
+    QVERIFY(QFileInfo::exists(verifier.mathKey("y^2")));
+    QCOMPARE(QDir(cache).entryList({"*.svg"}).size(), 2);
+    QFile neutral(xPath);
+    QVERIFY(neutral.open(QIODevice::ReadOnly));
+    QVERIFY(QString::fromUtf8(neutral.readAll()).contains("rgb(0%, 0%, 0%)"));
     // Warming must not create or select study state as a side effect.
     QVERIFY(!QFileInfo::exists(database));
 
+    // A different active theme must not re-render or duplicate anything.
+    QVERIFY(writeFile(themeDir + "/theme/colors.toml", R"theme(foreground = "#ff0000"
+accent = "#00ff00"
+)theme"));
     QFile::remove(argsLog);
     const QString text = runCliText({"warm", "--deck", "Warm"}, decks, database, &code);
     QCOMPARE(code, 0);
