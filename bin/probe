@@ -1,0 +1,31 @@
+#!/bin/sh
+# Build and run a standalone probe against the app sources.
+#
+# Usage: bin/probe <probe.cpp> [args...]
+#
+# The probe source keeps its own main(), so no tracked test file is edited.
+# It is built in build/probe/ and can be rerun after editing the source.
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+if [ "$#" -lt 1 ]; then
+    printf 'Usage: %s <probe.cpp> [args...]\n' "$0" >&2
+    exit 2
+fi
+
+PROBE=$1
+shift
+case "$PROBE" in
+    /*) ;;
+    *) PROBE="$(pwd)/$PROBE" ;;
+esac
+if [ ! -f "$PROBE" ]; then
+    printf 'No such probe source: %s\n' "$PROBE" >&2
+    exit 2
+fi
+
+BUILD="$ROOT/build/probe"
+mkdir -p "$BUILD"
+cd "$BUILD"
+qmake6 "$ROOT/tests/probe/probe.pro" "PROBE_SOURCE=$PROBE"
+make -j"$(nproc)"
+QT_QPA_PLATFORM=offscreen ./omacards_probe "$@"
