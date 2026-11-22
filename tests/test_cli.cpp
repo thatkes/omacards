@@ -73,6 +73,126 @@ void TestCli::addCardsCreatesDeckBulk() {
     QCOMPARE(deck.cards.at(1).tags, QStringList({"z", "w"}));
 }
 
+void TestCli::addCardsJsonMetadataContract() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    EnvGuard env(decks, database);
+
+    const QString input = dir.filePath("cards.json");
+    QVERIFY(writeFile(input, R"({"cards":[{"question":"Clean Q1?","answer":"A1"},
+                                          {"question":"Clean Q2?","answer":"A2"}]})"));
+
+    int code = -1;
+    const QJsonObject added = runCli({"add-cards", "--deck", "Calculus Series", "--description",
+                                      "Maclaurin and Taylor series", "--input", input, "--json"},
+                                     decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY(added.value(QStringLiteral("ok")).toBool());
+
+    QStringList successKeys{"created", "deck", "ids", "issueCounts", "ok", "path"};
+    successKeys.sort();
+    QCOMPARE(sortedKeys(added), successKeys);
+    QCOMPARE(added.value(QStringLiteral("deck")).toString(), QString("Calculus Series"));
+    QCOMPARE(added.value(QStringLiteral("created")).toInt(), 2);
+    QCOMPARE(added.value(QStringLiteral("ids")).toArray().size(), 2);
+
+    const QJsonObject listed = runCli({"decks", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QString listedPath;
+    const QJsonArray listedDecks = listed.value(QStringLiteral("decks")).toArray();
+    for (const QJsonValue &value : listedDecks) {
+        if (value.toObject().value(QStringLiteral("name")).toString() == QStringLiteral("Calculus Series"))
+            listedPath = value.toObject().value(QStringLiteral("path")).toString();
+    }
+    const QString path = added.value(QStringLiteral("path")).toString();
+    QVERIFY(!path.isEmpty());
+    QCOMPARE(path, listedPath);
+    QCOMPARE(path, QDir(decks).filePath(QStringLiteral("Calculus-Series.txt")));
+    QVERIFY(QFileInfo::exists(path));
+
+    const QJsonObject counts = added.value(QStringLiteral("issueCounts")).toObject();
+    QStringList countKeys{"error", "warning"};
+    countKeys.sort();
+    QCOMPARE(sortedKeys(counts), countKeys);
+    QVERIFY(counts.value(QStringLiteral("error")).isDouble());
+    QVERIFY(counts.value(QStringLiteral("warning")).isDouble());
+    QCOMPARE(counts.value(QStringLiteral("error")).toInt(), 0);
+    QCOMPARE(counts.value(QStringLiteral("warning")).toInt(), 0);
+
+    const QByteArray piped = R"([{"question":"Piped Q?","answer":"Piped A"}])";
+    const QJsonObject throughStdin = runCli({"add-cards", "--deck", "Piped Series", "--input", "-", "--json"}, decks,
+                                            database, &code, nullptr, &piped);
+    QCOMPARE(code, 0);
+    QCOMPARE(sortedKeys(throughStdin), successKeys);
+    QCOMPARE(throughStdin.value(QStringLiteral("deck")).toString(), QString("Piped Series"));
+    QCOMPARE(throughStdin.value(QStringLiteral("created")).toInt(), 1);
+    QVERIFY(!throughStdin.value(QStringLiteral("path")).toString().isEmpty());
+    QCOMPARE(sortedKeys(throughStdin.value(QStringLiteral("issueCounts")).toObject()), countKeys);
+
+    const QString human =
+        runCliText({"add-cards", "--deck", "Calculus Series", "--input", input}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(human, QStringLiteral("Added 2 cards to Calculus Series\n"));
+}
+
+void TestCli::addCardsJsonCountsOnlyWrittenDeck() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    EnvGuard env(decks, database);
+
+    QVERIFY(writeFile(QDir(decks).filePath(QStringLiteral("Target.txt")),
+                      "# Deck: Target\n---\nQ: same\nA: one\n---\nQ: same\nA: two\n"));
+    QVERIFY(writeFile(QDir(decks).filePath(QStringLiteral("Other.txt")),
+                      "# Deck: Other\n---\nQ: other\nA: one\n---\nQ: other\nA: two\n---\n"
+                      "Q: Bad \\(\\foobar{x}\\)\nA: ok\n"));
+
+    int code = -1;
+    const QString input = dir.filePath("cards.json");
+    QVERIFY(writeFile(input, R"([{"question":"Fresh question","answer":"Fresh answer"}])"));
+    const QJsonObject added =
+        runCli({"add-cards", "--deck", "Target", "--input", input, "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    const QJsonObject checked = runCli({"check", "--deck", "Target", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(QJsonDocument(added.value(QStringLiteral("issueCounts")).toObject()).toJson(),
+             QJsonDocument(checked.value(QStringLiteral("issueCounts")).toObject()).toJson());
+    const QJsonObject counts = added.value(QStringLiteral("issueCounts")).toObject();
+    QCOMPARE(counts.value(QStringLiteral("error")).toInt(), 0);
+    QCOMPARE(counts.value(QStringLiteral("warning")).toInt(), 1);
+
+    const QJsonObject all = runCli({"check", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY(all.value(QStringLiteral("issueCounts")).toObject().value(QStringLiteral("warning")).toInt() > 1);
+
+    const QString duplicateInput = dir.filePath("duplicate.json");
+    QVERIFY(writeFile(duplicateInput, R"([{"question":"same","answer":"three"}])"));
+    const QJsonObject duplicate =
+        runCli({"add-cards", "--deck", "Target", "--input", duplicateInput, "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    const QJsonObject checkedAgain = runCli({"check", "--deck", "Target", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(QJsonDocument(duplicate.value(QStringLiteral("issueCounts")).toObject()).toJson(),
+             QJsonDocument(checkedAgain.value(QStringLiteral("issueCounts")).toObject()).toJson());
+    QCOMPARE(duplicate.value(QStringLiteral("issueCounts")).toObject().value(QStringLiteral("warning")).toInt(), 2);
+
+    const QString mathInput = dir.filePath("math.json");
+    QVERIFY(writeFile(mathInput, R"json([{"question":"Bad \\(\\foobar{x}\\)",
+                                          "answer":"ok"}])json"));
+    const QJsonObject mathAdded =
+        runCli({"add-cards", "--deck", "Mathy", "--input", mathInput, "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    const QJsonObject mathChecked = runCli({"check", "--deck", "Mathy", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(QJsonDocument(mathAdded.value(QStringLiteral("issueCounts")).toObject()).toJson(),
+             QJsonDocument(mathChecked.value(QStringLiteral("issueCounts")).toObject()).toJson());
+    QCOMPARE(mathAdded.value(QStringLiteral("issueCounts")).toObject().value(QStringLiteral("warning")).toInt(), 1);
+    QCOMPARE(mathAdded.value(QStringLiteral("issueCounts")).toObject().value(QStringLiteral("error")).toInt(), 0);
+}
+
 void TestCli::addCardsMultilineRoundTrips() {
     QTemporaryDir dir;
     const QString decks = dir.filePath("decks");
@@ -142,6 +262,9 @@ void TestCli::writeCommandsValidateSerializedDeck() {
     const QJsonObject result = runCli({"add-cards", "-d", badDeck, "-i", input, "--json"}, decks, database, &code);
     QCOMPARE(code, 1);
     QVERIFY(!result.value(QStringLiteral("ok")).toBool(true));
+    QStringList failureKeys{"error", "ok"};
+    failureKeys.sort();
+    QCOMPARE(sortedKeys(result), failureKeys);
     const QString error = result.value(QStringLiteral("error")).toString();
     QVERIFY(error.contains(QStringLiteral("Deck would be invalid after write")));
     QVERIFY(error.contains(QStringLiteral("Hint:")));
@@ -1254,7 +1377,15 @@ void TestCli::flagEqualsFormsMatchSeparateArgs() {
         runCli({"add-cards", "--deck=Bulk", "--input=" + inputEquals, "--json"}, equalsDecks, equalsDb, &codeEquals);
     QCOMPARE(codeSeparate, 0);
     QCOMPARE(codeEquals, 0);
-    QCOMPARE(QJsonDocument(bulkEquals).toJson(), QJsonDocument(bulkSeparate).toJson());
+    // The two isolated decks directories give different absolute paths, so
+    // compare everything except the path and pin each path to its own root.
+    QJsonObject bulkSeparateWithoutPath = bulkSeparate;
+    QJsonObject bulkEqualsWithoutPath = bulkEquals;
+    bulkSeparateWithoutPath.remove(QStringLiteral("path"));
+    bulkEqualsWithoutPath.remove(QStringLiteral("path"));
+    QCOMPARE(QJsonDocument(bulkEqualsWithoutPath).toJson(), QJsonDocument(bulkSeparateWithoutPath).toJson());
+    QCOMPARE(bulkSeparate.value(QStringLiteral("path")).toString(), QDir(separateDecks).filePath("Bulk.txt"));
+    QCOMPARE(bulkEquals.value(QStringLiteral("path")).toString(), QDir(equalsDecks).filePath("Bulk.txt"));
 
     const QJsonObject previewSeparate =
         runCli({"preview", "--deck", "D", "--format", "html", "--json"}, separateDecks, separateDb, &codeSeparate);

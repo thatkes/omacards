@@ -704,6 +704,17 @@ int run(const QStringList &arguments) {
         if (!backend.createCards(options.deck, drafts, &description, &ids, &error))
             return fail(error, json);
 
+        // Reloaded after the write so an implicitly created Deck has the same
+        // stored path that decks --json reports. Only this Deck is linted.
+        QString writtenPath;
+        for (const Deck &deck : backend.allDecks()) {
+            if (deck.name == options.deck.trimmed()) {
+                writtenPath = deck.path;
+                break;
+            }
+        }
+        const DeckIssueReport report = deckIssueReport(backend.decksDirectory(), writtenPath);
+
         QJsonArray idArray;
         for (const QString &id : ids)
             idArray << id;
@@ -712,6 +723,8 @@ int run(const QStringList &arguments) {
         object.insert("deck", options.deck);
         object.insert("created", drafts.size());
         object.insert("ids", idArray);
+        object.insert("path", writtenPath);
+        object.insert("issueCounts", issueCountsJson(report));
         write(object, json, QObject::tr("Added %1 cards to %2").arg(drafts.size()).arg(options.deck));
         return 0;
     }

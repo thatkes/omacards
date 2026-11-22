@@ -63,13 +63,18 @@ inline QString appBinary() {
 }
 
 inline QByteArray runCliRaw(const QStringList &arguments, const QString &decksDir, const QString &stateDb,
-                            int *exitCode = nullptr, QByteArray *standardError = nullptr) {
+                            int *exitCode = nullptr, QByteArray *standardError = nullptr,
+                            const QByteArray *standardInput = nullptr) {
     QProcess process;
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("OMACARDS_DECKS_DIR"), decksDir);
     environment.insert(QStringLiteral("OMACARDS_STATE_DB"), stateDb);
     process.setProcessEnvironment(environment);
     process.start(appBinary(), arguments);
+    if (standardInput) {
+        process.write(*standardInput);
+        process.closeWriteChannel();
+    }
     if (!process.waitForFinished(10000)) {
         if (exitCode)
             *exitCode = -1;
@@ -85,8 +90,10 @@ inline QByteArray runCliRaw(const QStringList &arguments, const QString &decksDi
 }
 
 inline QJsonObject runCli(const QStringList &arguments, const QString &decksDir, const QString &stateDb,
-                          int *exitCode = nullptr, QByteArray *standardError = nullptr) {
-    return QJsonDocument::fromJson(runCliRaw(arguments, decksDir, stateDb, exitCode, standardError)).object();
+                          int *exitCode = nullptr, QByteArray *standardError = nullptr,
+                          const QByteArray *standardInput = nullptr) {
+    return QJsonDocument::fromJson(runCliRaw(arguments, decksDir, stateDb, exitCode, standardError, standardInput))
+        .object();
 }
 
 inline QString runCliText(const QStringList &arguments, const QString &decksDir, const QString &stateDb,

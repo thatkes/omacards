@@ -72,8 +72,13 @@ the command creates the deck (and optional description) if it does not exist.
 omacards add-cards --deck "Calculus" \
   --description "Maclaurin and Taylor series" \
   --input cards.json --json
-# returns {"ok":true,"deck":"Calculus","created":N,"ids":[...]}
+# returns {"ok":true,"deck":"Calculus","created":N,"ids":[...],
+#          "path":".../Calculus.txt","issueCounts":{"error":0,"warning":0}}
 ```
+
+`path` is the stored deck file, the same value `decks --json` reports.
+`issueCounts` covers only this deck after the write, with the same severity
+keys as `check --json`.
 
 `cards.json` accepts either a bare array or an object with a `cards` array and
 an optional `description`. Each card supports `question`, `answer`, `type`
