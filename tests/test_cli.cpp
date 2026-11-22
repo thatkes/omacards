@@ -1619,9 +1619,9 @@ accent = "#445566"
     QCOMPARE(toolchainRenders(argsLog), 2);
 
     MathRenderer verifier(cache);
-    const QString xPath = verifier.mathKey("x^2");
+    const QString xPath = verifier.mathSvgPath("x^2");
     QVERIFY(QFileInfo::exists(xPath));
-    QVERIFY(QFileInfo::exists(verifier.mathKey("y^2")));
+    QVERIFY(QFileInfo::exists(verifier.mathSvgPath("y^2")));
     QCOMPARE(QDir(cache).entryList({"*.svg"}).size(), 2);
     QFile neutral(xPath);
     QVERIFY(neutral.open(QIODevice::ReadOnly));
