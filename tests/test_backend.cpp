@@ -64,6 +64,8 @@ struct MainWindowHarness {
         return window ? window->findChild<QQuickItem *>(objectName) : nullptr;
     }
 
+    QString screenName() const { return window ? window->property("screen").toString() : QString(); }
+
     // Repeater delegates are visual children but not QObject children of the
     // window, so findChild() cannot see help-overlay rows.
     QQuickItem *visualItem(const QString &objectName) const {
@@ -200,6 +202,25 @@ struct StudyViewFixture {
     }
 
     QQuickWindow *window() const { return view ? qobject_cast<QQuickWindow *>(view->window) : nullptr; }
+
+    QString screenName() const { return view ? view->screenName() : QString(); }
+
+    QQuickItem *item(const QString &objectName) const { return view ? view->item(objectName) : nullptr; }
+
+    QVariantMap visualFacts() const { return view ? view->visualFacts() : QVariantMap(); }
+
+    bool flipAndResetStudyScroll() const {
+        return view && QMetaObject::invokeMethod(view->window, "flipAndResetStudyScroll");
+    }
+
+    bool scaleImagesToWidth(const QString &html, double width, QString *out) const {
+        QVariant result;
+        const bool invoked =
+            view && QMetaObject::invokeMethod(view->window, "scaleImagesToWidth", Q_RETURN_ARG(QVariant, result),
+                                              Q_ARG(QVariant, html), Q_ARG(QVariant, width));
+        *out = result.toString();
+        return invoked;
+    }
 
     bool enterStudy(const QString &mode, Sizing sizing = Sizing::Minimum) {
         if (!window() || !QTest::qWaitForWindowExposed(window()))
@@ -724,7 +745,7 @@ void TestBackend::qmlStudySelectorSwitchesDeckFresh() {
     auto *window = fixture.window();
     QVERIFY(window);
     QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
-    auto *selector = fixture.view->item(QStringLiteral("studyDeckSelector"));
+    auto *selector = fixture.item(QStringLiteral("studyDeckSelector"));
     QVERIFY(selector);
     QCOMPARE(selector->property("currentText").toString(), QString("Alpha"));
 
@@ -757,13 +778,13 @@ void TestBackend::qmlStudyScrollViewClipsAndSizes() {
     auto *window = fixture.window();
     QVERIFY(window);
     QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
-    QCOMPARE(fixture.view->window->property("screen").toString(), QStringLiteral("study"));
+    QCOMPARE(fixture.screenName(), QStringLiteral("study"));
 
-    auto *scroll = fixture.view->item(QStringLiteral("studyScrollView"));
-    auto *verticalBar = fixture.view->item(QStringLiteral("studyVerticalScrollBar"));
-    auto *horizontalBar = fixture.view->item(QStringLiteral("studyHorizontalScrollBar"));
-    auto *question = fixture.view->item(QStringLiteral("studyQuestionLabel"));
-    auto *answer = fixture.view->item(QStringLiteral("studyAnswerLabel"));
+    auto *scroll = fixture.item(QStringLiteral("studyScrollView"));
+    auto *verticalBar = fixture.item(QStringLiteral("studyVerticalScrollBar"));
+    auto *horizontalBar = fixture.item(QStringLiteral("studyHorizontalScrollBar"));
+    auto *question = fixture.item(QStringLiteral("studyQuestionLabel"));
+    auto *answer = fixture.item(QStringLiteral("studyAnswerLabel"));
     QVERIFY(scroll && verticalBar && horizontalBar && question && answer);
     QVERIFY(scroll->findChild<QQuickItem *>(QStringLiteral("studyQuestionLabel")));
     QVERIFY(scroll->findChild<QQuickItem *>(QStringLiteral("studyAnswerLabel")));
@@ -780,7 +801,7 @@ void TestBackend::qmlStudyScrollViewClipsAndSizes() {
                                  "studyAgainButton", "studyGoodButton", "reviewGoodLabel"};
     QList<QQuickItem *> fixed;
     for (const QString &name : fixedNames) {
-        QQuickItem *item = fixture.view->item(name);
+        QQuickItem *item = fixture.item(name);
         QVERIFY2(item, qPrintable(name + QStringLiteral(" is missing")));
         QVERIFY2(!scroll->isAncestorOf(item), qPrintable(name + QStringLiteral(" is inside the viewport")));
         fixed << item;
@@ -789,7 +810,7 @@ void TestBackend::qmlStudyScrollViewClipsAndSizes() {
     for (QQuickItem *item : fixed)
         places << visualRect(item);
 
-    QVERIFY(QMetaObject::invokeMethod(fixture.view->window, "flipAndResetStudyScroll"));
+    QVERIFY(fixture.flipAndResetStudyScroll());
     fixture.settle();
     QVERIFY(fixture.backend.showingAnswer());
 
@@ -824,7 +845,7 @@ void TestBackend::qmlStudyScrollFirstKeysAndFlipFallbacks() {
     QVERIFY(window);
     QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
 
-    auto *scroll = fixture.view->item(QStringLiteral("studyScrollView"));
+    auto *scroll = fixture.item(QStringLiteral("studyScrollView"));
     QVERIFY(scroll);
     auto *flickable = scroll->property("contentItem").value<QQuickItem *>();
     QVERIFY(flickable);
@@ -896,11 +917,11 @@ void TestBackend::qmlStudyJKScrollOnlyWithoutOverflow() {
     QVERIFY(window);
     QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
 
-    auto *scroll = fixture.view->item(QStringLiteral("studyScrollView"));
-    auto *verticalBar = fixture.view->item(QStringLiteral("studyVerticalScrollBar"));
-    auto *topFade = fixture.view->item(QStringLiteral("studyTopFade"));
-    auto *bottomFade = fixture.view->item(QStringLiteral("studyBottomFade"));
-    auto *endHint = fixture.view->item(QStringLiteral("studyEndOfScrollHint"));
+    auto *scroll = fixture.item(QStringLiteral("studyScrollView"));
+    auto *verticalBar = fixture.item(QStringLiteral("studyVerticalScrollBar"));
+    auto *topFade = fixture.item(QStringLiteral("studyTopFade"));
+    auto *bottomFade = fixture.item(QStringLiteral("studyBottomFade"));
+    auto *endHint = fixture.item(QStringLiteral("studyEndOfScrollHint"));
     QVERIFY(scroll && verticalBar && topFade && bottomFade && endHint);
     auto *flickable = scroll->property("contentItem").value<QQuickItem *>();
     QVERIFY(flickable);
@@ -948,12 +969,12 @@ void TestBackend::qmlStudyScrollCuesFollowPosition() {
     QVERIFY(window);
     QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
 
-    auto *scroll = fixture.view->item(QStringLiteral("studyScrollView"));
-    auto *verticalBar = fixture.view->item(QStringLiteral("studyVerticalScrollBar"));
-    auto *horizontalBar = fixture.view->item(QStringLiteral("studyHorizontalScrollBar"));
-    auto *topFade = fixture.view->item(QStringLiteral("studyTopFade"));
-    auto *bottomFade = fixture.view->item(QStringLiteral("studyBottomFade"));
-    auto *endHint = fixture.view->item(QStringLiteral("studyEndOfScrollHint"));
+    auto *scroll = fixture.item(QStringLiteral("studyScrollView"));
+    auto *verticalBar = fixture.item(QStringLiteral("studyVerticalScrollBar"));
+    auto *horizontalBar = fixture.item(QStringLiteral("studyHorizontalScrollBar"));
+    auto *topFade = fixture.item(QStringLiteral("studyTopFade"));
+    auto *bottomFade = fixture.item(QStringLiteral("studyBottomFade"));
+    auto *endHint = fixture.item(QStringLiteral("studyEndOfScrollHint"));
     QVERIFY(scroll && verticalBar && horizontalBar && topFade && bottomFade && endHint);
     QCOMPARE(verticalBar->property("policy").toInt(), static_cast<int>(Qt::ScrollBarAsNeeded));
     QCOMPARE(horizontalBar->property("policy").toInt(), static_cast<int>(Qt::ScrollBarAlwaysOff));
@@ -1028,7 +1049,7 @@ void TestBackend::qmlStudyResetsScrollOnFlipAndNewCard() {
     QVERIFY(window);
     QVERIFY(fixture.enterStudy(QStringLiteral("review")));
 
-    auto *scroll = fixture.view->item(QStringLiteral("studyScrollView"));
+    auto *scroll = fixture.item(QStringLiteral("studyScrollView"));
     QVERIFY(scroll);
     auto *flickable = scroll->property("contentItem").value<QQuickItem *>();
     QVERIFY(flickable);
@@ -1075,13 +1096,13 @@ void TestBackend::qmlStudyPointerScrollAndClickFlip() {
     fixture.settle();
     QVERIFY(fixture.backend.showingAnswer());
 
-    auto *scroll = fixture.view->item(QStringLiteral("studyScrollView"));
+    auto *scroll = fixture.item(QStringLiteral("studyScrollView"));
     QVERIFY(scroll);
     auto *flickable = scroll->property("contentItem").value<QQuickItem *>();
     QVERIFY(flickable);
     const QRectF viewportRect = scroll->mapRectToScene(scroll->boundingRect());
     const QPoint center = viewportRect.center().toPoint();
-    auto *clickArea = fixture.view->item(QStringLiteral("studyClickArea"));
+    auto *clickArea = fixture.item(QStringLiteral("studyClickArea"));
     QVERIFY(clickArea);
     const QPoint panelCorner = clickArea->mapRectToScene(clickArea->boundingRect()).topLeft().toPoint() + QPoint(8, 8);
     QVERIFY(window->geometry().contains(center));
@@ -1129,12 +1150,7 @@ void TestBackend::qmlStudyScalesPicturesToWidth() {
     fixture.settle();
 
     auto scale = [&](const QString &html, double width, QString *out) {
-        QVariant result;
-        const bool invoked =
-            QMetaObject::invokeMethod(fixture.view->window, "scaleImagesToWidth", Q_RETURN_ARG(QVariant, result),
-                                      Q_ARG(QVariant, html), Q_ARG(QVariant, width));
-        *out = result.toString();
-        return invoked;
+        return fixture.scaleImagesToWidth(html, width, out);
     };
     auto dimensions = [](const QString &tag) {
         static const QRegularExpression widthPattern(QStringLiteral("\\bwidth\\s*=\\s*[\"']?([0-9.]+)[\"']?"));
@@ -1206,12 +1222,12 @@ void TestBackend::qmlStudyVisualFactsPinLayoutAtMinimumSize() {
     QVERIFY(fixture.enterStudy(QStringLiteral("cram"), QSize(760, 540)));
     QCOMPARE(window->width(), 760);
     QCOMPARE(window->height(), 540);
-    QCOMPARE(fixture.view->window->property("screen").toString(), QStringLiteral("study"));
+    QCOMPARE(fixture.screenName(), QStringLiteral("study"));
 
     const QStringList names{"textInsideContent", "gapToHint",          "gapToRatings",       "scrollRange",
                             "lastLineBottomGap", "horizontalOverflow", "answerContentWidth", "textWidth",
                             "answerFontPixels",  "questionFontPixels"};
-    const QVariantMap questionFacts = fixture.view->visualFacts();
+    const QVariantMap questionFacts = fixture.visualFacts();
     for (const QString &name : names)
         QVERIFY2(questionFacts.contains(name), qPrintable(name + QStringLiteral(" missing in question facts")));
 
@@ -1219,11 +1235,11 @@ void TestBackend::qmlStudyVisualFactsPinLayoutAtMinimumSize() {
     QVERIFY2(questionFacts.value("gapToHint").toDouble() >= 8.0, "question text touches the hint");
     QVERIFY2(questionFacts.value("horizontalOverflow").toDouble() <= 1.0, "horizontal overflow in question state");
 
-    QVERIFY(QMetaObject::invokeMethod(fixture.view->window, "flipAndResetStudyScroll"));
+    QVERIFY(fixture.flipAndResetStudyScroll());
     fixture.settle();
     QVERIFY(fixture.backend.showingAnswer());
 
-    const QVariantMap answerFacts = fixture.view->visualFacts();
+    const QVariantMap answerFacts = fixture.visualFacts();
     for (const QString &name : names)
         QVERIFY2(answerFacts.contains(name), qPrintable(name + QStringLiteral(" missing in answer facts")));
 
@@ -2470,8 +2486,8 @@ void TestBackend::qmlStudyShowsMathPlaceholderUntilSvgArrives() {
     QVERIFY(fixture.loadWindow());
     QVERIFY(fixture.enterStudy(QStringLiteral("review")));
 
-    auto *question = fixture.view->item(QStringLiteral("studyQuestionLabel"));
-    auto *answer = fixture.view->item(QStringLiteral("studyAnswerLabel"));
+    auto *question = fixture.item(QStringLiteral("studyQuestionLabel"));
+    auto *answer = fixture.item(QStringLiteral("studyAnswerLabel"));
     QVERIFY(question);
     QVERIFY(answer);
     fixture.backend.flip();
@@ -2531,7 +2547,7 @@ void TestBackend::qmlStudyRecolorsCachedSvgWhenThemeChanges() {
     QVERIFY(fixture.loadWindow());
     QVERIFY(fixture.enterStudy(QStringLiteral("review")));
 
-    auto *question = fixture.view->item(QStringLiteral("studyQuestionLabel"));
+    auto *question = fixture.item(QStringLiteral("studyQuestionLabel"));
     QVERIFY(question);
     const QString before = question->property("text").toString();
     QVERIFY(before.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
@@ -2574,7 +2590,7 @@ void TestBackend::qmlStudyUsesCachedSvgWithoutPlaceholder() {
     QVERIFY(fixture.loadWindow());
     QVERIFY(fixture.enterStudy(QStringLiteral("review")));
 
-    auto *question = fixture.view->item(QStringLiteral("studyQuestionLabel"));
+    auto *question = fixture.item(QStringLiteral("studyQuestionLabel"));
     QVERIFY(question);
     const QString text = question->property("text").toString();
     QVERIFY(text.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
