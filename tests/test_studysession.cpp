@@ -7,6 +7,7 @@
 #include <QVariantMap>
 
 #include "test_studysession.h"
+#include "test_support.h"
 #include "config.h"
 #include "deck.h"
 #include "deckrepository.h"
@@ -70,34 +71,59 @@ private:
     int m_lastRating = 0;
 };
 
-bool prepareSessionWith(SessionFixture &fixture, StudySession &session, const QString &deckName,
-                        const QStringList &questions, QString *error) {
-    if (!fixture.repo.initialize(error))
+// The planner Store stub comes from #18; the recording stub stays local so
+// each side can fail independently at the StudySession rating seam.
+struct StubSessionFixture {
+    QTemporaryDir dir;
+    Store store;
+    FileHistory history;
+    DeckRepository repo;
+    TestSupport::PlannerStoreStub plannerStore;
+    StudyPlanner planner;
+    RecordingStoreStub ratingStore;
+    RatingRecording ratings;
+    StudySession session;
+    QString current;
+
+    StubSessionFixture()
+        : store(dir.filePath("state.db")), repo(dir.filePath("decks"), store, history), planner(plannerStore),
+          ratings(ratingStore), session(repo, planner, ratings) {}
+};
+
+bool prepareSessionParts(DeckRepository &repo, Store &store, StudyPlanner &planner, StudySession &session,
+                         QString *loadedDeck, const QString &deckName, const QStringList &questions, QString *error) {
+    if (!repo.initialize(error))
         return false;
-    if (!fixture.store.open(error))
+    if (!store.open(error))
         return false;
-    fixture.repo.load(&fixture.current);
-    if (fixture.repo.deckByName("Welcome")) {
-        if (!fixture.repo.removeDeck("Welcome", &fixture.current, error))
+    repo.load(loadedDeck);
+    if (repo.deckByName("Welcome")) {
+        if (!repo.removeDeck("Welcome", loadedDeck, error))
             return false;
     }
-    if (!fixture.repo.createDeck(deckName, &fixture.current, error))
+    if (!repo.createDeck(deckName, loadedDeck, error))
         return false;
     for (const QString &question : questions) {
-        if (!fixture.repo.createCard(deckName, &fixture.current, question, "A " + question, "basic", QString(), error))
+        if (!repo.createCard(deckName, loadedDeck, question, "A " + question, "basic", QString(), error))
             return false;
     }
-    fixture.repo.load(&fixture.current);
-    fixture.planner.setDecks(fixture.repo.deckData());
-    fixture.planner.configure(Config::kDefaultNewPerDay, 0);
+    repo.load(loadedDeck);
+    planner.setDecks(repo.deckData());
+    planner.configure(Config::kDefaultNewPerDay, 0);
     QString storeError;
-    if (!fixture.planner.refresh(&storeError)) {
+    if (!planner.refresh(&storeError)) {
         if (error)
             *error = storeError;
         return false;
     }
     session.rebuild(deckName);
     return true;
+}
+
+bool prepareSessionWith(SessionFixture &fixture, StudySession &session, const QString &deckName,
+                        const QStringList &questions, QString *error) {
+    return prepareSessionParts(fixture.repo, fixture.store, fixture.planner, session, &fixture.current, deckName,
+                               questions, error);
 }
 
 bool prepareSession(SessionFixture &fixture, const QString &deckName, const QStringList &questions, QString *error) {
@@ -349,6 +375,60 @@ void TestStudySession::successfulReviewRefreshesPlanner() {
     const QVariantMap row = fixture.planner.cardList("Refresh", "Q1", "new", "due").first().toMap();
     QCOMPARE(row.value("reps").toInt(), 1);
     QVERIFY(!row.value("isDue").toBool());
+}
+
+void TestStudySession::goodRatingWithFailedRefreshPinsErrorAndDegradedValues() {
+    StubSessionFixture fixture;
+    QString error;
+    QVERIFY(prepareSessionParts(fixture.repo, fixture.store, fixture.planner, fixture.session, &fixture.current,
+                                "RefreshFailure", {"Q1", "Q2"}, &error));
+    QVERIFY(error.isEmpty());
+    QVERIFY(fixture.session.hasCard());
+    QVERIFY(fixture.session.dueCount() > 0);
+
+    QSignalSpy errorSpy(&fixture.session, &StudySession::errorOccurred);
+    const QString rawStoreError = QStringLiteral("refresh read boom");
+    fixture.plannerStore.failReads(rawStoreError);
+
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
+    QCOMPARE(fixture.ratingStore.logCount(), 1); // the Rating itself recorded
+    QCOMPARE(errorSpy.count(), 1);
+    QCOMPARE(errorSpy.first().at(0).toString(), QStringLiteral("Cannot read scheduling state: %1").arg(rawStoreError));
+
+    // A failed refresh invalidates the snapshot: the successful write cannot
+    // leave a usable plan behind, so Q2 shows the degraded values.
+    QCOMPARE(fixture.planner.availableCount(), 0);
+    QCOMPARE(fixture.session.dueCount(), 0);
+    QVERIFY(fixture.session.status().contains(QStringLiteral("predicted recall 100%")));
+}
+
+void TestStudySession::againRatingWithFailedRefreshKeepsPendingRepeat() {
+    AgainDelayGuard guard;
+    qputenv("OMACARDS_AGAIN_DELAY_MS", "1000");
+    StubSessionFixture fixture;
+    QString error;
+    QVERIFY(prepareSessionParts(fixture.repo, fixture.store, fixture.planner, fixture.session, &fixture.current,
+                                "RepeatFailure", {"Q1", "Q2"}, &error));
+    QVERIFY(error.isEmpty());
+    QVERIFY(fixture.session.question().contains(QStringLiteral("Q1")));
+
+    QSignalSpy errorSpy(&fixture.session, &StudySession::errorOccurred);
+    fixture.plannerStore.failReads(QStringLiteral("refresh read boom"));
+
+    QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention));
+    QCOMPARE(fixture.ratingStore.logCount(), 1);
+    QVERIFY(fixture.session.question().contains(QStringLiteral("Q2")));
+
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
+    QCOMPARE(fixture.ratingStore.logCount(), 2);
+    QCOMPARE(errorSpy.count(), 2); // both refreshes after recording fail
+    QCOMPARE(fixture.planner.availableCount(), 0);
+    QCOMPARE(fixture.session.dueCount(), 1); // only the Pending repeat remains
+    QVERIFY(fixture.session.waitingForRepeat());
+    QVERIFY(!fixture.session.hasCard());
+
+    QTRY_VERIFY_WITH_TIMEOUT(fixture.session.question().contains(QStringLiteral("Q1")), 5000);
+    QVERIFY(!fixture.session.waitingForRepeat());
 }
 
 void TestStudySession::reviewStatusOmitsSessionPositionBox() {

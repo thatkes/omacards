@@ -14,6 +14,8 @@ private slots:
     void reviewPassesTypedRatingToRecording();
     void reviewFailuresKeepTranslatedText();
     void successfulReviewRefreshesPlanner();
+    void goodRatingWithFailedRefreshPinsErrorAndDegradedValues();
+    void againRatingWithFailedRefreshKeepsPendingRepeat();
     void reviewStatusOmitsSessionPositionBox();
     void flipAndShowNextToggleAnswer();
     void setStatusDedupesAndReportErrorSignals();

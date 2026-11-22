@@ -10,7 +10,30 @@
 #include <QString>
 #include <QStringList>
 
+#include "studyplanner.h"
+
 namespace TestSupport {
+
+// Stub at the planner's Store seam: a failing read is visible only through
+// lastError(), exactly as it is with the real Store.
+class PlannerStoreStub : public StudyPlanner::StoreAdapter {
+public:
+    void clearError() override { m_error.clear(); }
+    QHash<QString, FsrsState> states() const override {
+        if (!m_readError.isEmpty())
+            m_error = m_readError;
+        return {};
+    }
+    QHash<QString, QString> hashes() const override { return {}; }
+    int newCardsToday(int) const override { return 0; }
+    QString lastError() const override { return m_error; }
+
+    void failReads(const QString &error) { m_readError = error; }
+
+private:
+    QString m_readError;
+    mutable QString m_error;
+};
 
 struct EnvGuard {
     QByteArray decks;
