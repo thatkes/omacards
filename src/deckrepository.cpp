@@ -498,15 +498,7 @@ bool DeckRepository::commitImport(const DeckImport::Result &result, QString *cur
         emit statusMessage(trBackend("Imported 0 cards"));
         return true;
     }
-    // Only a new deck receives an imported description; an existing deck keeps
-    // the description its owner wrote.
-    QString description;
-    const QString *descriptionPtr = nullptr;
-    if (!deckByName(result.deckName) && !result.description.isEmpty()) {
-        description = result.description;
-        descriptionPtr = &description;
-    }
-    if (!createCards(result.deckName, currentDeck, result.cards, descriptionPtr, nullptr, error))
+    if (!createCards(result.deckName, currentDeck, result.cards, nullptr, nullptr, error))
         return false;
     emit statusMessage(trBackend("Imported %1 cards").arg(result.cards.size()));
     return true;
