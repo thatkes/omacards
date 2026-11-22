@@ -16,17 +16,37 @@ jobs:
           fetch-depth: 0
 
       - name: Check commit subjects
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           git fetch --no-tags origin main >/dev/null 2>&1 || true
-          if ! git rev-parse --verify --quiet origin/main >/dev/null; then
-            printf 'origin/main unavailable; skipping commit subject check\n'
-            exit 0
-          fi
-          if [ -z "$(git log --format=%s origin/main..HEAD)" ]; then
-            printf 'No commits in origin/main..HEAD; skipping subject check\n'
-            exit 0
-          fi
-          git log --format=%s origin/main..HEAD | ./bin/check-commit-subject --stdin
+          case "$EVENT_NAME" in
+            pull_request)
+              range="$BASE_SHA..HEAD"
+              ;;
+            push)
+              case "$BEFORE_SHA" in
+                *[!0]*)
+                  range="$BEFORE_SHA..HEAD"
+                  ;;
+                *)
+                  base=$(git merge-base HEAD origin/main 2>/dev/null || true)
+                  if [ -n "$base" ]; then
+                    range="$base..HEAD"
+                  else
+                    range="HEAD~20..HEAD"
+                  fi
+                  ;;
+              esac
+              ;;
+            *)
+              printf 'Unsupported event %s; skipping subject check\n' "$EVENT_NAME"
+              exit 0
+              ;;
+          esac
+          git log --format=%s "$range" | ./bin/check-commit-subject --stdin
 
       - name: Install Qt 6
         run: |
