@@ -10,6 +10,10 @@ omacards is a keyboard-first flashcards app for Omarchy, built for agent-driven 
 A named collection of cards studied together.
 _Avoid_: collection, folder, set
 
+**Current deck**:
+The Deck chosen for study in the current and next Study session. It is moved to the top of the last-studied order when chosen.
+_Avoid_: active deck, selected deck, last studied deck
+
 **Card**:
 A single study item with a question and an answer.
 _Avoid_: note, item
