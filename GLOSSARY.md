@@ -52,6 +52,26 @@ _Avoid_: drill, sprint
 One continuous stretch of study with a queue of cards, a currently shown card, and ratings.
 _Avoid_: sitting, run
 
+**Flashcard**:
+A Card presented in the Study screen.
+_Avoid_: card
+
+**Reveal**:
+Showing the Answer for the current Flashcard in a Study session.
+_Avoid_: flip
+
+**Flashcard viewport**:
+The vertically scrollable area of the Study screen that shows the Question and, when revealed, the Answer.
+_Avoid_: scroll view, card pane
+
+**Scroll boundary**:
+The top or bottom limit of scrollable content in the Flashcard viewport where further scrolling is not possible.
+_Avoid_: edge
+
+**End-of-scroll hint**:
+A Study screen cue shown when revealed scrollable content of the Flashcard viewport is at its bottom Scroll boundary, indicating how Up/Down behave under current key rules.
+_Avoid_: flip hint
+
 **Rating**:
 The learner's judgement of a presented card: Again or Good.
 _Avoid_: grade, score, answer
