@@ -10,9 +10,20 @@
 #include <QString>
 #include <QStringList>
 
+#include "deck.h"
 #include "studyplanner.h"
 
 namespace TestSupport {
+
+inline Card makeCard(const QString &id, const QString &question, const QString &answer,
+                     const QString &deckName = QStringLiteral("Deck")) {
+    Card card;
+    card.id = id;
+    card.question = question;
+    card.answer = answer;
+    card.deck = deckName;
+    return card;
+}
 
 // Stub at the planner's Store seam: a failing read is visible only through
 // lastError(), exactly as it is with the real Store.
