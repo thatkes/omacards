@@ -110,20 +110,6 @@ for arg do svg="$arg"; done
     return writeFakeTool(binDir, "tectonic", tectonicBody) && writeFakeTool(binDir, "pdftocairo", cairoBody);
 }
 
-// The renderer colors the cached master by emitting a data URI. Tests read the
-// SVG back out of that URI instead of inspecting rendered pixels.
-QString svgFromMathHtml(const QString &html) {
-    static const QString prefix = QStringLiteral("<img src='data:image/svg+xml;base64,");
-    const int start = html.indexOf(prefix);
-    if (start < 0)
-        return {};
-    const int end = html.indexOf('\'', start + prefix.size());
-    if (end < 0)
-        return {};
-    const QByteArray encoded = html.mid(start + prefix.size(), end - start - prefix.size()).toLocal8Bit();
-    return QString::fromUtf8(QByteArray::fromBase64(encoded));
-}
-
 bool writeDviToolchain(const QString &binDir, const QString &svg) {
     const QString latexBody = QStringLiteral(R"sh(
 tex=

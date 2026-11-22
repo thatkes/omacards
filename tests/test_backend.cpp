@@ -215,25 +215,6 @@ private:
     }
 };
 
-QString svgFromMathHtml(const QString &html) {
-    static const QString prefix = QStringLiteral("<img src='data:image/svg+xml;base64,");
-    const int start = html.indexOf(prefix);
-    if (start < 0)
-        return {};
-    const int end = html.indexOf('\'', start + prefix.size());
-    if (end < 0)
-        return {};
-    const QByteArray encoded = html.mid(start + prefix.size(), end - start - prefix.size()).toLocal8Bit();
-    return QString::fromUtf8(QByteArray::fromBase64(encoded));
-}
-
-int toolchainRenders(const QString &logPath) {
-    QFile log(logPath);
-    if (!log.open(QIODevice::ReadOnly))
-        return 0;
-    return QString::fromUtf8(log.readAll()).count(QStringLiteral(".tex"));
-}
-
 QString manyCardLines(int count) {
     QString text;
     for (int i = 0; i < count; ++i)
