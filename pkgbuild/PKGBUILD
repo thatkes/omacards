@@ -8,7 +8,10 @@ depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'qt6-wayland' 'xdg-desktop-porta
 makedepends=('gcc' 'make' 'desktop-file-utils')
 optdepends=('unzip: import Anki .apkg packages'
             'tectonic: render LaTeX math as SVG'
-            'pdftocairo: convert rendered math to SVG')
+            'pdftocairo: convert rendered math to SVG'
+            'pdflatex: render LaTeX math as PDF without Tectonic'
+            'latex: render LaTeX math as DVI'
+            'dvisvgm: convert rendered DVI math to SVG')
 source=()
 sha256sums=()
 
