@@ -118,8 +118,8 @@ void DeckRepository::load(QString *currentDeck) {
         *currentDeck = m_deckNames.isEmpty() ? QString() : m_deckNames.first();
 
     // Only prune sidecar rows after a clean, conclusive load. loadAll() skips
-    // deck files it cannot read; pruning then would silently erase their FSRS
-    // progress. An intentional last-deck deletion prunes in removeDeck().
+    // deck files it cannot read; pruning then would silently erase their
+    // Scheduling state. An intentional last-deck deletion prunes in removeDeck().
     if (error.isEmpty() && (!m_decks.isEmpty() || !hadDecks)) {
         QSet<QString> ids;
         for (const Deck &deck : m_decks)

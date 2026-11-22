@@ -29,8 +29,8 @@ inline constexpr int kLeitnerBoxes = 5;
 inline constexpr int kLeitnerIntervals[kLeitnerBoxes] = {1, 2, 4, 8, 16};
 
 // Study days roll over at dayStartHour instead of at midnight. Everything that
-// calls itself "due" or "today" uses these helpers so the library label, the
-// due counts and the daily new-card budget cannot disagree about the boundary.
+// calls itself "due" or "Study day" uses these helpers so the library label, the
+// due counts and the New-card allowance cannot disagree about the boundary.
 // Compare local calendar days, not raw epoch days: dividing by 86400000 would
 // put the boundary at UTC midnight and shift every user by their timezone.
 inline QDate studyDay(qint64 atMs, int dayStartHour) {
@@ -41,7 +41,7 @@ inline bool isDueByDay(qint64 dueMs, qint64 nowMs, int dayStartHour) {
     return studyDay(dueMs, dayStartHour) <= studyDay(nowMs, dayStartHour);
 }
 
-// First instant of the study day containing `atMs`. With a 3 AM rollover, a
+// First instant of the study day containing `atMs`. With a Day-start hour of 3 AM, a
 // clock of 01:00 on Nov 19 starts the Nov 18 study day at 03:00 on Nov 18.
 inline qint64 studyDayStartMs(qint64 atMs, int dayStartHour) {
     const QDateTime shifted = QDateTime::fromMSecsSinceEpoch(atMs).addSecs(-static_cast<qint64>(dayStartHour) * 3600);

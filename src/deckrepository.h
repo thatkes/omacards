@@ -18,7 +18,7 @@ struct Result;
 
 // Owns deck files, in-memory deck data and the file watcher. Scheduling state
 // is read and written through the shared Store; Backend still owns settings,
-// the current selection and all QML-facing state.
+// the Current deck and all QML-facing state.
 class DeckRepository : public QObject {
     Q_OBJECT
 
