@@ -68,6 +68,13 @@ InSessionProgression::NextResult InSessionProgression::next(qint64 now) {
     return result;
 }
 
+QVector<int> InSessionProgression::boxCounts() const {
+    QVector<int> counts(Config::kLeitnerBoxes, 0);
+    for (const CramEntry &entry : m_cramQueue)
+        ++counts[entry.box];
+    return counts;
+}
+
 qint64 InSessionProgression::pendingWait(qint64 now) const {
     qint64 next = 0;
     bool haveNext = false;

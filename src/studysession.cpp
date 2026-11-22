@@ -203,7 +203,7 @@ void StudySession::presentCard() {
         setStatus(tr("Cram · box %1 of %2 · next in %3 cards")
                       .arg(currentBox())
                       .arg(Config::kLeitnerBoxes)
-                      .arg(Config::kLeitnerIntervals[currentBox() - 1]));
+                      .arg(cramNextInCards()));
     }
     emit statsChanged();
     emit cardChanged();

@@ -269,6 +269,25 @@ void TestStudySession::setModeCramSwitchesAndResets() {
     QVERIFY(fixture.session.hasCard());
     QCOMPARE(fixture.session.currentBox(), 1);
     QVERIFY(fixture.session.status().contains("Cram"));
+    QCOMPARE(fixture.session.boxCounts(), QVector<int>({2, 0, 0, 0, 0}));
+    QCOMPARE(fixture.session.cramNextInCards(), 1);
+
+    fixture.session.flip();
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
+    QCOMPARE(fixture.session.boxCounts(), QVector<int>({1, 1, 0, 0, 0}));
+    QCOMPARE(fixture.session.currentBox(), 1);
+
+    fixture.session.flip();
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
+    QCOMPARE(fixture.session.boxCounts(), QVector<int>({0, 2, 0, 0, 0}));
+    QCOMPARE(fixture.session.currentBox(), 2); // the next Flashcard is in Box 2
+    QCOMPARE(fixture.session.cramNextInCards(), 2);
+
+    fixture.session.flip();
+    QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention));
+    QCOMPARE(fixture.session.boxCounts(), QVector<int>({1, 1, 0, 0, 0}));
+    QCOMPARE(fixture.session.currentBox(), 2); // the reset card waits; the other Box 2 card is next
+    QCOMPARE(fixture.session.cramNextInCards(), 2);
 }
 
 void TestStudySession::invalidRatingsAreNoOps() {
@@ -557,13 +576,16 @@ void TestStudySession::statsTextAndMathEngine() {
     QString error;
     QVERIFY(prepareSession(fixture, "Stats", {"Q1", "Q2"}, &error));
 
+    QCOMPARE(fixture.session.boxCounts(), QVector<int>({0, 0, 0, 0, 0}));
     QCOMPARE(fixture.session.statsText(), QString("0 reviewed · 0% Good"));
 
     fixture.session.setMode("cram");
     fixture.session.rebuild("Stats");
     QCOMPARE(fixture.session.currentBox(), 1);
+    QCOMPARE(fixture.session.boxCounts(), QVector<int>({2, 0, 0, 0, 0}));
     fixture.session.flip();
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
+    QCOMPARE(fixture.session.boxCounts(), QVector<int>({1, 1, 0, 0, 0}));
     QCOMPARE(fixture.session.statsText(), QString("1 reviewed · 100% Good"));
 
     fixture.session.flip();

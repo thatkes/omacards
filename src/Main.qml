@@ -40,9 +40,18 @@ ApplicationWindow {
     property string pendingDeck: ""
     property int cardIndex: 0
     property string lastPresentedStudyState: ""
+    readonly property bool cramDistributionVisible: backend.mode === "cram" && cramQueueHasCards()
 
     function withAlpha(color, alpha) {
         return Qt.rgba(color.r, color.g, color.b, alpha)
+    }
+
+    function cramQueueHasCards() {
+        const counts = backend.boxCounts
+        for (let i = 0; i < counts.length; ++i)
+            if (counts[i] > 0)
+                return true
+        return false
     }
 
     function startStudy(mode) {
@@ -1687,6 +1696,7 @@ ApplicationWindow {
                     spacing: 10
 
                     Rectangle {
+                        objectName: "studyFooterDot"
                         width: 8
                         height: 8
                         radius: 4
@@ -1694,6 +1704,8 @@ ApplicationWindow {
                     }
 
                     Label {
+                        objectName: "studyStatusLabel"
+                        visible: win.screen !== "study" || !win.cramDistributionVisible
                         text: win.screen === "study"
                               ? backend.status
                               : backend.currentDeck.length > 0
@@ -1703,6 +1715,50 @@ ApplicationWindow {
                         font.pixelSize: 11
                         elide: Text.ElideRight
                         Layout.maximumWidth: 460
+                    }
+
+                    Row {
+                        id: boxDistributionDisplay
+                        objectName: "boxDistributionDisplay"
+                        visible: win.screen === "study" && win.cramDistributionVisible
+                        spacing: 10
+
+                        Label {
+                            objectName: "cramBoxCount1"
+                            text: qsTr("Box 1: %1").arg(backend.boxCounts[0] || 0)
+                            color: backend.currentBox === 1 ? theme.green : win.muted
+                            font.pixelSize: 11
+                        }
+                        Label {
+                            objectName: "cramBoxCount2"
+                            text: qsTr("Box 2: %1").arg(backend.boxCounts[1] || 0)
+                            color: backend.currentBox === 2 ? theme.green : win.muted
+                            font.pixelSize: 11
+                        }
+                        Label {
+                            objectName: "cramBoxCount3"
+                            text: qsTr("Box 3: %1").arg(backend.boxCounts[2] || 0)
+                            color: backend.currentBox === 3 ? theme.green : win.muted
+                            font.pixelSize: 11
+                        }
+                        Label {
+                            objectName: "cramBoxCount4"
+                            text: qsTr("Box 4: %1").arg(backend.boxCounts[3] || 0)
+                            color: backend.currentBox === 4 ? theme.green : win.muted
+                            font.pixelSize: 11
+                        }
+                        Label {
+                            objectName: "cramBoxCount5"
+                            text: qsTr("Box 5: %1").arg(backend.boxCounts[4] || 0)
+                            color: backend.currentBox === 5 ? theme.green : win.muted
+                            font.pixelSize: 11
+                        }
+                        Label {
+                            objectName: "cramNextInLabel"
+                            text: qsTr("next in %1 cards").arg(backend.cramNextInCards)
+                            color: win.muted
+                            font.pixelSize: 11
+                        }
                     }
 
                     Item { Layout.fillWidth: true }

@@ -36,6 +36,8 @@ public:
 
     NextResult next(qint64 now);
     int currentBox() const { return m_currentBox; }
+    // Box distribution of the live Cram queue, in Box 1 to Box 5 order.
+    QVector<int> boxCounts() const;
 
     void remove(const QString &id);
     void repeatAfter(const QString &id, qint64 notBefore);

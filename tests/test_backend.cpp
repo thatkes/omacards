@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QColor>
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
@@ -132,6 +133,23 @@ struct MainWindowHarness {
     QQmlEngine engine;
     Theme theme;
     QObject *window = nullptr;
+};
+
+// Points the window's Theme at a temporary colors.toml so a live theme change
+// can be tested without touching the real Omarchy theme.
+struct ThemeDirGuard {
+    QByteArray previous;
+
+    explicit ThemeDirGuard(const QString &path) : previous(qgetenv("OMACARDS_THEME_DIR")) {
+        qputenv("OMACARDS_THEME_DIR", path.toUtf8());
+    }
+
+    ~ThemeDirGuard() {
+        if (!previous.isNull())
+            qputenv("OMACARDS_THEME_DIR", previous);
+        else
+            qunsetenv("OMACARDS_THEME_DIR");
+    }
 };
 
 // Shared setup for the study-view tests. The window is still the real Main.qml
@@ -1048,6 +1066,184 @@ void TestBackend::qmlCramLabelUsesCurrentBox() {
     const int current = backend.currentBox();
     QVERIFY(current >= 1);
     QVERIFY(label->property("text").toString().contains(QStringLiteral("BOX %1 OF 5").arg(current)));
+}
+
+void TestBackend::qmlCramBoxDistributionShowsCountsTimingAndHighlight() {
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    QVERIFY(fixture.createCard("Q1", "A1"));
+    QVERIFY(fixture.createCard("Q2", "A2"));
+    QVERIFY(fixture.createCard("Q3", "A3"));
+    fixture.selectDeck();
+    fixture.prepareMode(QStringLiteral("cram"));
+
+    QVERIFY(fixture.loadWindow());
+    QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
+
+    const QVariantList counts = fixture.backend.property("boxCounts").toList();
+    QCOMPARE(counts, QVariantList({3, 0, 0, 0, 0}));
+    QCOMPARE(fixture.backend.property("cramNextInCards").toInt(), 1);
+
+    QQuickItem *display = fixture.view->item(QStringLiteral("boxDistributionDisplay"));
+    QVERIFY(display);
+    QVERIFY(display->isVisible());
+    QQuickItem *status = fixture.view->item(QStringLiteral("studyStatusLabel"));
+    QVERIFY(status);
+    QVERIFY(!status->isVisible()); // only one status format appears at a time
+
+    const QColor green(fixture.view->theme.green());
+    const QColor muted(fixture.view->theme.muted());
+    for (int box = 1; box <= Config::kLeitnerBoxes; ++box) {
+        QQuickItem *label = fixture.view->item(QStringLiteral("cramBoxCount%1").arg(box));
+        QVERIFY2(label, qPrintable(QStringLiteral("cramBoxCount%1 is missing").arg(box)));
+        QCOMPARE(label->property("text").toString(),
+                 QStringLiteral("Box %1: %2").arg(box).arg(counts.at(box - 1).toInt()));
+        QCOMPARE(label->property("color").value<QColor>(), box == 1 ? green : muted);
+    }
+
+    QQuickItem *timing = fixture.view->item(QStringLiteral("cramNextInLabel"));
+    QVERIFY(timing);
+    QCOMPARE(timing->property("text").toString(), QStringLiteral("next in 1 cards"));
+    QCOMPARE(timing->property("color").value<QColor>(), muted);
+
+    QQuickItem *dot = fixture.view->item(QStringLiteral("studyFooterDot"));
+    QVERIFY(dot);
+    QCOMPARE(dot->property("color").value<QColor>(), green);
+}
+
+void TestBackend::qmlCramBoxDistributionFollowsRatings() {
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    QVERIFY(fixture.createCard("Q1", "A1"));
+    QVERIFY(fixture.createCard("Q2", "A2"));
+    fixture.selectDeck();
+    fixture.prepareMode(QStringLiteral("cram"));
+
+    QVERIFY(fixture.loadWindow());
+    QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
+
+    QQuickItem *box1 = fixture.view->item(QStringLiteral("cramBoxCount1"));
+    QQuickItem *box2 = fixture.view->item(QStringLiteral("cramBoxCount2"));
+    QQuickItem *timing = fixture.view->item(QStringLiteral("cramNextInLabel"));
+    QVERIFY(box1 && box2 && timing);
+    const QColor green(fixture.view->theme.green());
+    const QColor muted(fixture.view->theme.muted());
+
+    QCOMPARE(box1->property("text").toString(), QStringLiteral("Box 1: 2"));
+    QCOMPARE(box2->property("text").toString(), QStringLiteral("Box 2: 0"));
+    QCOMPARE(box1->property("color").value<QColor>(), green);
+    QCOMPARE(box2->property("color").value<QColor>(), muted);
+    QCOMPARE(timing->property("text").toString(), QStringLiteral("next in 1 cards"));
+
+    fixture.backend.flip();
+    fixture.backend.rate(3);
+    QCOMPARE(box1->property("text").toString(), QStringLiteral("Box 1: 1"));
+    QCOMPARE(box2->property("text").toString(), QStringLiteral("Box 2: 1"));
+    QCOMPARE(box1->property("color").value<QColor>(), green);
+    QCOMPARE(timing->property("text").toString(), QStringLiteral("next in 1 cards"));
+
+    fixture.backend.flip();
+    fixture.backend.rate(3);
+    QCOMPARE(box1->property("text").toString(), QStringLiteral("Box 1: 0"));
+    QCOMPARE(box2->property("text").toString(), QStringLiteral("Box 2: 2"));
+    QCOMPARE(box2->property("color").value<QColor>(), green);
+    QCOMPARE(box1->property("color").value<QColor>(), muted);
+    QCOMPARE(timing->property("text").toString(), QStringLiteral("next in 2 cards"));
+
+    fixture.backend.flip();
+    fixture.backend.rate(1);
+    QCOMPARE(box1->property("text").toString(), QStringLiteral("Box 1: 1"));
+    QCOMPARE(box2->property("text").toString(), QStringLiteral("Box 2: 1"));
+    QCOMPARE(box2->property("color").value<QColor>(), green); // the next Flashcard, not the reset one
+    QCOMPARE(timing->property("text").toString(), QStringLiteral("next in 2 cards"));
+
+    // A Deck change rebuilds the queue; no stale counts or highlight linger.
+    QVERIFY(fixture.backend.createCard("Study", "Q3", "A3"));
+    fixture.view->settleFileWatcher();
+    QCOMPARE(fixture.backend.property("boxCounts").toList(), QVariantList({3, 0, 0, 0, 0}));
+    QCOMPARE(box1->property("text").toString(), QStringLiteral("Box 1: 3"));
+    QCOMPARE(box2->property("text").toString(), QStringLiteral("Box 2: 0"));
+    QCOMPARE(box1->property("color").value<QColor>(), green);
+    QCOMPARE(timing->property("text").toString(), QStringLiteral("next in 1 cards"));
+}
+
+void TestBackend::qmlCramBoxDistributionIsCramOnlyAndHidesWhenEmpty() {
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    QVERIFY(fixture.createCard("Q1", "A1"));
+    QVERIFY(fixture.createCard("Q2", "A2"));
+    fixture.selectDeck();
+    fixture.prepareMode(QStringLiteral("review"));
+
+    QVERIFY(fixture.loadWindow());
+    QVERIFY(fixture.enterStudy(QStringLiteral("review")));
+    QQuickItem *display = fixture.view->item(QStringLiteral("boxDistributionDisplay"));
+    QQuickItem *status = fixture.view->item(QStringLiteral("studyStatusLabel"));
+    QVERIFY(display && status);
+    QVERIFY(!display->isVisible());
+    QVERIFY(status->isVisible());
+
+    auto *window = fixture.window();
+    QVERIFY(QMetaObject::invokeMethod(window, "startStudy", Q_ARG(QVariant, QStringLiteral("cram"))));
+    fixture.settle();
+    QVERIFY(display->isVisible());
+    QVERIFY(!status->isVisible());
+
+    QVERIFY(QMetaObject::invokeMethod(window, "startStudy", Q_ARG(QVariant, QStringLiteral("review"))));
+    fixture.settle();
+    QVERIFY(!display->isVisible());
+    QVERIFY(status->isVisible());
+
+    StudyViewFixture empty;
+    QVERIFY(empty.initialize());
+    QVERIFY(empty.createDeck());
+    empty.selectDeck();
+    empty.prepareMode(QStringLiteral("cram"));
+    QVERIFY(empty.loadWindow());
+    QVERIFY(empty.enterStudy(QStringLiteral("cram")));
+    QVERIFY(!empty.backend.hasCard());
+    QCOMPARE(empty.backend.property("boxCounts").toList(), QVariantList({0, 0, 0, 0, 0}));
+    QQuickItem *emptyDisplay = empty.view->item(QStringLiteral("boxDistributionDisplay"));
+    QQuickItem *emptyStatus = empty.view->item(QStringLiteral("studyStatusLabel"));
+    QVERIFY(emptyDisplay && emptyStatus);
+    QVERIFY(!emptyDisplay->isVisible());
+    QVERIFY(emptyStatus->isVisible());
+    QVERIFY(emptyStatus->property("text").toString().contains(QStringLiteral("No cards")));
+}
+
+void TestBackend::qmlCramBoxHighlightFollowsThemeChange() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QVERIFY(QDir(dir.path()).mkpath(QStringLiteral("theme")));
+    const QString colors = dir.filePath(QStringLiteral("theme/colors.toml"));
+    QVERIFY(writeFile(colors, "green = \"#112233\"\n"));
+    ThemeDirGuard guard(dir.path());
+
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    QVERIFY(fixture.createCard("Q1", "A1"));
+    fixture.selectDeck();
+    fixture.prepareMode(QStringLiteral("cram"));
+    QVERIFY(fixture.loadWindow());
+    QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
+
+    QCOMPARE(fixture.view->theme.green(), QString("#112233"));
+    QQuickItem *highlight = fixture.view->item(QStringLiteral("cramBoxCount1"));
+    QQuickItem *dot = fixture.view->item(QStringLiteral("studyFooterDot"));
+    QQuickItem *mutedCount = fixture.view->item(QStringLiteral("cramBoxCount2"));
+    QVERIFY(highlight && dot && mutedCount);
+    QCOMPARE(highlight->property("color").value<QColor>(), QColor(QStringLiteral("#112233")));
+    QCOMPARE(dot->property("color").value<QColor>(), QColor(QStringLiteral("#112233")));
+
+    QVERIFY(writeFile(colors, "green = \"#445566\"\n"));
+    QTRY_VERIFY_WITH_TIMEOUT(fixture.view->theme.green() == QStringLiteral("#445566"), 3000);
+    QCOMPARE(highlight->property("color").value<QColor>(), QColor(QStringLiteral("#445566")));
+    QCOMPARE(dot->property("color").value<QColor>(), QColor(QStringLiteral("#445566")));
+    QCOMPARE(mutedCount->property("color").value<QColor>(), QColor(fixture.view->theme.muted()));
 }
 
 void TestBackend::qmlGoodLabelUsesGoodCount() {
