@@ -7,9 +7,9 @@
 #include <QTimer>
 
 // Follows Omarchy's current theme: palette (light or dark), accent, and
-// Hyprland's effective corner rounding. The palette layer follows keymemo
-// (MIT, David Heinemeier Hansson); the watcher re-arms around every change
-// because a theme switch replaces links and files.
+// Hyprland's effective corner rounding. Theme watching follows keymemo and
+// Omacut (MIT, David Heinemeier Hansson); the watcher re-arms around every
+// change because a theme switch replaces links and files.
 class Theme : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString accent READ accent NOTIFY changed)
