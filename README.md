@@ -59,8 +59,8 @@ This is a one-time, global download of Tectonic's TeX bundle (stored in `~/.cach
 
 | Key | Action |
 | --- | --- |
-| `Space`, `Enter`, `Return` | Start a review, flip the card, or continue |
-| `↑`, `↓` | Scroll a long card, or flip when there is no more to scroll |
+| `Space`, `Enter`, `Return` | Start a review, Reveal the Flashcard, or continue |
+| `↑`, `↓` | Scroll a long card, or Reveal the Flashcard when there is no more to scroll |
 | `J` / `K` | Scroll a long card while studying; move the card selection in the library |
 | `1`, `A`, `←` | Again |
 | `2`, `G`, `→` | Good |
@@ -70,7 +70,7 @@ This is a one-time, global download of Tectonic's TeX bundle (stored in `~/.cach
 | `Enter` | Edit the selected card in the library |
 | `Delete` / `Backspace` | Delete the selected card in the library |
 | `/` | Focus library search |
-| `S` | Stats for today and this session |
+| `S` | Stats for this Study day and this Study session |
 | `,` | Settings: New-card allowance, Day-start hour and Desired retention |
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / redo a card or deck edit |
 | `I` | Import a file |
@@ -80,9 +80,9 @@ This is a one-time, global download of Tectonic's TeX bundle (stored in `~/.cach
 | `?`, `F1` | Shortcut overlay |
 | `Q` | Quit |
 
-Closing the window quits the app. While omacards is open, the tray tooltip shows the number of due cards; clicking it opens a review session.
+Closing the window quits the app. While omacards is open, the tray tooltip shows the number of Due cards; clicking it opens a Review Study session.
 
-`B` opens the card browser. It searches questions, answers and tags, and each card can be edited or deleted there. The selected row is highlighted; `J`/`K` (or the arrow keys) move it, `Enter` edits it and `Delete` removes it. Clicking a row selects it, and `/` jumps to the search field. Card and deck edits are undoable with `Ctrl+Z`; `Ctrl+Shift+Z` (or `Ctrl+Y`) redoes them. The same history covers cards added from the GUI, CLI imports and deck deletions. Review answers are intentionally not undoable, so a lapse cannot be erased by accident.
+`B` opens the card browser. It searches questions, answers and tags, and each card can be edited or deleted there. The selected row is highlighted; `J`/`K` (or the arrow keys) move it, `Enter` edits it and `Delete` removes it. Clicking a row selects it, and `/` jumps to the search field. Card and deck edits are undoable with `Ctrl+Z`; `Ctrl+Shift+Z` (or `Ctrl+Y`) redoes them. The same history covers cards added from the GUI, CLI imports and deck deletions. Ratings are intentionally not undoable, so a lapse cannot be erased by accident.
 
 ## Settings
 
@@ -90,13 +90,13 @@ Press `,` (or the gear button) to open the Settings screen. Settings are stored 
 
 ![omacards settings](docs/settings.png)
 
-- **New-card allowance** (default 20) caps how many never-reviewed cards enter a review session. This keeps a large Anki import manageable. Set it to 0 to study only cards that are already in review.
+- **New-card allowance** (default 20) caps how many New cards enter a Review Study session. This keeps a large Anki import manageable. Set it to 0 to study only cards that are already in review.
 - **Day-start hour** (default 00:00) sets when a Study day rolls over. A card due at 22:00 is available from 22:00 on its due date with the default, but waits until 03:00 if you set the Day-start hour to 3 AM. The library, the due counts and the New-card allowance all use this boundary, so an Available card is always in the study queue. A 3 AM rollover helps if you often study just before midnight. The day does not reset until you have had a chance to finish.
-- **Desired retention** (default 90%) is the FSRS target used when intervals are calculated. Higher values shorten intervals and mean more reviews; lower values stretch intervals. The change affects future answers, not existing due dates.
+- **Desired retention** (default 90%) is the probability of recall Review scheduling aims to maintain. Higher values shorten intervals and mean more reviews; lower values stretch intervals. The change affects future Ratings, not existing due dates.
 
 Again repeats come back after a 60-second break in the same session. Set `OMACARDS_AGAIN_DELAY_MS` (milliseconds) to adjust that break; `0` shows the card immediately.
 
-Due reviews are shown before new cards, and new cards follow deck-file order. The tray count and due badge reflect the Available cards in the study queue after the New-card allowance. `omacards config` exposes the same Settings to agents.
+Due cards are shown before New cards, and New cards follow deck-file order. The tray count and due badge reflect the Available cards in the study queue after the New-card allowance. `omacards config` exposes the same Settings to agents.
 
 ## Deck format
 
@@ -117,7 +117,7 @@ type: cloze
 
 Questions and answers may span multiple lines: indent every continuation line with exactly two spaces. `omacards check` reports lines with more indentation as Deck issues.
 
-A card's id is a hash of its deck, question and answer, so editing a card resets its FSRS state but keeps the file readable. An explicit `id:` line pins the identity across edits.
+A card's id is a hash of its deck, question and answer, so editing a card resets its Scheduling state but keeps the file readable. An explicit `id:` line pins the identity across edits.
 
 Anki `.apkg` imports preserve HTML entities, tags, and cloze note types (`{{c1::answer}}`; `::hint` is dropped). Referenced media is extracted next to the deck files under `media/<deck>/` and image sources are rewritten to local `file://` URLs, so images still render in the study view. CSV/TSV files with a `question,answer,tags` header are imported as basic cards.
 
@@ -149,11 +149,11 @@ omacards skill install
 
 `omacards skill install` writes a short agent skill to `~/.agents/skills/omacards/SKILL.md`. Set `OMACARDS_DECKS_DIR` and `OMACARDS_STATE_DB` to isolate data for tests or scripts.
 
-Deck-writing commands (`add-deck`, `add-cards`, `add-card`, `import`, `edit-card` and `delete-card`) reload the file they just wrote and run the same deck checks as `check`. If a write would introduce a hard format error, the previous file is restored (or a newly created deck is removed), no history entry is recorded, and the command exits 1 with an error that includes a fix hint. Advisory warnings, such as duplicate questions or unsupported math macros, do not block a write, and decks that already contain issues can still be edited.
+Deck-writing commands (`add-deck`, `add-cards`, `add-card`, `import`, `edit-card` and `delete-card`) reload the file they just wrote and run the same deck checks as `check`. If a write would introduce an Error, the previous file is restored (or a newly created deck is removed), no history entry is recorded, and the command exits 1 with an Error that includes a fix hint. Warnings, such as duplicate questions or unsupported math macros, do not block a write, and decks that already contain Deck issues can still be edited.
 
 ## Why Leitner for cram?
 
-Cram needs no persistent state, must never end, and should re-show weak cards quickly. A five-box Leitner queue gives exactly that: Good ratings promote a card to a longer card-count interval, Again resets it to box 1, and the queue is refilled forever. FSRS remains the long-term scheduler where spaced intervals and retention targets matter.
+Cram needs no persistent state, must never end, and should re-show weak cards quickly. A queue of five Leitner boxes gives exactly that: Good ratings promote a card to a longer card-count interval, Again resets it to Leitner box 1, and the queue is refilled forever. FSRS remains the long-term scheduler where spaced intervals and Desired retention matter.
 
 ## Layout
 

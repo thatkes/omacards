@@ -36,9 +36,9 @@ command -v omacards
 
 ```sh
 omacards check --json
-omacards check --deck Spanish --json         # scope decks, cards and issues to one deck
-omacards check --math --json                 # advisory math warnings
-omacards check --strict --json               # exit 1 if any issues exist
+omacards check --deck Spanish --json         # scope decks, cards and Deck issues to one deck
+omacards check --math --json                 # math Warnings
+omacards check --strict --json               # exit 1 if any Deck issues exist
 omacards decks --json
 omacards cards --deck Spanish --json
 omacards search gato --json
@@ -124,7 +124,7 @@ id: a1b2c3d4e5f6
 - Keys: `Q:` / `A:` (question / answer), `Answer:` is an alias for `A:`,
   `type: cloze`, `tags: a, b`, and an explicit `id:`.
 - **Continuation lines must start with exactly two spaces.** Three or more
-  leading spaces are reported as an issue by `check`.
+  leading spaces are reported as a Deck issue by `check`.
 - Editing a card without an explicit `id:` line changes its id.
 
 After editing a file by hand, run the **validation loop** below.
@@ -140,7 +140,7 @@ a notation that survives that fallback:
   `\\to`, `\\int`, `\\cdots`. The fallback maps nested `\\frac{a}{b}` to
   `(a)/(b)`, `\\binom{r}{n}` to `C(r,n)`, and `\\sqrt{1+x}` to `√(1+x)`.
 - Unknown macros stay visible and are reported by `check --math`; they are
-  advisory and do not flip `ok`.
+  Warnings and do not flip `ok`.
 - Installing `tectonic` + `pdftocairo` enables real LaTeX SVG rendering; omit
   those dependencies to keep the Unicode fallback as the default. On Arch/Omarchy:
   `sudo pacman -S tectonic poppler` (poppler provides `pdftocairo`), then prewarm
@@ -161,15 +161,15 @@ After authoring or editing a deck:
 
 ```sh
 omacards preview --deck "My Deck" --format text --json   # see rendered math
-omacards check --math --json                             # advisory math warnings
-omacards check --json                                    # syntax + issues
+omacards check --math --json                             # math Warnings
+omacards check --json                                    # syntax + Deck issues
 ```
 
 Read `issues` from `check --json`: each entry has `path`, optional `line` and
 `card`, a `severity` (`error` or `warning`), `message`, and a concrete `hint`.
-The `issueCounts` object summarizes errors and warnings. `ok` is false only for
-hard errors; `--strict` exits 1 whenever any issue exists, which is useful in
-scripts. Fix line-numbered issues and re-run until the deck is clean.
+The `issueCounts` object summarizes Errors and Warnings. `ok` is false only for
+Errors; `--strict` exits 1 whenever any Deck issue exists, which is useful in
+scripts. Fix line-numbered Deck issues and re-run until the deck is clean.
 
 ## Development
 
@@ -186,14 +186,14 @@ scripts. Fix line-numbered issues and re-run until the deck is clean.
 
 ## Scheduling settings
 
-`omacards config` reads the daily new-card limit, the study-day start hour and
-FSRS desired retention. Use `--new-per-day N`, `--day-start-hour H` (0–23,
-default 0) and `--retention R` (0.70–0.99) to change them. A card is due once
-the study day containing its FSRS due time has begun: with `--day-start-hour 3`,
-a card due at 22:00 waits until 03:00 the next calendar day. The same boundary
-governs "reviews today", streaks and the daily new-card budget. `due`, `check`
-and `stats` already account for the daily new-card limit. `totalDue` in their
-JSON is the unclamped count.
+`omacards config` reads the New-card allowance, the Day-start hour and Desired
+retention. Use `--new-per-day N`, `--day-start-hour H` (0–23, default 0) and
+`--retention R` (0.70–0.99) to change them. A card is due once the Study day
+containing its FSRS due time has begun: with `--day-start-hour 3`, a card due at
+22:00 waits until 03:00 the next Study day. The same boundary governs Ratings on
+the Study day, Streaks and the New-card allowance. `due`, `check` and `stats`
+already account for the New-card allowance. `totalDue` in their JSON is the
+unclamped count.
 
 Editing a card without an explicit `id:` line changes its id, so use the id
 returned by `edit-card` for any follow-up `review` or `delete-card`.
