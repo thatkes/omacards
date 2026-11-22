@@ -138,7 +138,7 @@ struct MainWindowHarness {
 // loaded by MainWindowHarness; this only owns the temp dir, Backend and card
 // setup that every study test used to repeat.
 struct StudyViewFixture {
-    enum class Sizing { Minimum, Keep };
+    enum class Sizing { Minimum, KeepWindowSize };
 
     StudyViewFixture() : backend(dir.path(), dir.filePath("state.db")) {}
 
@@ -680,7 +680,7 @@ void TestBackend::qmlStudyRatingKeysKeepTheirMeaning() {
         QVERIFY(fixture.loadWindow());
         auto *window = fixture.window();
         QVERIFY(window);
-        QVERIFY(fixture.enterStudy(QStringLiteral("review"), StudyViewFixture::Sizing::Keep));
+        QVERIFY(fixture.enterStudy(QStringLiteral("review"), StudyViewFixture::Sizing::KeepWindowSize));
 
         QTest::keyClick(window, Qt::Key_Space);
         fixture.settle();
