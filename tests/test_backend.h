@@ -19,6 +19,8 @@ private slots:
     void qmlCanNavigateLibraryCards();
     void qmlStudyScrollViewClipsAndSizes();
     void qmlStudyScrollFirstKeysAndFlipFallbacks();
+    void qmlStudyJKScrollOnlyWithoutOverflow();
+    void qmlStudyScrollCuesFollowPosition();
     void qmlStudyRatingKeysKeepTheirMeaning();
     void qmlStudyResetsScrollOnFlipAndNewCard();
     void qmlStudyPointerScrollAndClickFlip();

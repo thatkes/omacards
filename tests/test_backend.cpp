@@ -649,23 +649,134 @@ void TestBackend::qmlStudyScrollFirstKeysAndFlipFallbacks() {
 
     flickable->setProperty("contentY", 0.0);
     fixture.settle();
-    press(Qt::Key_K); // at the top, K flips
-    QVERIFY(!fixture.backend.showingAnswer());
-    press(Qt::Key_J); // the short question cannot scroll, so J flips
+    press(Qt::Key_K); // K only scrolls, so it cannot flip at the top
     QVERIFY(fixture.backend.showingAnswer());
+    QCOMPARE(position(), qreal(0));
     flickable->setProperty("contentY", maxPosition());
     fixture.settle();
+    press(Qt::Key_J); // J only scrolls, so it cannot flip at the bottom
+    QVERIFY(fixture.backend.showingAnswer());
+    QCOMPARE(position(), maxPosition());
     press(Qt::Key_Down); // at the bottom, Down flips
     QVERIFY(!fixture.backend.showingAnswer());
+    press(Qt::Key_Up); // at the top, Up flips
+    QVERIFY(fixture.backend.showingAnswer());
 
     flickable->setProperty("contentY", 0.0);
     press(Qt::Key_Space);
-    QVERIFY(fixture.backend.showingAnswer());
-    press(Qt::Key_Return);
     QVERIFY(!fixture.backend.showingAnswer());
-    press(Qt::Key_Enter);
+    press(Qt::Key_Return);
     QVERIFY(fixture.backend.showingAnswer());
-    QVERIFY(position() < 1.0);
+    press(Qt::Key_Enter);
+    QVERIFY(!fixture.backend.showingAnswer());
+    QCOMPARE(position(), qreal(0));
+}
+
+void TestBackend::qmlStudyJKScrollOnlyWithoutOverflow() {
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    QVERIFY(fixture.createCard("Short question", "Short answer"));
+    fixture.selectDeck();
+    fixture.prepareMode(QStringLiteral("cram"));
+
+    QVERIFY(fixture.loadWindow());
+    auto *window = fixture.window();
+    QVERIFY(window);
+    QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
+
+    auto *scroll = fixture.view->item(QStringLiteral("studyScrollView"));
+    auto *verticalBar = fixture.view->item(QStringLiteral("studyVerticalScrollBar"));
+    auto *topFade = fixture.view->item(QStringLiteral("studyTopFade"));
+    auto *bottomFade = fixture.view->item(QStringLiteral("studyBottomFade"));
+    auto *endHint = fixture.view->item(QStringLiteral("studyEndOfScrollHint"));
+    QVERIFY(scroll && verticalBar && topFade && bottomFade && endHint);
+    auto *flickable = scroll->property("contentItem").value<QQuickItem *>();
+    QVERIFY(flickable);
+    QVERIFY(flickable->property("contentHeight").toReal() <= flickable->height() + 1.0);
+
+    auto noCues = [&] {
+        fixture.settle();
+        QVERIFY(verticalBar->property("size").toDouble() >= 0.99);
+        QVERIFY(!topFade->property("visible").toBool());
+        QVERIFY(!bottomFade->property("visible").toBool());
+        QVERIFY(!endHint->property("visible").toBool());
+    };
+    noCues();
+
+    auto press = [&](Qt::Key key) {
+        QTest::keyClick(window, key);
+        fixture.settle();
+    };
+    press(Qt::Key_J);
+    QVERIFY(!fixture.backend.showingAnswer());
+    press(Qt::Key_K);
+    QVERIFY(!fixture.backend.showingAnswer());
+    QCOMPARE(flickable->property("contentY").toReal(), qreal(0));
+
+    press(Qt::Key_Space);
+    QVERIFY(fixture.backend.showingAnswer());
+    noCues();
+
+    press(Qt::Key_J);
+    press(Qt::Key_K);
+    QVERIFY(fixture.backend.showingAnswer());
+    QCOMPARE(flickable->property("contentY").toReal(), qreal(0));
+}
+
+void TestBackend::qmlStudyScrollCuesFollowPosition() {
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    QVERIFY(fixture.createCard(manyCardLines(30), manyCardLines(40)));
+    fixture.selectDeck();
+    fixture.prepareMode(QStringLiteral("cram"));
+
+    QVERIFY(fixture.loadWindow());
+    auto *window = fixture.window();
+    QVERIFY(window);
+    QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
+
+    auto *scroll = fixture.view->item(QStringLiteral("studyScrollView"));
+    auto *verticalBar = fixture.view->item(QStringLiteral("studyVerticalScrollBar"));
+    auto *horizontalBar = fixture.view->item(QStringLiteral("studyHorizontalScrollBar"));
+    auto *topFade = fixture.view->item(QStringLiteral("studyTopFade"));
+    auto *bottomFade = fixture.view->item(QStringLiteral("studyBottomFade"));
+    auto *endHint = fixture.view->item(QStringLiteral("studyEndOfScrollHint"));
+    QVERIFY(scroll && verticalBar && horizontalBar && topFade && bottomFade && endHint);
+    QCOMPARE(verticalBar->property("policy").toInt(), static_cast<int>(Qt::ScrollBarAsNeeded));
+    QCOMPARE(horizontalBar->property("policy").toInt(), static_cast<int>(Qt::ScrollBarAlwaysOff));
+    QCOMPARE(endHint->property("text").toString(), QStringLiteral("At end — ↑/↓ flips card"));
+
+    auto *flickable = scroll->property("contentItem").value<QQuickItem *>();
+    QVERIFY(flickable);
+    auto maxPosition = [&] {
+        return qMax<qreal>(0.0, flickable->property("contentHeight").toReal() - flickable->height());
+    };
+    auto expectCues = [&](bool topFadeVisible, bool bottomFadeVisible, bool hintVisible, bool barHasOverflow) {
+        fixture.settle();
+        QCOMPARE(topFade->property("visible").toBool(), topFadeVisible);
+        QCOMPARE(bottomFade->property("visible").toBool(), bottomFadeVisible);
+        QCOMPARE(endHint->property("visible").toBool(), hintVisible);
+        QCOMPARE(verticalBar->property("size").toDouble() < 0.99, barHasOverflow);
+    };
+
+    expectCues(false, true, false, true); // the first question overflows at the top
+
+    flickable->setProperty("contentY", maxPosition());
+    expectCues(true, false, false, true); // no hint before Reveal, even at the bottom
+
+    QTest::keyClick(window, Qt::Key_Space);
+    expectCues(false, true, false, true); // Reveal resets scroll to the top
+
+    flickable->setProperty("contentY", maxPosition() / 2);
+    expectCues(true, true, false, true);
+
+    flickable->setProperty("contentY", maxPosition());
+    expectCues(true, false, true, true); // the hint appears only at the bottom of revealed content
+
+    QTest::keyClick(window, Qt::Key_Space);
+    expectCues(false, true, false, true); // flip resets scroll to the top of the question
 }
 
 void TestBackend::qmlStudyRatingKeysKeepTheirMeaning() {
