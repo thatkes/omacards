@@ -19,6 +19,7 @@ private slots:
     void qmlCanNavigateLibraryCards();
     void qmlDeckSelectorShowsCurrentDeckAndCounts();
     void qmlDeckCycleKeysWrapAndAreScoped();
+    void qmlHelpOverlayNamesDeckSelector();
     void qmlStudySelectorSwitchesDeckFresh();
     void qmlStudyScrollViewClipsAndSizes();
     void qmlStudyScrollFirstKeysAndFlipFallbacks();

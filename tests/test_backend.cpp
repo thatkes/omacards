@@ -63,6 +63,22 @@ struct MainWindowHarness {
         return window ? window->findChild<QQuickItem *>(objectName) : nullptr;
     }
 
+    // Repeater delegates are visual children but not QObject children of the
+    // window, so findChild() cannot see help-overlay rows.
+    QQuickItem *visualItem(const QString &objectName) const {
+        auto *qwindow = qobject_cast<QQuickWindow *>(window);
+        if (!qwindow)
+            return nullptr;
+        QList<QQuickItem *> pending{qwindow->contentItem()};
+        while (!pending.isEmpty()) {
+            QQuickItem *current = pending.takeLast();
+            if (current->objectName() == objectName)
+                return current;
+            pending.append(current->childItems());
+        }
+        return nullptr;
+    }
+
     // Geometry-only facts for the loaded study panel. All rects are mapped
     // through real QML items; text measured inside the scroll content, and
     // gaps measured against the clipped viewport, so a long answer that is
@@ -647,6 +663,33 @@ void TestBackend::qmlDeckCycleKeysWrapAndAreScoped() {
     QVERIFY(QMetaObject::invokeMethod(view.window, "goHome"));
     press(Qt::Key_B);
     QCOMPARE(view.window->property("screen").toString(), QString("library"));
+}
+
+void TestBackend::qmlHelpOverlayNamesDeckSelector() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Alpha", &error));
+    backend.selectDeck("Alpha");
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+
+    QQuickItem *row = view.visualItem(QStringLiteral("helpDeckSelectorRow"));
+    QVERIFY(row);
+    QVERIFY(!row->isVisible());
+
+    view.window->setProperty("helpVisible", true);
+    view.settle();
+    QVERIFY(row->isVisible());
+
+    QQuickItem *line = view.visualItem(QStringLiteral("helpDeckSelectorRowText"));
+    QVERIFY(line);
+    const QString text = line->property("text").toString();
+    QVERIFY2(text.contains(QStringLiteral("Deck selector")), qPrintable(text));
+    QVERIFY2(text.contains(QStringLiteral("Home")), qPrintable(text));
+    QVERIFY2(text.contains(QStringLiteral("Study header")), qPrintable(text));
 }
 
 void TestBackend::qmlStudySelectorSwitchesDeckFresh() {
