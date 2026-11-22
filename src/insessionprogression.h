@@ -30,7 +30,7 @@ public:
 
     void clear();
 
-    void buildReview(const QStringList &dueIds, const QStringList &freshIds = {},
+    void buildReview(const QStringList &dueIds, const QStringList &newIds = {},
                      const QHash<QString, qint64> &pending = {});
     void buildCram(const QVector<Card> &orderedCards);
 

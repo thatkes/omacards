@@ -117,10 +117,10 @@ void TestStudyPlanner::noDecksIsSafe() {
     verifyEmptyState(planner.stateFor(card));
 
     QStringList dueIds;
-    QStringList freshIds;
-    planner.reviewIds("Missing", &dueIds, &freshIds);
+    QStringList newIds;
+    planner.reviewIds("Missing", &dueIds, &newIds);
     QVERIFY(dueIds.isEmpty());
-    QVERIFY(freshIds.isEmpty());
+    QVERIFY(newIds.isEmpty());
 
     QVERIFY(planner.deckSummaries(QString()).isEmpty());
     QVERIFY(planner.cardList(QString(), "needle", "new", "due").isEmpty());
@@ -501,22 +501,22 @@ void TestStudyPlanner::reviewIdsFollowAvailabilityOrder() {
     QVERIFY(planner.refresh(&error));
 
     QStringList dueIds;
-    QStringList freshIds;
-    planner.reviewIds("Order", &dueIds, &freshIds);
+    QStringList newIds;
+    planner.reviewIds("Order", &dueIds, &newIds);
     QCOMPARE(dueIds, QStringList({"d1", "d2"}));
-    QCOMPARE(freshIds, QStringList({"f1", "f2"}));
+    QCOMPARE(newIds, QStringList({"f1", "f2"}));
 
     dueIds.clear();
-    freshIds.clear();
-    planner.reviewIds(QString(), &dueIds, &freshIds);
+    newIds.clear();
+    planner.reviewIds(QString(), &dueIds, &newIds);
     QCOMPARE(dueIds, QStringList({"d1", "d2"}));
-    QCOMPARE(freshIds, QStringList({"f1", "f2"}));
+    QCOMPARE(newIds, QStringList({"f1", "f2"}));
 
     dueIds.clear();
-    freshIds.clear();
-    planner.reviewIds("NoSuchDeck", &dueIds, &freshIds);
+    newIds.clear();
+    planner.reviewIds("NoSuchDeck", &dueIds, &newIds);
     QVERIFY(dueIds.isEmpty());
-    QVERIFY(freshIds.isEmpty());
+    QVERIFY(newIds.isEmpty());
 }
 
 void TestStudyPlanner::cardListFiltersAndFormats() {

@@ -45,9 +45,9 @@ void StudySession::rebuild(const QString &deckName) {
         m_progression.buildCram(ordered);
     } else if (deck) {
         QStringList dueIds;
-        QStringList freshIds;
-        m_planner.reviewIds(deckName, &dueIds, &freshIds);
-        m_progression.buildReview(dueIds, freshIds, pending);
+        QStringList newIds;
+        m_planner.reviewIds(deckName, &dueIds, &newIds);
+        m_progression.buildReview(dueIds, newIds, pending);
     } else {
         m_progression.clear();
     }

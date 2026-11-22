@@ -37,7 +37,7 @@ void TestInSessionProgression::nextResultCarriesKindCardWaitAndLeitnerBox() {
 
 void TestInSessionProgression::reviewOrderComesFromNextResults() {
     InSessionProgression progression;
-    progression.buildReview({QStringLiteral("due1"), QStringLiteral("due2")}, {QStringLiteral("fresh1")});
+    progression.buildReview({QStringLiteral("due1"), QStringLiteral("due2")}, {QStringLiteral("new1")});
 
     const InSessionProgression::NextResult first = progression.next(1000);
     QCOMPARE(first.kind, InSessionProgression::Next::Ready);
@@ -45,7 +45,7 @@ void TestInSessionProgression::reviewOrderComesFromNextResults() {
     QCOMPARE(first.waitMs, qint64(0));
     QCOMPARE(first.box, 0); // Review has no Leitner box
     QCOMPARE(progression.next(1000).cardId, QStringLiteral("due2"));
-    QCOMPARE(progression.next(1000).cardId, QStringLiteral("fresh1"));
+    QCOMPARE(progression.next(1000).cardId, QStringLiteral("new1"));
 
     const InSessionProgression::NextResult done = progression.next(1000);
     QCOMPARE(done.kind, InSessionProgression::Next::Finished);

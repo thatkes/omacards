@@ -52,7 +52,7 @@ public:
     int deckDue(int deckIndex) const;
     int deckNew(int deckIndex) const;
     QVector<Card> dueCards(const QString &deckName = {}) const;
-    void reviewIds(const QString &deckName, QStringList *dueIds, QStringList *freshIds) const;
+    void reviewIds(const QString &deckName, QStringList *dueIds, QStringList *newIds) const;
     QVariantList deckSummaries(const QString &currentDeck) const;
     QVariantList cardList(const QString &currentDeck, const QString &filter, const QString &newText,
                           const QString &dueText) const;

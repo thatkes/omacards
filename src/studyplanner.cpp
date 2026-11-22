@@ -139,14 +139,14 @@ QVector<Card> StudyPlanner::dueCards(const QString &deckName) const {
     return cards;
 }
 
-void StudyPlanner::reviewIds(const QString &deckName, QStringList *dueIds, QStringList *freshIds) const {
+void StudyPlanner::reviewIds(const QString &deckName, QStringList *dueIds, QStringList *newIds) const {
     const Availability available = availability(deckName);
     // Due reviews come first so lapses are not hidden behind new material;
     // new cards then follow in deck-file order up to the daily limit.
     for (const Card &card : available.due)
         dueIds->append(card.id);
     for (const Card &card : available.fresh)
-        freshIds->append(card.id);
+        newIds->append(card.id);
 }
 
 QVariantList StudyPlanner::deckSummaries(const QString &currentDeck) const {

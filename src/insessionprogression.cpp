@@ -11,11 +11,11 @@ void InSessionProgression::clear() {
     m_currentBox = 0;
 }
 
-void InSessionProgression::buildReview(const QStringList &dueIds, const QStringList &freshIds,
+void InSessionProgression::buildReview(const QStringList &dueIds, const QStringList &newIds,
                                        const QHash<QString, qint64> &pending) {
     clear();
     m_reviewQueue = dueIds;
-    m_reviewQueue << freshIds;
+    m_reviewQueue << newIds;
     for (auto it = pending.constBegin(); it != pending.constEnd(); ++it) {
         // A repeat's FSRS due date is in the future, so it is not part of the
         // database-derived queue; keep it as session-only work with its
