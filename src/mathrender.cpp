@@ -206,8 +206,8 @@ struct RenderClaim {
 // has to release the key so later expressions can use the worker slot.
 class MathRenderRunnable : public QRunnable {
 public:
-    MathRenderRunnable(QPointer<MathRenderer> owner, const MathRenderer::RenderRequest &request)
-        : m_owner(owner), m_request(request) {}
+    MathRenderRunnable(QPointer<MathRenderer> owner, const MathRenderer::RenderRequest &request, quint64 generation)
+        : m_owner(owner), m_request(request), m_generation(generation) {}
 
     void run() override {
         MathRenderer *owner = m_owner.data();
@@ -217,12 +217,17 @@ public:
         const QString html =
             path.isEmpty() ? QString() : mathImageHtml(path, m_request.expression, m_request.ink, m_request.scale);
         QMetaObject::invokeMethod(
-            owner, [owner, key = m_request.key, html] { owner->finishRender(key, html); }, Qt::QueuedConnection);
+            owner,
+            [owner, key = m_request.key, html, generation = m_generation] {
+                owner->finishRender(key, html, generation);
+            },
+            Qt::QueuedConnection);
     }
 
 private:
     QPointer<MathRenderer> m_owner;
     MathRenderer::RenderRequest m_request;
+    quint64 m_generation;
 };
 
 MathRenderer::MathRenderer(const QString &cacheDirectory, QObject *parent)
@@ -369,13 +374,27 @@ void MathRenderer::prefetch(const QString &text, const QString &ink, double scal
 void MathRenderer::clearPendingMath() {
     m_queue.clear();
     m_queuedKeys.clear();
+    // A worker already running keeps its slot, but its markup belongs to the
+    // old theme. finishRender detects the generation change and recolors from
+    // the neutral SVG the worker is about to write.
+    ++m_generation;
 }
 
 void MathRenderer::enqueueExpression(const RenderRequest &request) {
     constexpr int kMaxQueued = 12;
     if (QFileInfo::exists(mathKey(request.expression)))
         return;
-    if (m_queuedKeys.contains(request.key) || m_activeKeys.contains(request.key))
+    if (m_activeKeys.contains(request.key)) {
+        // The slot is taken. Remember the first request for this generation so
+        // an invalidated result can be rebuilt with the ink now on screen. A
+        // second caller in the same generation must not steal the style.
+        if (m_activeRequestGenerations.value(request.key) != m_generation) {
+            m_activeRequests.insert(request.key, request);
+            m_activeRequestGenerations.insert(request.key, m_generation);
+        }
+        return;
+    }
+    if (m_queuedKeys.contains(request.key))
         return;
     while (m_queue.size() >= kMaxQueued)
         m_queuedKeys.remove(m_queue.dequeue().key);
@@ -394,7 +413,9 @@ void MathRenderer::startNextRender() {
         if (m_activeKeys.contains(request.key))
             continue;
         m_activeKeys.insert(request.key);
-        m_pool.start(new MathRenderRunnable(this, request));
+        m_activeRequests.insert(request.key, request);
+        m_activeRequestGenerations.insert(request.key, m_generation);
+        m_pool.start(new MathRenderRunnable(this, request, m_generation));
     }
 }
 
@@ -402,11 +423,22 @@ QString MathRenderer::renderRequest(const RenderRequest &request) {
     return renderLatex(request.expression);
 }
 
-void MathRenderer::finishRender(const QString &key, const QString &html) {
+void MathRenderer::finishRender(const QString &key, const QString &html, quint64 generation) {
     if (!m_activeKeys.remove(key))
         return;
-    if (!html.isEmpty())
-        emit mathRendered(key, html);
+    const RenderRequest request = m_activeRequests.take(key);
+    m_activeRequestGenerations.remove(key);
+    QString result = html;
+    if (generation != m_generation) {
+        // The theme changed while this worker ran. Its SVG is neutral and now
+        // cached, so renderExpression only rebuilds the data URI; no toolchain
+        // runs on a theme switch.
+        result = QFileInfo::exists(mathKey(request.expression))
+                     ? renderExpression(request.expression, request.ink, request.scale)
+                     : QString();
+    }
+    if (!result.isEmpty())
+        emit mathRendered(key, result);
     startNextRender();
 }
 
