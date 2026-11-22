@@ -12,19 +12,11 @@ LOG="$ROOT/build/tests/last-run.log"
 status=0
 QT_QPA_PLATFORM=offscreen ./omacards_tests "$@" > "$LOG" 2>&1 || status=$?
 cat "$LOG"
-awk '
-  /^(FAIL|QFATAL)/ { failures = failures $0 "\n" }
-  /^Totals:/ {
-    passed += $2
-    failed += $4
-    skipped += $6
-    blacklisted += $8
-    suites++
-  }
-  END {
-    printf "ALL: %d passed, %d failed, %d skipped, %d blacklisted across %d suites\n", passed, failed, skipped, blacklisted, suites
-    if (failures != "")
-      printf "\nFailures:\n%s", failures
-  }
-' "$LOG"
-exit "$status"
+set +e
+"$ROOT/bin/check-test-summary" "$LOG"
+summary_status=$?
+set -e
+if [ "$status" -ne 0 ]; then
+    exit "$status"
+fi
+exit "$summary_status"
