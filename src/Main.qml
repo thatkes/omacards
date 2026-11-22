@@ -5,7 +5,7 @@ import QtQuick.Layouts
 
 // Main.qml map. Names, not line numbers, so this stays true after edits.
 // keyHandler - one Keys.onPressed for every screen
-// study - study Panel with Question and Answer labels, and the flip MouseArea
+// study - study Panel with the Flashcard viewport, edge fades, end hint and flip MouseArea
 // library - deckList and cardView ListViews
 // settings - ScrollView
 // help overlay - keyboard Repeater
@@ -486,15 +486,21 @@ ApplicationWindow {
                         event.accepted = true
                         break
                     case Qt.Key_Up:
-                    case Qt.Key_K:
                         if (!win.scrollStudy(-1))
                             win.flipAndResetStudyScroll()
                         event.accepted = true
                         break
                     case Qt.Key_Down:
-                    case Qt.Key_J:
                         if (!win.scrollStudy(1))
                             win.flipAndResetStudyScroll()
+                        event.accepted = true
+                        break
+                    case Qt.Key_K:
+                        win.scrollStudy(-1)
+                        event.accepted = true
+                        break
+                    case Qt.Key_J:
+                        win.scrollStudy(1)
                         event.accepted = true
                         break
                     case Qt.Key_1:
@@ -777,63 +783,135 @@ ApplicationWindow {
                                         font.letterSpacing: 1.5
                                     }
 
-                                    ScrollView {
-                                        id: studyViewport
-                                        objectName: "studyScrollView"
+                                    Item {
+                                        id: studyViewportFrame
                                         Layout.fillWidth: true
                                         Layout.fillHeight: true
                                         visible: backend.hasCard
-                                        clip: true
-                                        contentWidth: width
-                                        contentHeight: studyText.implicitHeight
-                                        ScrollBar.horizontal.objectName: "studyHorizontalScrollBar"
-                                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-                                        ScrollBar.vertical.objectName: "studyVerticalScrollBar"
 
-                                        Item {
-                                            width: studyViewport.width
-                                            height: studyText.implicitHeight
+                                        ScrollView {
+                                            id: studyViewport
+                                            objectName: "studyScrollView"
+                                            anchors.fill: parent
+                                            visible: backend.hasCard
+                                            clip: true
+                                            contentWidth: width
+                                            contentHeight: studyText.implicitHeight
+                                            ScrollBar.horizontal.objectName: "studyHorizontalScrollBar"
+                                            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                                            ScrollBar.vertical.objectName: "studyVerticalScrollBar"
+                                            ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
-                                            Column {
-                                                id: studyText
-                                                objectName: "studyTextColumn"
-                                                anchors.horizontalCenter: parent.horizontalCenter
-                                                width: Math.min(studyViewport.width - 96, 660)
-                                                spacing: 18
+                                            readonly property bool contentOverflows: {
+                                                const flick = contentItem
+                                                return !!flick && flick.contentHeight > flick.height + 1
+                                            }
+                                            readonly property bool canScrollUp: {
+                                                const flick = contentItem
+                                                return !!flick && flick.contentY > 1
+                                            }
+                                            readonly property bool canScrollDown: {
+                                                const flick = contentItem
+                                                return !!flick
+                                                       && flick.contentY < flick.contentHeight - flick.height - 1
+                                            }
 
-                                                Label {
-                                                    objectName: "studyQuestionLabel"
-                                                    width: parent.width
-                                                    horizontalAlignment: Text.AlignHCenter
-                                                    wrapMode: Text.Wrap
-                                                    textFormat: Text.RichText
-                                                    text: win.scaleImagesToWidth(backend.question, studyText.width)
-                                                    color: win.text
-                                                    font.pixelSize: 30
-                                                    font.weight: Font.DemiBold
-                                                    onLinkActivated: function(link) { Qt.openUrlExternally(link) }
-                                                }
+                                            Item {
+                                                width: studyViewport.width
+                                                height: studyText.implicitHeight
 
-                                                Rectangle {
-                                                    objectName: "studySeparator"
-                                                    width: parent.width
-                                                    height: 1
-                                                    color: win.border
-                                                    visible: backend.showingAnswer
-                                                }
+                                                Column {
+                                                    id: studyText
+                                                    objectName: "studyTextColumn"
+                                                    anchors.horizontalCenter: parent.horizontalCenter
+                                                    width: Math.min(studyViewport.width - 96, 660)
+                                                    spacing: 18
 
-                                                Label {
-                                                    objectName: "studyAnswerLabel"
-                                                    width: parent.width
-                                                    visible: backend.showingAnswer
-                                                    horizontalAlignment: Text.AlignHCenter
-                                                    wrapMode: Text.Wrap
-                                                    textFormat: Text.RichText
-                                                    text: win.scaleImagesToWidth(backend.answer, studyText.width)
-                                                    color: theme.accent
-                                                    font.pixelSize: 24
+                                                    Label {
+                                                        objectName: "studyQuestionLabel"
+                                                        width: parent.width
+                                                        horizontalAlignment: Text.AlignHCenter
+                                                        wrapMode: Text.Wrap
+                                                        textFormat: Text.RichText
+                                                        text: win.scaleImagesToWidth(backend.question, studyText.width)
+                                                        color: win.text
+                                                        font.pixelSize: 30
+                                                        font.weight: Font.DemiBold
+                                                        onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+                                                    }
+
+                                                    Rectangle {
+                                                        objectName: "studySeparator"
+                                                        width: parent.width
+                                                        height: 1
+                                                        color: win.border
+                                                        visible: backend.showingAnswer
+                                                    }
+
+                                                    Label {
+                                                        objectName: "studyAnswerLabel"
+                                                        width: parent.width
+                                                        visible: backend.showingAnswer
+                                                        horizontalAlignment: Text.AlignHCenter
+                                                        wrapMode: Text.Wrap
+                                                        textFormat: Text.RichText
+                                                        text: win.scaleImagesToWidth(backend.answer, studyText.width)
+                                                        color: theme.accent
+                                                        font.pixelSize: 24
+                                                    }
                                                 }
                                             }
+                                        }
+
+                                        Rectangle {
+                                            objectName: "studyTopFade"
+                                            anchors.left: parent.left
+                                            anchors.right: parent.right
+                                            anchors.rightMargin: 14
+                                            anchors.top: parent.top
+                                            height: 34
+                                            enabled: false
+                                            visible: backend.hasCard && studyViewport.canScrollUp
+                                            opacity: visible ? 0.9 : 0
+                                            gradient: Gradient {
+                                                GradientStop { position: 0.0; color: win.panel }
+                                                GradientStop {
+                                                    position: 1.0
+                                                    color: Qt.rgba(win.panel.r, win.panel.g, win.panel.b, 0)
+                                                }
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            objectName: "studyBottomFade"
+                                            anchors.left: parent.left
+                                            anchors.right: parent.right
+                                            anchors.rightMargin: 14
+                                            anchors.bottom: parent.bottom
+                                            height: 34
+                                            enabled: false
+                                            visible: backend.hasCard && studyViewport.canScrollDown
+                                            opacity: visible ? 0.9 : 0
+                                            gradient: Gradient {
+                                                GradientStop {
+                                                    position: 0.0
+                                                    color: Qt.rgba(win.panel.r, win.panel.g, win.panel.b, 0)
+                                                }
+                                                GradientStop { position: 1.0; color: win.panel }
+                                            }
+                                        }
+
+                                        Label {
+                                            objectName: "studyEndOfScrollHint"
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            anchors.bottom: parent.bottom
+                                            anchors.bottomMargin: 10
+                                            text: qsTr("At end — ↑/↓ flips card")
+                                            color: win.muted
+                                            font.pixelSize: 12
+                                            visible: backend.hasCard && backend.showingAnswer
+                                                     && studyViewport.contentOverflows && !studyViewport.canScrollDown
+                                            opacity: visible ? 1 : 0
                                         }
                                     }
 
