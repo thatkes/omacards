@@ -28,6 +28,8 @@ private slots:
     void checkJsonKeyContract();
     void checkDeckScoping();
     void readCommandJsonContracts();
+    void useDeckCommandContract();
+    void decksActiveCommandContract();
     void reviewCommandContract();
     void reviewWrapsStoreErrors();
     void reviewWrapsWriteStoreErrors();

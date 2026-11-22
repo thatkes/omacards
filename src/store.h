@@ -35,6 +35,13 @@ public:
     QString setting(const QString &key, const QString &fallback = {}) const;
     bool setSetting(const QString &key, const QString &value);
 
+    // Current deck and per-deck last-studied records live in the same settings
+    // table as the other sidecar state; no extra file or module is involved.
+    QString currentDeck() const;
+    bool setCurrentDeck(const QString &name);
+    QHash<QString, qint64> deckLastStudied() const;
+    bool setDeckLastStudied(const QString &name, qint64 at);
+
     QString path() const { return m_path; }
 
     // Errors are sticky until clearError() so a caller can check once after a

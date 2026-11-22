@@ -4,10 +4,13 @@
 
 #include "mathrender.h"
 
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QFileInfo>
 #include <QStandardPaths>
 #include <QUrl>
+
+#include <algorithm>
 
 namespace {
 QString defaultDataDirectory() {
@@ -59,6 +62,9 @@ bool Backend::initialize(QString *error) {
         m_session.reportError(tr("Cannot open state database: %1").arg(m_store.path()));
         return false;
     }
+    m_persistedDeck = m_store.currentDeck();
+    m_currentDeck = m_persistedDeck;
+    m_lastStudied = m_store.deckLastStudied();
     m_newPerDay = qBound(0, m_store.setting("new_per_day", QString::number(Config::kDefaultNewPerDay)).toInt(),
                          Config::kMaxNewPerDay);
     m_desiredRetention =
@@ -74,6 +80,10 @@ bool Backend::initialize(QString *error) {
 
 void Backend::refresh() {
     m_deckRepo.load(&m_currentDeck);
+    // A stored Deck can vanish between launches. load() picks a usable one;
+    // remember that fallback so the selector and the next launch agree.
+    if (m_currentDeck != m_persistedDeck)
+        recordDeckSelection(m_currentDeck);
     m_planner.setDecks(m_deckRepo.deckData());
     m_planner.configure(m_newPerDay, m_dayStartHour);
     QString storeError;
@@ -175,14 +185,57 @@ QString Backend::mathEngine() const {
     return tr("Unicode fallback");
 }
 
+void Backend::recordDeckSelection(const QString &name) {
+    if (name.isEmpty())
+        return;
+    // A strictly increasing stamp keeps selector order stable even when a
+    // learner or an agent selects several decks within the same millisecond.
+    qint64 stamp = QDateTime::currentMSecsSinceEpoch();
+    for (qint64 previous : m_lastStudied)
+        stamp = qMax(stamp, previous + 1);
+    m_lastStudied.insert(name, stamp);
+    m_store.clearError();
+    const bool recencySaved = m_store.setDeckLastStudied(name, stamp);
+    const bool currentSaved = m_store.setCurrentDeck(name);
+    m_persistedDeck = name;
+    if (!recencySaved || !currentSaved || !m_store.lastError().isEmpty())
+        m_session.reportError(tr("Cannot save settings: %1").arg(m_store.lastError()));
+}
+
 void Backend::selectDeck(const QString &name) {
     if (name.isEmpty() || name == m_currentDeck || !m_deckRepo.deckByName(name))
         return;
     m_currentDeck = name;
+    recordDeckSelection(name);
     emit currentDeckChanged();
     emit cardsChanged();
     emit decksChanged();
-    m_session.rebuild(m_currentDeck);
+    m_session.startFresh(m_currentDeck);
+}
+
+QVariantList Backend::deckSelector() const {
+    const QVariantList summaries = deckSummaries();
+    QVariantList result;
+    for (const QVariant &entry : summaries) {
+        if (entry.toMap().value("name").toString() == m_currentDeck)
+            result << entry;
+    }
+    QVector<QPair<qint64, int>> studied;
+    for (int i = 0; i < summaries.size(); ++i) {
+        const QString name = summaries.at(i).toMap().value("name").toString();
+        if (name != m_currentDeck && m_lastStudied.contains(name))
+            studied << qMakePair(m_lastStudied.value(name), i);
+    }
+    std::stable_sort(studied.begin(), studied.end(),
+                     [](const QPair<qint64, int> &a, const QPair<qint64, int> &b) { return a.first > b.first; });
+    for (const auto &entry : studied)
+        result << summaries.at(entry.second);
+    for (int i = 0; i < summaries.size(); ++i) {
+        const QString name = summaries.at(i).toMap().value("name").toString();
+        if (name != m_currentDeck && !m_lastStudied.contains(name))
+            result << summaries.at(i);
+    }
+    return result;
 }
 
 void Backend::setMode(const QString &mode) {
