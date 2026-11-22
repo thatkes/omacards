@@ -4,4 +4,5 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT"
 ./bin/check-cli-contract
 ./bin/check-local-only-files
+./bin/check-skill-install
 clang-format --dry-run --Werror src/*.h src/*.cpp tests/*.h tests/*.cpp

@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+source_file="$ROOT/src/skill/SKILL.md"
+installed_file="$HOME/.agents/skills/omacards/SKILL.md"
+
+if [ ! -f "$installed_file" ]; then
+    printf 'Installed omacards skill not found at %s; skipping check\n' \
+        "$installed_file" >&2
+    exit 0
+fi
+
+if ! cmp -s "$source_file" "$installed_file"; then
+    printf 'Installed omacards skill differs from %s\n' "$source_file" >&2
+    printf 'Refresh it with: omacards skill install\n' >&2
+    exit 1
+fi
