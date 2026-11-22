@@ -220,5 +220,5 @@ MathRenderer::Engine StudySession::mathEngine() const {
 
 QString StudySession::statsText() const {
     const double accuracy = m_reviewed > 0 ? 100.0 * m_good / m_reviewed : 0.0;
-    return tr("%1 reviewed · %2% Good · box %3").arg(m_reviewed).arg(qRound(accuracy)).arg(currentBox());
+    return tr("%1 reviewed · %2% Good").arg(m_reviewed).arg(qRound(accuracy));
 }

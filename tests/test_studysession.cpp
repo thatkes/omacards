@@ -557,18 +557,18 @@ void TestStudySession::statsTextAndMathEngine() {
     QString error;
     QVERIFY(prepareSession(fixture, "Stats", {"Q1", "Q2"}, &error));
 
-    QCOMPARE(fixture.session.statsText(), QString("0 reviewed · 0% Good · box 0"));
+    QCOMPARE(fixture.session.statsText(), QString("0 reviewed · 0% Good"));
 
     fixture.session.setMode("cram");
     fixture.session.rebuild("Stats");
     QCOMPARE(fixture.session.currentBox(), 1);
     fixture.session.flip();
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
-    QCOMPARE(fixture.session.statsText(), QString("1 reviewed · 100% Good · box 1"));
+    QCOMPARE(fixture.session.statsText(), QString("1 reviewed · 100% Good"));
 
     fixture.session.flip();
     QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention));
-    QCOMPARE(fixture.session.statsText(), QString("2 reviewed · 50% Good · box 2"));
+    QCOMPARE(fixture.session.statsText(), QString("2 reviewed · 50% Good"));
 
     const MathRenderer::Engine engine = fixture.session.mathEngine();
     QVERIFY(engine == MathRenderer::Engine::Unicode || engine == MathRenderer::Engine::LatexSvg);

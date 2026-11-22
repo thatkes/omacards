@@ -1248,7 +1248,7 @@ void TestBackend::emptySessionHelpersAndStatsText() {
     QCOMPARE(backend.reviewed(), 1);
     QCOMPARE(backend.good(), 1);
     QCOMPARE(backend.currentBox(), 2);
-    QCOMPARE(backend.statsText(), QString("1 reviewed · 100% Good · box 2"));
+    QCOMPARE(backend.statsText(), QString("1 reviewed · 100% Good"));
 }
 
 void TestBackend::setDeckDescriptionAndQmlErrorSignals() {
