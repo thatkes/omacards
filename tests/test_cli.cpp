@@ -50,7 +50,10 @@ void TestCli::helpIsHeadless() {
     process.start(appBinary(), {"--help"});
     QVERIFY(process.waitForFinished(5000));
     QCOMPARE(process.exitCode(), 0);
-    QVERIFY(process.readAllStandardOutput().contains("Usage:"));
+    const QByteArray help = process.readAllStandardOutput();
+    QVERIFY(help.contains("Usage:"));
+    QVERIFY(help.contains("omacards use-deck NAME"));
+    QVERIFY(help.contains("omacards decks active"));
 }
 
 void TestCli::addCardsCreatesDeckBulk() {
@@ -558,9 +561,9 @@ oops: not a key
 
 void TestCli::headlessCommandDetectionIsComplete() {
     const QStringList commands{
-        "check",     "decks",       "cards",       "search", "add-deck", "add-cards", "add-card",
-        "edit-card", "delete-card", "delete-deck", "import", "due",      "review",    "cram",
-        "preview",   "skill",       "stats",       "config", "help",     "--help",    "-h",
+        "check",       "decks",       "cards",    "search", "add-deck", "add-cards", "add-card", "edit-card",
+        "delete-card", "delete-deck", "import",   "due",    "review",   "cram",      "preview",  "skill",
+        "stats",       "config",      "use-deck", "help",   "--help",   "-h",
     };
     for (const QString &command : commands)
         QVERIFY2(Cli::needsOffscreen({command}), qPrintable(command));
@@ -783,6 +786,89 @@ void TestCli::readCommandJsonContracts() {
     QCOMPARE(config.value(QStringLiteral("newToday")).toInt(), 1);
     QCOMPARE(config.value(QStringLiteral("newRemaining")).toInt(),
              config.value(QStringLiteral("newPerDay")).toInt() - 1);
+}
+
+void TestCli::useDeckCommandContract() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    EnvGuard env(decks, database);
+    {
+        auto owned = Backend::fromEnvironment();
+        QString error;
+        QVERIFY(owned->initialize(&error));
+        QVERIFY(owned->createDeck("Alpha", &error));
+        QVERIFY(owned->createDeck("Beta", &error));
+    }
+
+    int code = -1;
+    const QJsonObject used = runCli({"use-deck", "Beta", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(sortedKeys(used), QStringList({"deck", "ok"}));
+    QVERIFY(used.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(used.value(QStringLiteral("deck")).toString(), QString("Beta"));
+    QCOMPARE(runCliText({"use-deck", "Beta"}, decks, database, &code).trimmed(), QString("Using deck Beta"));
+    QCOMPARE(code, 0);
+
+    const QJsonObject active = runCli({"decks", "active", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(active.value(QStringLiteral("deck")).toString(), QString("Beta"));
+
+    const QJsonObject unknown = runCli({"use-deck", "Missing", "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QCOMPARE(sortedKeys(unknown), QStringList({"error", "ok"}));
+    QVERIFY(!unknown.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(unknown.value(QStringLiteral("error")).toString(), QString("No such deck: Missing"));
+
+    QByteArray standardError;
+    const QJsonObject missing = runCli({"use-deck", "--json"}, decks, database, &code, &standardError);
+    QCOMPARE(code, 1);
+    QCOMPARE(sortedKeys(missing), QStringList({"error", "ok"}));
+    QVERIFY(!missing.value(QStringLiteral("ok")).toBool());
+    QVERIFY(missing.value(QStringLiteral("error")).toString().contains(QStringLiteral("use-deck NAME")));
+
+    // A per-invocation --deck flag must not change the Current deck.
+    runCli({"stats", "--deck", "Alpha", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(runCliText({"decks", "active"}, decks, database, &code).trimmed(), QString("Beta"));
+    QCOMPARE(code, 0);
+}
+
+void TestCli::decksActiveCommandContract() {
+    QTemporaryDir emptyDir;
+    const QString emptyDecks = emptyDir.filePath("decks");
+    const QString emptyDatabase = emptyDir.filePath("state.db");
+    QVERIFY(QDir().mkpath(emptyDecks));
+
+    int code = -1;
+    QByteArray standardError;
+    const QJsonObject none = runCli({"decks", "active", "--json"}, emptyDecks, emptyDatabase, &code, &standardError);
+    QCOMPARE(code, 1);
+    QCOMPARE(sortedKeys(none), QStringList({"error", "ok"}));
+    QVERIFY(!none.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(none.value(QStringLiteral("error")).toString(), QString("No deck selected"));
+    runCli({"decks", "active"}, emptyDecks, emptyDatabase, &code, &standardError);
+    QCOMPARE(code, 1);
+    QVERIFY(standardError.contains("No deck selected"));
+
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    EnvGuard env(decks, database);
+    {
+        auto owned = Backend::fromEnvironment();
+        QString error;
+        QVERIFY(owned->initialize(&error));
+        QVERIFY(owned->createDeck("Only", &error));
+    }
+    QCOMPARE(runCliText({"decks", "active"}, decks, database, &code).trimmed(), QString("Only"));
+    QCOMPARE(code, 0);
+    const QJsonObject active = runCli({"decks", "active", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(sortedKeys(active), QStringList({"deck", "ok"}));
+    QCOMPARE(active.value(QStringLiteral("deck")).toString(), QString("Only"));
 }
 
 void TestCli::reviewCommandContract() {

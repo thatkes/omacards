@@ -34,6 +34,7 @@ class Backend : public QObject {
     Q_PROPERTY(int deckNew READ deckNew NOTIFY dueCountChanged)
     Q_PROPERTY(int streak READ streak NOTIFY dueCountChanged)
     Q_PROPERTY(QVariantList deckList READ deckSummaries NOTIFY decksChanged)
+    Q_PROPERTY(QVariantList deckSelector READ deckSelector NOTIFY decksChanged)
     Q_PROPERTY(int reviewed READ reviewed NOTIFY statsChanged)
     Q_PROPERTY(int good READ good NOTIFY statsChanged)
     Q_PROPERTY(int currentBox READ currentBox NOTIFY statsChanged)
@@ -93,6 +94,9 @@ public:
     int dayStartHour() const { return m_dayStartHour; }
     int availableCount(const QString &deckName = {}) const { return m_planner.availableCount(deckName); }
     QVariantList deckSummaries() const { return m_planner.deckSummaries(m_currentDeck); }
+    // Same summaries as deckSummaries(), ordered for the deck selector:
+    // Current deck first, then last-studied order, then file order.
+    QVariantList deckSelector() const;
     QVariantList cardList() const { return m_planner.cardList(m_currentDeck, m_cardFilter, tr("new"), tr("due now")); }
     ReviewSummary reviewSummary() const { return m_store.summary(m_dayStartHour); }
 
@@ -169,6 +173,8 @@ signals:
     void errorOccurred(const QString &message);
 
 private:
+    void recordDeckSelection(const QString &name);
+
     Store m_store;
     FileHistory m_history;
     StoreRatingAdapter m_ratingStore;
@@ -181,6 +187,8 @@ private:
     double m_desiredRetention = Config::kDefaultRetention;
     int m_dayStartHour = Config::kDefaultDayStartHour;
     QString m_currentDeck;
+    QString m_persistedDeck;
+    QHash<QString, qint64> m_lastStudied;
     StudyMode m_mode = StudyMode::Review;
     QString m_cardFilter;
 };

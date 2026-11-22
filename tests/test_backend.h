@@ -17,6 +17,9 @@ private slots:
     void backendAppliesDayStartToDueCards();
     void backendReportsNewCountAndDeckSummaries();
     void qmlCanNavigateLibraryCards();
+    void qmlDeckSelectorShowsCurrentDeckAndCounts();
+    void qmlDeckCycleKeysWrapAndAreScoped();
+    void qmlStudySelectorSwitchesDeckFresh();
     void qmlStudyScrollViewClipsAndSizes();
     void qmlStudyScrollFirstKeysAndFlipFallbacks();
     void qmlStudyRatingKeysKeepTheirMeaning();
@@ -35,7 +38,8 @@ private slots:
     void deckCountsMatchLibrarySummaries();
     void deckCreationRejectsSanitizedPathCollision();
     void refreshKeepsPendingAgainRepeat();
-    void deckSwitchKeepsPendingAgainRepeat();
+    void deckSwitchStartsFreshSession();
+    void deckSwitchKeepsModeAndResetsCramBox();
     void setMathColorsNotifiesColorChange();
     void statsSummaryKeepsContract();
     void setModeBoundarySemantics();
@@ -44,6 +48,9 @@ private slots:
     void signalContractsForRefreshAndNavigation();
     void modifyCardInvalidTypeNormalizesToBasic();
     void deckSummariesAndSearchFilterByDeck();
+    void currentDeckAndRecencyPersistAcrossBackends();
+    void selectionUpdatesRecencyOnlyOnExplicitChoice();
+    void missingDeckFallbackPersistsAndSelectorAgrees();
     void emptySessionHelpersAndStatsText();
     void setDeckDescriptionAndQmlErrorSignals();
 };

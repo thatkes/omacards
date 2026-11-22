@@ -54,9 +54,9 @@ struct Options {
 
 bool isHeadlessCommand(const QString &command) {
     static const QStringList commands{
-        "check",     "decks",       "cards",       "search", "add-deck", "add-cards", "add-card",
-        "edit-card", "delete-card", "delete-deck", "import", "due",      "review",    "cram",
-        "preview",   "skill",       "stats",       "config", "help",     "--help",    "-h",
+        "check",       "decks",       "cards",    "search", "add-deck", "add-cards", "add-card", "edit-card",
+        "delete-card", "delete-deck", "import",   "due",    "review",   "cram",      "preview",  "skill",
+        "stats",       "config",      "use-deck", "help",   "--help",   "-h",
     };
     return commands.contains(command);
 }
@@ -374,6 +374,8 @@ QString usage() {
                           "  omacards check [--deck NAME] [--math] [--strict] [--json]\n"
                           "                                   Show decks, cards, due count, math and issues\n"
                           "  omacards decks [--json]          List decks\n"
+                          "  omacards decks active [--json]  Show the Current deck\n"
+                          "  omacards use-deck NAME [--json] Choose the Current deck\n"
                           "  omacards cards [--deck D] [--json]\n"
                           "  omacards search TERM [--deck D] [--json]\n"
                           "  omacards preview --deck D [--card ID] [--format text|html] [--json]\n"
@@ -634,6 +636,38 @@ int run(const QStringList &arguments) {
                   .arg(accuracy)
                   .arg(summary.streakDays)
                   .arg(backend.availableCount()));
+        return 0;
+    }
+
+    if (options.command == "use-deck") {
+        if (options.path.isEmpty())
+            return fail(QObject::tr("Usage: omacards use-deck NAME"), json);
+        const QString path = resolveDeckPath(decks, backend.decksDirectory(), options.path);
+        QString selected;
+        for (const Deck &deck : decks) {
+            if (deck.path == path) {
+                selected = deck.name;
+                break;
+            }
+        }
+        if (selected.isEmpty())
+            return fail(QObject::tr("No such deck: %1").arg(options.path), json);
+        backend.selectDeck(selected);
+        QJsonObject object;
+        object.insert("ok", true);
+        object.insert("deck", selected);
+        write(object, json, QObject::tr("Using deck %1").arg(selected));
+        return 0;
+    }
+
+    if (options.command == "decks" && options.path == "active") {
+        const QString selected = backend.currentDeck();
+        if (selected.isEmpty())
+            return fail(QObject::tr("No deck selected"), json);
+        QJsonObject object;
+        object.insert("ok", true);
+        object.insert("deck", selected);
+        write(object, json, selected);
         return 0;
     }
 

@@ -214,9 +214,49 @@ ApplicationWindow {
             return qsTr("%1 new card%2 left today in %3.")
                 .arg(backend.deckNew).arg(backend.deckNew === 1 ? "" : "s").arg(backend.currentDeck)
         if (backend.dueCount > 0)
-            return qsTr("%1 cards are due in other decks. Open the library to switch.")
+            return qsTr("%1 cards are due in other decks. Use the deck selector to switch.")
                 .arg(backend.dueCount)
         return qsTr("Nothing is due in %1. Cram a deck or import new material.").arg(backend.currentDeck)
+    }
+
+    // Both selectors read the same ordered summaries. Index lookup lives here
+    // so the Current deck, the delegate and the bracket keys cannot disagree.
+    function deckIndex(name) {
+        const entries = backend.deckSelector
+        for (let i = 0; i < entries.length; ++i) {
+            if (entries[i].name === name)
+                return i
+        }
+        return -1
+    }
+
+    function deckSummary(entry) {
+        if (!entry)
+            return qsTr("No deck")
+        return qsTr("%1 · %2 cards · %3 due")
+            .arg(entry.name).arg(entry.cards).arg(entry.due)
+    }
+
+    function selectDeckAt(control, index) {
+        const entry = backend.deckSelector[index]
+        if (!entry)
+            return
+        if (entry.name !== backend.currentDeck)
+            backend.selectDeck(entry.name)
+        // Picking an item breaks the currentIndex binding, so restore it after
+        // the selection has reordered the model with Current deck first.
+        control.currentIndex = Qt.binding(function() { return win.deckIndex(backend.currentDeck) })
+    }
+
+    function cycleDeck(delta) {
+        const entries = backend.deckSelector
+        if (!entries.length)
+            return
+        const current = win.deckIndex(backend.currentDeck)
+        const next = (current + delta + entries.length) % entries.length
+        const entry = entries[next]
+        if (entry && entry.name !== backend.currentDeck)
+            backend.selectDeck(entry.name)
     }
 
     component ActionButton: Rectangle {
@@ -274,6 +314,37 @@ ApplicationWindow {
             enabled: control.enabled
             cursorShape: Qt.PointingHandCursor
             onClicked: control.clicked()
+        }
+    }
+
+    component DeckSelector: ComboBox {
+        id: selector
+        property string selectorObjectName: ""
+        property string labelObjectName: ""
+        property int selectorWidth: 320
+        property int selectorFontSize: 13
+
+        objectName: selectorObjectName
+        Layout.preferredWidth: selectorWidth
+        model: backend.deckSelector
+        textRole: "name"
+        currentIndex: win.deckIndex(backend.currentDeck)
+        onActivated: function(index) { win.selectDeckAt(selector, index) }
+
+        contentItem: Label {
+            objectName: selector.labelObjectName
+            text: win.deckSummary(backend.deckSelector[selector.currentIndex])
+            color: win.text
+            font.pixelSize: selector.selectorFontSize
+            font.weight: selector.selectorFontSize >= 20 ? Font.DemiBold : Font.Normal
+            elide: Text.ElideRight
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        delegate: ItemDelegate {
+            width: selector.width
+            text: win.deckSummary(modelData)
+            highlighted: selector.highlightedIndex === index
         }
     }
 
@@ -462,6 +533,14 @@ ApplicationWindow {
 
                 if (screen === "home") {
                     switch (event.key) {
+                    case Qt.Key_BracketLeft:
+                        win.cycleDeck(-1)
+                        event.accepted = true
+                        break
+                    case Qt.Key_BracketRight:
+                        win.cycleDeck(1)
+                        event.accepted = true
+                        break
                     case Qt.Key_Space:
                     case Qt.Key_Return:
                     case Qt.Key_Enter:
@@ -515,6 +594,14 @@ ApplicationWindow {
                         break
                     case Qt.Key_C:
                         startStudy("cram")
+                        event.accepted = true
+                        break
+                    case Qt.Key_BracketLeft:
+                        win.cycleDeck(-1)
+                        event.accepted = true
+                        break
+                    case Qt.Key_BracketRight:
+                        win.cycleDeck(1)
                         event.accepted = true
                         break
                     }
@@ -654,6 +741,23 @@ ApplicationWindow {
                                 Layout.alignment: Qt.AlignHCenter
                                 spacing: 10
 
+                                Label {
+                                    text: qsTr("Deck")
+                                    color: win.muted
+                                    font.pixelSize: 13
+                                }
+
+                                DeckSelector {
+                                    selectorObjectName: "homeDeckSelector"
+                                    labelObjectName: "homeDeckLabel"
+                                    selectorWidth: 320
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.alignment: Qt.AlignHCenter
+                                spacing: 10
+
                                 ActionButton {
                                     primary: true
                                     label: backend.dueCount > 0 || backend.newCount > 0
@@ -707,13 +811,11 @@ ApplicationWindow {
 
                                 ColumnLayout {
                                     spacing: 2
-                                    Label {
-                                        objectName: "studyDeckLabel"
-                                        text: backend.currentDeck.length > 0
-                                              ? backend.currentDeck : qsTr("No deck")
-                                        color: win.text
-                                        font.pixelSize: 20
-                                        font.weight: Font.DemiBold
+                                    DeckSelector {
+                                        selectorObjectName: "studyDeckSelector"
+                                        labelObjectName: "studyDeckLabel"
+                                        selectorWidth: 260
+                                        selectorFontSize: 20
                                     }
                                     Label {
                                         objectName: "studyModeLabel"
@@ -1678,6 +1780,7 @@ ApplicationWindow {
                         { keys: "1 / A / ←", action: qsTr("Again") },
                         { keys: "2 / G / →", action: qsTr("Good") },
                         { keys: "R / C", action: qsTr("Review or cram mode") },
+                        { keys: "[ / ]", action: qsTr("Previous or next deck on Home or Study") },
                         { keys: "B", action: qsTr("Open the library") },
                         { keys: "J / K", action: qsTr("Scroll a long card, or move the library selection") },
                         { keys: "Enter", action: qsTr("Edit the selected card in the library") },

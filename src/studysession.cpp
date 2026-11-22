@@ -56,6 +56,17 @@ void StudySession::rebuild(const QString &deckName) {
     presentCard();
 }
 
+void StudySession::startFresh(const QString &deckName) {
+    // A different Deck is a new sitting. Keep the Study mode, but drop the
+    // previous sitting's Pending repeats, Leitner boxes and live counters.
+    m_repeatTimer.stop();
+    m_progression.clear();
+    m_reviewed = 0;
+    m_good = 0;
+    rebuild(deckName);
+    emit statsChanged();
+}
+
 void StudySession::updateDueCount() {
     // Pending Again repeats are not "due" in the database yet, but they are
     // still work waiting in this session.

@@ -534,6 +534,136 @@ void TestBackend::qmlCanNavigateLibraryCards() {
     QCOMPARE(backend.cardList().size(), 2);
 }
 
+namespace {
+// Three decks with a known selector order: Alpha is Current, Beta was selected
+// before it, and Gamma was added straight to disk so it has no recency record.
+void prepareSelectorDecks(Backend &backend, QString *error) {
+    QVERIFY(backend.createDeck("Alpha", error));
+    QVERIFY(backend.createCard("Alpha", "alpha one", "A1", "basic", {}, error));
+    QVERIFY(backend.createCard("Alpha", "alpha two", "A2", "basic", {}, error));
+    QVERIFY(backend.createDeck("Beta", error));
+    QVERIFY(backend.createCard("Beta", "beta one", "B1", "basic", {}, error));
+    const QDir dir(backend.decksDirectory());
+    QVERIFY(TestSupport::writeFile(dir.filePath("Gamma.txt"), "# Deck: Gamma\n"));
+    backend.refresh();
+    backend.selectDeck("Beta");
+    backend.selectDeck("Alpha");
+}
+} // namespace
+
+void TestBackend::qmlDeckSelectorShowsCurrentDeckAndCounts() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    prepareSelectorDecks(backend, &error);
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    QQuickItem *homeSelector = view.item(QStringLiteral("homeDeckSelector"));
+    QVERIFY(homeSelector);
+    QCOMPARE(homeSelector->property("currentText").toString(), QString("Alpha"));
+
+    QQuickItem *homeSummary = view.item(QStringLiteral("homeDeckLabel"));
+    QVERIFY(homeSummary);
+    const QString homeText = homeSummary->property("text").toString();
+    QVERIFY2(homeText.contains("Alpha"), qPrintable(homeText));
+    QVERIFY2(homeText.contains("2 cards"), qPrintable(homeText));
+    QVERIFY2(homeText.contains("0 due"), qPrintable(homeText));
+
+    QVERIFY(QMetaObject::invokeMethod(view.window, "startStudy", Q_ARG(QVariant, QString("review"))));
+    view.settle();
+    QQuickItem *studySelector = view.item(QStringLiteral("studyDeckSelector"));
+    QVERIFY(studySelector);
+    QCOMPARE(studySelector->property("currentText").toString(), QString("Alpha"));
+    QQuickItem *studySummary = view.item(QStringLiteral("studyDeckLabel"));
+    QVERIFY(studySummary);
+    const QString studyText = studySummary->property("text").toString();
+    QVERIFY2(studyText.contains("Alpha"), qPrintable(studyText));
+    QVERIFY2(studyText.contains("2 cards"), qPrintable(studyText));
+}
+
+void TestBackend::qmlDeckCycleKeysWrapAndAreScoped() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    prepareSelectorDecks(backend, &error);
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    QCOMPARE(backend.currentDeck(), QString("Alpha"));
+
+    const auto press = [&](Qt::Key key) {
+        QTest::keyClick(window, key);
+        view.settle();
+    };
+    press(Qt::Key_BracketRight);
+    QCOMPARE(backend.currentDeck(), QString("Beta"));
+    // Beta is now Current and pinned first, with Alpha next in recency order.
+    press(Qt::Key_BracketRight);
+    QCOMPARE(backend.currentDeck(), QString("Alpha"));
+    press(Qt::Key_BracketLeft);
+    QCOMPARE(backend.currentDeck(), QString("Gamma")); // wraps at the start
+    press(Qt::Key_BracketLeft);
+    QCOMPARE(backend.currentDeck(), QString("Beta")); // wraps again after Gamma
+
+    QVERIFY(QMetaObject::invokeMethod(view.window, "openLibrary"));
+    press(Qt::Key_BracketRight);
+    QCOMPARE(backend.currentDeck(), QString("Beta"));
+    QVERIFY(QMetaObject::invokeMethod(view.window, "openSettings"));
+    press(Qt::Key_BracketLeft);
+    QCOMPARE(backend.currentDeck(), QString("Beta"));
+
+    QVERIFY(QMetaObject::invokeMethod(view.window, "goHome"));
+    window->setProperty("helpVisible", true);
+    press(Qt::Key_BracketRight);
+    QCOMPARE(backend.currentDeck(), QString("Beta"));
+    window->setProperty("helpVisible", false);
+
+    // The Library shortcut is unchanged.
+    QVERIFY(QMetaObject::invokeMethod(view.window, "goHome"));
+    press(Qt::Key_B);
+    QCOMPARE(view.window->property("screen").toString(), QString("library"));
+}
+
+void TestBackend::qmlStudySelectorSwitchesDeckFresh() {
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.backend.createDeck("Alpha", &fixture.error));
+    QVERIFY(fixture.backend.createCard("Alpha", "Alpha question", "A", "basic", {}, &fixture.error));
+    QVERIFY(fixture.backend.createDeck("Beta", &fixture.error));
+    QVERIFY(fixture.backend.createCard("Beta", "Beta question", "B", "basic", {}, &fixture.error));
+    fixture.selectDeck("Alpha");
+
+    QVERIFY(fixture.loadWindow());
+    auto *window = fixture.window();
+    QVERIFY(window);
+    QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
+    auto *selector = fixture.view->item(QStringLiteral("studyDeckSelector"));
+    QVERIFY(selector);
+    QCOMPARE(selector->property("currentText").toString(), QString("Alpha"));
+
+    QTest::keyClick(window, Qt::Key_Space);
+    fixture.settle();
+    QTest::keyClick(window, Qt::Key_2);
+    fixture.settle();
+    QCOMPARE(fixture.backend.reviewed(), 1);
+    QCOMPARE(fixture.backend.currentBox(), 2);
+
+    QTest::keyClick(window, Qt::Key_BracketRight);
+    fixture.settle();
+    QCOMPARE(fixture.backend.currentDeck(), QString("Beta"));
+    QCOMPARE(selector->property("currentText").toString(), QString("Beta"));
+    QCOMPARE(fixture.backend.mode(), QString("cram"));
+    QVERIFY(fixture.backend.question().contains("Beta question"));
+    QCOMPARE(fixture.backend.reviewed(), 0);
+    QCOMPARE(fixture.backend.currentBox(), 1);
+}
+
 void TestBackend::qmlStudyScrollViewClipsAndSizes() {
     StudyViewFixture fixture;
     QVERIFY(fixture.initialize());
@@ -1378,7 +1508,7 @@ void TestBackend::refreshKeepsPendingAgainRepeat() {
         qputenv("OMACARDS_AGAIN_DELAY_MS", previousDelay);
 }
 
-void TestBackend::deckSwitchKeepsPendingAgainRepeat() {
+void TestBackend::deckSwitchStartsFreshSession() {
     QTemporaryDir dir;
     const QByteArray previousDelay = qgetenv("OMACARDS_AGAIN_DELAY_MS");
     qputenv("OMACARDS_AGAIN_DELAY_MS", "500");
@@ -1400,16 +1530,43 @@ void TestBackend::deckSwitchKeepsPendingAgainRepeat() {
         backend.selectDeck("Second");
         QVERIFY(backend.question().contains("Q3"));
         backend.selectDeck("First");
-        QVERIFY(backend.question().contains("Q2"));
-
-        backend.flip();
-        backend.rate(3); // Q2 is done; Q1's pending repeat comes back.
-        QTRY_VERIFY_WITH_TIMEOUT(backend.question().contains("Q1"), 2000);
+        // Switching back starts over: the Pending repeat and the counters from
+        // the old sitting do not follow the learner to the new one.
+        const QString freshQuestion = backend.question();
+        QVERIFY(!freshQuestion.isEmpty());
+        QCOMPARE(backend.reviewed(), 0);
+        QCOMPARE(backend.good(), 0);
+        QTest::qWait(700);
+        QCOMPARE(backend.question(), freshQuestion);
     }
     if (previousDelay.isNull())
         qunsetenv("OMACARDS_AGAIN_DELAY_MS");
     else
         qputenv("OMACARDS_AGAIN_DELAY_MS", previousDelay);
+}
+
+void TestBackend::deckSwitchKeepsModeAndResetsCramBox() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("First", &error));
+    QVERIFY(backend.createCard("First", "Q1", "A1", "basic", {}, &error));
+    QVERIFY(backend.createDeck("Second", &error));
+    QVERIFY(backend.createCard("Second", "Q3", "A3", "basic", {}, &error));
+
+    backend.selectDeck("First");
+    backend.setMode("cram");
+    backend.flip();
+    backend.rate(3);
+    QCOMPARE(backend.currentBox(), 2);
+    QCOMPARE(backend.reviewed(), 1);
+
+    backend.selectDeck("Second");
+    QCOMPARE(backend.mode(), QString("cram"));
+    QCOMPARE(backend.currentBox(), 1);
+    QCOMPARE(backend.reviewed(), 0);
+    QVERIFY(backend.question().contains("Q3"));
 }
 
 void TestBackend::setMathColorsNotifiesColorChange() {
@@ -1746,6 +1903,120 @@ void TestBackend::deckSummariesAndSearchFilterByDeck() {
     QCOMPARE(backend.searchCards("question", "Alpha").size(), 1);
     QCOMPARE(backend.searchCards("").size(), 3);
     QCOMPARE(backend.searchCards("", "Beta").size(), 1);
+
+    // The selector reorders the same summaries; the Library list keeps file order.
+    const auto namesOf = [](const QVariantList &entries) {
+        QStringList names;
+        for (const QVariant &entry : entries)
+            names << entry.toMap().value("name").toString();
+        return names;
+    };
+    QCOMPARE(namesOf(backend.deckSummaries()), QStringList({"Alpha", "Beta"}));
+    QCOMPARE(namesOf(backend.deckSelector()), QStringList({"Beta", "Alpha"}));
+    const QVariantMap first = backend.deckSelector().first().toMap();
+    QCOMPARE(first.value("cards").toInt(), 1);
+    QCOMPARE(first.value("due").toInt(), 0); // a New card is not Due by day
+}
+
+void TestBackend::currentDeckAndRecencyPersistAcrossBackends() {
+    QTemporaryDir dir;
+    const QString database = dir.filePath("state.db");
+    {
+        Backend backend(dir.path(), database);
+        QString error;
+        QVERIFY(backend.initialize(&error));
+        QVERIFY(backend.createDeck("Alpha", &error));
+        QVERIFY(backend.createCard("Alpha", "Q1", "A1", "basic", {}, &error));
+        QVERIFY(backend.createDeck("Beta", &error));
+        QVERIFY(backend.createCard("Beta", "Q2", "A2", "basic", {}, &error));
+
+        // Gamma is added behind the Backend so it has no last-studied record.
+        const QString gamma = dir.filePath("Gamma.txt");
+        QVERIFY(TestSupport::writeFile(gamma, "# Deck: Gamma\n"));
+        backend.refresh();
+        QCOMPARE(backend.decks(), QStringList({"Alpha", "Beta", "Gamma"}));
+
+        backend.selectDeck("Beta");
+        backend.selectDeck("Alpha");
+        const auto namesOf = [](const QVariantList &entries) {
+            QStringList names;
+            for (const QVariant &entry : entries)
+                names << entry.toMap().value("name").toString();
+            return names;
+        };
+        QCOMPARE(namesOf(backend.deckSelector()), QStringList({"Alpha", "Beta", "Gamma"}));
+    }
+    {
+        Backend reopened(dir.path(), database);
+        QString error;
+        QVERIFY(reopened.initialize(&error));
+        QCOMPARE(reopened.currentDeck(), QString("Alpha"));
+        const auto namesOf = [](const QVariantList &entries) {
+            QStringList names;
+            for (const QVariant &entry : entries)
+                names << entry.toMap().value("name").toString();
+            return names;
+        };
+        QCOMPARE(namesOf(reopened.deckSelector()), QStringList({"Alpha", "Beta", "Gamma"}));
+    }
+}
+
+void TestBackend::selectionUpdatesRecencyOnlyOnExplicitChoice() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Alpha", &error));
+    QVERIFY(backend.createCard("Alpha", "Q1", "A1", "basic", {}, &error));
+    QVERIFY(backend.createDeck("Beta", &error));
+    QVERIFY(backend.createCard("Beta", "Q2", "A2", "basic", {}, &error));
+
+    const auto namesOf = [&]() {
+        QStringList names;
+        for (const QVariant &entry : backend.deckSelector())
+            names << entry.toMap().value("name").toString();
+        return names;
+    };
+    backend.selectDeck("Alpha");
+    backend.selectDeck("Beta");
+    const QStringList afterSelection{"Beta", "Alpha"};
+    QCOMPARE(namesOf(), afterSelection);
+
+    backend.setMode("cram");
+    backend.flip();
+    backend.rate(3);
+    backend.refresh();
+    QCOMPARE(namesOf(), afterSelection);
+}
+
+void TestBackend::missingDeckFallbackPersistsAndSelectorAgrees() {
+    QTemporaryDir dir;
+    const QString database = dir.filePath("state.db");
+    {
+        Backend backend(dir.path(), database);
+        QString error;
+        QVERIFY(backend.initialize(&error));
+        QVERIFY(backend.createDeck("Alpha", &error));
+        QVERIFY(backend.createDeck("Beta", &error));
+        backend.selectDeck("Beta");
+        QCOMPARE(backend.currentDeck(), QString("Beta"));
+
+        QString betaPath;
+        for (const Deck &deck : backend.allDecks())
+            if (deck.name == QStringLiteral("Beta"))
+                betaPath = deck.path;
+        QVERIFY(!betaPath.isEmpty());
+        QVERIFY(QFile::remove(betaPath));
+        backend.refresh();
+        QCOMPARE(backend.currentDeck(), QString("Alpha"));
+        QCOMPARE(backend.deckSelector().first().toMap().value("name").toString(), QString("Alpha"));
+    }
+    {
+        Backend reopened(dir.path(), database);
+        QString error;
+        QVERIFY(reopened.initialize(&error));
+        QCOMPARE(reopened.currentDeck(), QString("Alpha"));
+    }
 }
 
 void TestBackend::emptySessionHelpersAndStatsText() {

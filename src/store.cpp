@@ -272,3 +272,33 @@ bool Store::setSetting(const QString &key, const QString &value) {
     }
     return true;
 }
+
+QString Store::currentDeck() const {
+    return setting(QStringLiteral("current_deck"));
+}
+
+bool Store::setCurrentDeck(const QString &name) {
+    return setSetting(QStringLiteral("current_deck"), name);
+}
+
+QHash<QString, qint64> Store::deckLastStudied() const {
+    QHash<QString, qint64> result;
+    if (!m_db.isOpen())
+        return result;
+    const QString prefix = QStringLiteral("deck_last_studied/");
+    QSqlQuery query(m_db);
+    if (!query.exec(QStringLiteral("SELECT key, value FROM settings"))) {
+        m_lastError = query.lastError().text();
+        return result;
+    }
+    while (query.next()) {
+        const QString key = query.value(0).toString();
+        if (key.startsWith(prefix))
+            result.insert(key.mid(prefix.size()), query.value(1).toString().toLongLong());
+    }
+    return result;
+}
+
+bool Store::setDeckLastStudied(const QString &name, qint64 at) {
+    return setSetting(QStringLiteral("deck_last_studied/") + name, QString::number(at));
+}
