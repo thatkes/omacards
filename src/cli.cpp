@@ -40,7 +40,7 @@ struct Options {
     QString format = "text";
     int rating = 0;
     int steps = 10;
-    int newPerDay = -1;
+    int newCardAllowance = -1;
     int dayStartHour = -1;
     double retention = -1.0;
     bool json = false;
@@ -98,8 +98,8 @@ Options parse(const QStringList &arguments) {
             options.rating = value().toInt();
         else if (arg == "--steps")
             options.steps = value().toInt();
-        else if (arg == "--new-per-day")
-            options.newPerDay = value().toInt();
+        else if (arg == "--new-card-allowance" || arg == "--new-per-day")
+            options.newCardAllowance = value().toInt();
         else if (arg == "--day-start-hour")
             options.dayStartHour = value().toInt();
         else if (arg == "--retention")
@@ -118,6 +118,8 @@ Options parse(const QStringList &arguments) {
             options.description = arg.section('=', 1);
         else if (arg.startsWith("--format="))
             options.format = arg.section('=', 1);
+        else if (arg.startsWith("--new-card-allowance=") || arg.startsWith("--new-per-day="))
+            options.newCardAllowance = arg.section('=', 1).toInt();
         else if (options.path.isEmpty())
             options.path = arg;
     }
@@ -374,7 +376,7 @@ QString usage() {
                           "  omacards check [--deck NAME] [--math] [--strict] [--json]\n"
                           "                                   Show decks, cards, due count, math and issues\n"
                           "  omacards decks [--json]          List decks\n"
-                          "  omacards decks active [--json]  Show the Current deck\n"
+                          "  omacards decks current [--json]  Show the Current deck (alias: active)\n"
                           "  omacards use-deck NAME [--json] Choose the Current deck\n"
                           "  omacards cards [--deck D] [--json]\n"
                           "  omacards search TERM [--deck D] [--json]\n"
@@ -391,7 +393,8 @@ QString usage() {
                           "  omacards review -c ID -r 1|3 [--json]\n"
                           "  omacards cram [-d D] [--steps N] [--json]\n"
                           "  omacards stats [--json]\n"
-                          "  omacards config [--new-per-day N] [--retention 0.70-0.99] [--json]\n"
+                          "  omacards config [--new-card-allowance N] [--retention 0.70-0.99] [--json]\n"
+                          "                       (--new-per-day is an accepted alias)\n"
                           "  omacards skill install [--json]\n");
 }
 } // namespace
@@ -540,7 +543,7 @@ int run(const QStringList &arguments) {
         object.insert("due", due);
         object.insert("totalDue", backend.countDue(options.deck));
         object.insert("newCardsOnStudyDay", backend.reviewSummary().newCardsOnStudyDay);
-        object.insert("newCardAllowance", backend.newPerDay());
+        object.insert("newCardAllowance", backend.newCardAllowance());
         object.insert("retention", backend.desiredRetention());
         object.insert("dayStartHour", backend.dayStartHour());
         object.insert("math", backend.mathEngine());
@@ -627,8 +630,8 @@ int run(const QStringList &arguments) {
         if (options.retention > 0 &&
             (options.retention < Config::kMinRetention || options.retention > Config::kMaxRetention))
             return fail(QObject::tr("Retention must be between 0.70 and 0.99"), json);
-        if (options.newPerDay > Config::kMaxNewPerDay)
-            return fail(QObject::tr("New cards per day must be 9999 or less"), json);
+        if (options.newCardAllowance > Config::kMaxNewPerDay)
+            return fail(QObject::tr("New-card allowance must be 9999 or less"), json);
         if (options.dayStartHour < -1 || options.dayStartHour > Config::kMaxDayStartHour)
             return fail(QObject::tr("Day start hour must be between 0 and 23"), json);
         // The QML setters report write failures as signals; the CLI must turn
@@ -639,8 +642,8 @@ int run(const QStringList &arguments) {
                 if (settingError.isEmpty())
                     settingError = message;
             });
-        if (options.newPerDay >= 0)
-            backend.setNewPerDay(options.newPerDay);
+        if (options.newCardAllowance >= 0)
+            backend.setNewCardAllowance(options.newCardAllowance);
         if (options.dayStartHour >= 0)
             backend.setDayStartHour(options.dayStartHour);
         if (options.retention > 0)
@@ -652,14 +655,15 @@ int run(const QStringList &arguments) {
         const ReviewSummary summary = backend.reviewSummary();
         QJsonObject object;
         object.insert("ok", true);
-        object.insert("newCardAllowance", backend.newPerDay());
+        object.insert("newCardAllowance", backend.newCardAllowance());
         object.insert("retention", backend.desiredRetention());
         object.insert("dayStartHour", backend.dayStartHour());
         object.insert("newCardsOnStudyDay", summary.newCardsOnStudyDay);
-        object.insert("newRemaining", qMax(0, backend.newPerDay() - summary.newCardsOnStudyDay));
+        object.insert("newRemaining", qMax(0, backend.newCardAllowance() - summary.newCardsOnStudyDay));
         write(object, json,
-              QObject::tr("New cards/day: %1 · reviewed new today: %2 · desired retention: %3% · day starts at %4")
-                  .arg(backend.newPerDay())
+              QObject::tr("New-card allowance: %1 · new cards on Study day: %2 · desired retention: %3% · "
+                          "day-start hour: %4")
+                  .arg(backend.newCardAllowance())
                   .arg(summary.newCardsOnStudyDay)
                   .arg(qRound(backend.desiredRetention() * 100))
                   .arg(QStringLiteral("%1:00").arg(backend.dayStartHour(), 2, 10, QLatin1Char('0'))));
@@ -675,7 +679,7 @@ int run(const QStringList &arguments) {
         object.insert("studyDayGood", summary.studyDayGood);
         object.insert("streak", summary.streak);
         object.insert("newCardsOnStudyDay", summary.newCardsOnStudyDay);
-        object.insert("newCardAllowance", backend.newPerDay());
+        object.insert("newCardAllowance", backend.newCardAllowance());
         object.insert("due", backend.availableCount());
         object.insert("totalDue", backend.countDue());
         object.insert("cards", allCards(decks, {}).size());
@@ -712,10 +716,10 @@ int run(const QStringList &arguments) {
         return 0;
     }
 
-    if (options.command == "decks" && options.path == "active") {
+    if (options.command == "decks" && (options.path == "current" || options.path == "active")) {
         const QString selected = backend.currentDeck();
         if (selected.isEmpty())
-            return fail(QObject::tr("No deck selected"), json);
+            return fail(QObject::tr("No current deck"), json);
         QJsonObject object;
         object.insert("ok", true);
         object.insert("deck", selected);
@@ -996,7 +1000,7 @@ int run(const QStringList &arguments) {
         if (!result.ok) {
             const QString message = result.failurePhase == RatingRecording::FailurePhase::SchedulingRead
                                         ? QObject::tr("Cannot read scheduling state: %1")
-                                        : QObject::tr("Cannot save review: %1");
+                                        : QObject::tr("Cannot record rating: %1");
             return fail(message.arg(result.storeError), json);
         }
 

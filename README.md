@@ -143,7 +143,7 @@ omacards review -c <card-id> -r 3
 omacards cram --deck Spanish --steps 20
 omacards stats
 omacards config
-omacards config --new-per-day 10 --day-start-hour 3 --retention 0.9
+omacards config --new-card-allowance 10 --day-start-hour 3 --retention 0.9
 omacards skill install
 ```
 

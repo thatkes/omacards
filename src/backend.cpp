@@ -65,8 +65,12 @@ bool Backend::initialize(QString *error) {
     m_persistedDeck = m_store.currentDeck();
     m_currentDeck = m_persistedDeck;
     m_lastStudied = m_store.deckLastStudied();
-    m_newPerDay = qBound(0, m_store.setting("new_per_day", QString::number(Config::kDefaultNewPerDay)).toInt(),
-                         Config::kMaxNewPerDay);
+    // Store::open copies legacy values forward; the nested fallback also
+    // covers databases read without that migration step.
+    const QString allowance =
+        m_store.setting(QStringLiteral("new_card_allowance"),
+                        m_store.setting(QStringLiteral("new_per_day"), QString::number(Config::kDefaultNewPerDay)));
+    m_newCardAllowance = qBound(0, allowance.toInt(), Config::kMaxNewPerDay);
     m_desiredRetention =
         qBound(Config::kMinRetention,
                m_store.setting("desired_retention", QString::number(Config::kDefaultRetention)).toDouble(),
@@ -85,7 +89,7 @@ void Backend::refresh() {
     if (m_currentDeck != m_persistedDeck)
         recordDeckSelection(m_currentDeck);
     m_planner.setDecks(m_deckRepo.deckData());
-    m_planner.configure(m_newPerDay, m_dayStartHour);
+    m_planner.configure(m_newCardAllowance, m_dayStartHour);
     QString storeError;
     if (!m_planner.refresh(&storeError))
         m_session.reportError(tr("Cannot read scheduling state: %1").arg(storeError));
@@ -131,11 +135,13 @@ void Backend::setCardFilter(const QString &filter) {
     emit cardsChanged();
 }
 
-void Backend::setNewPerDay(int count) {
+void Backend::setNewCardAllowance(int count) {
     const int clean = qBound(0, count, Config::kMaxNewPerDay);
-    if (m_newPerDay == clean)
+    if (m_newCardAllowance == clean)
         return;
-    m_newPerDay = clean;
+    m_newCardAllowance = clean;
+    m_store.setSetting(QStringLiteral("new_card_allowance"), QString::number(clean));
+    // Mirror the old key until every consumer reads the canonical one.
     m_store.setSetting(QStringLiteral("new_per_day"), QString::number(clean));
     if (!m_store.lastError().isEmpty())
         m_session.reportError(tr("Cannot save settings: %1").arg(m_store.lastError()));

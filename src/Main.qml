@@ -1528,12 +1528,12 @@ ApplicationWindow {
                                         implicitWidth: 38
                                         Layout.minimumWidth: 38
                                         Layout.maximumWidth: 38
-                                        onClicked: backend.setNewPerDay(Math.max(0, backend.newPerDay - 1))
+                                        onClicked: backend.setNewCardAllowance(Math.max(0, backend.newCardAllowance - 1))
                                     }
 
                                     Label {
                                         objectName: "settingsNewCardAllowanceValue"
-                                        text: backend.newPerDay
+                                        text: backend.newCardAllowance
                                         color: win.text
                                         font.pixelSize: 17
                                         font.family: "monospace"
@@ -1550,7 +1550,7 @@ ApplicationWindow {
                                         implicitWidth: 38
                                         Layout.minimumWidth: 38
                                         Layout.maximumWidth: 38
-                                        onClicked: backend.setNewPerDay(Math.min(999, backend.newPerDay + 1))
+                                        onClicked: backend.setNewCardAllowance(Math.min(999, backend.newCardAllowance + 1))
                                     }
                                 }
                             }

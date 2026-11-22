@@ -8,8 +8,8 @@
 
 StudyPlanner::StudyPlanner(StoreAdapter &store) : m_store(store) {}
 
-void StudyPlanner::configure(int newPerDay, int dayStartHour) {
-    m_newPerDay = newPerDay;
+void StudyPlanner::configure(int newCardAllowance, int dayStartHour) {
+    m_newCardAllowance = newCardAllowance;
     m_dayStartHour = dayStartHour;
 }
 
@@ -23,7 +23,7 @@ bool StudyPlanner::refresh(QString *storeError) {
     StudySnapshot next;
     next.states = m_store.states();
     next.hashes = m_store.hashes();
-    next.newBudget = qMax(0, m_newPerDay - m_store.newCardsToday(m_dayStartHour));
+    next.newBudget = qMax(0, m_newCardAllowance - m_store.newCardsOnStudyDay(m_dayStartHour));
     if (!m_store.lastError().isEmpty()) {
         // Never present a card with scheduling data we could not verify.
         m_snapshot = StudySnapshot{};
@@ -42,7 +42,7 @@ void StudyPlanner::updateNewBudget(QString *storeError) {
     if (!m_snapshotValid)
         return;
     m_store.clearError();
-    m_snapshot.newBudget = qMax(0, m_newPerDay - m_store.newCardsToday(m_dayStartHour));
+    m_snapshot.newBudget = qMax(0, m_newCardAllowance - m_store.newCardsOnStudyDay(m_dayStartHour));
     if (!m_store.lastError().isEmpty() && storeError)
         *storeError = m_store.lastError();
 }
@@ -217,7 +217,7 @@ QVariantMap StudyPlanner::statsSummary(const StatsSummaryInputs &inputs) const {
     result.insert("decks", inputs.deckCount);
     result.insert("newCardsOnStudyDay", inputs.summary.newCardsOnStudyDay);
     result.insert("newAvailable", newCount());
-    result.insert("newCardAllowance", m_newPerDay);
+    result.insert("newCardAllowance", m_newCardAllowance);
     result.insert("retention", qRound(inputs.desiredRetention * 100));
     result.insert("dayStartHour", m_dayStartHour);
     result.insert("sessionReviewed", inputs.sessionReviewed);
@@ -239,8 +239,8 @@ QHash<QString, QString> StorePlannerAdapter::hashes() const {
     return m_store.hashes();
 }
 
-int StorePlannerAdapter::newCardsToday(int dayStartHour) const {
-    return m_store.newCardsToday(dayStartHour);
+int StorePlannerAdapter::newCardsOnStudyDay(int dayStartHour) const {
+    return m_store.newCardsOnStudyDay(dayStartHour);
 }
 
 QString StorePlannerAdapter::lastError() const {

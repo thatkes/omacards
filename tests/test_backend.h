@@ -52,6 +52,7 @@ private slots:
     void setModeBoundarySemantics();
     void invalidRatingsAreNoOps();
     void settingsClampAndPersist();
+    void legacyAllowanceSettingMigratesAndMirrorsWrites();
     void signalContractsForRefreshAndNavigation();
     void modifyCardInvalidTypeNormalizesToBasic();
     void deckSummariesAndSearchFilterByDeck();

@@ -55,7 +55,7 @@ public:
     }
     QHash<QString, QString> hashes() const override { return {}; }
     void save(const QString &, const QString &, const FsrsState &) override {}
-    void logReview(const QString &, int rating, qint64, const FsrsState &, int, bool) override {
+    void recordRating(const QString &, int rating, qint64, const FsrsState &, int, bool) override {
         ++m_logCount;
         m_lastRating = rating;
         if (!m_writeError.isEmpty())

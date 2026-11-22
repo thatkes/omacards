@@ -17,6 +17,7 @@ private slots:
     void saveUpsertsByCardId();
     void removeExceptKeepsReviewsLog();
     void migratesLegacyReviewsSchema();
+    void migratesLegacyNewCardAllowanceKey();
     void summaryStreakBreaksOnMissingDay();
     void summaryStreakSurvivesDayWithoutReviews();
     void summaryCountsOnlyGood();

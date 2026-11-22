@@ -572,7 +572,7 @@ void TestBackend::backendReportsNewCountAndDeckSummaries() {
     QCOMPARE(summaries.at(0).toMap().value("new").toInt(), 4);
     QCOMPARE(summaries.at(1).toMap().value("name").toString(), QString("Beta"));
 
-    backend.setNewPerDay(3);
+    backend.setNewCardAllowance(3);
     QCOMPARE(backend.newCount(), 3);
     const QVariantList capped = backend.deckSummaries();
     QCOMPARE(capped.at(0).toMap().value("new").toInt(), 3);
@@ -1684,7 +1684,7 @@ void TestBackend::backendAppliesNewCardLimit() {
         QCOMPARE(backend.countDue(), 5);
         QCOMPARE(backend.availableCount(), 5);
 
-        backend.setNewPerDay(2);
+        backend.setNewCardAllowance(2);
         QCOMPARE(backend.availableCount(), 2);
         QCOMPARE(backend.dueCount(), 2);
         QCOMPARE(backend.reviewSummary().newCardsOnStudyDay, 0);
@@ -1697,14 +1697,14 @@ void TestBackend::backendAppliesNewCardLimit() {
         QCOMPARE(backend.availableCount(), 0);
         QCOMPARE(backend.dueCount(), 0);
 
-        backend.setNewPerDay(3);
+        backend.setNewCardAllowance(3);
         QCOMPARE(backend.availableCount(), 1);
         backend.setDesiredRetention(0.85);
     }
     Backend reopened(dir.path(), database);
     QString error;
     QVERIFY(reopened.initialize(&error));
-    QCOMPARE(reopened.newPerDay(), 3);
+    QCOMPARE(reopened.newCardAllowance(), 3);
     QCOMPARE(reopened.desiredRetention(), 0.85);
 }
 
@@ -1848,7 +1848,7 @@ void TestBackend::deckCountsMatchLibrarySummaries() {
     for (int i = 0; i < 2; ++i)
         QVERIFY(backend.createCard("Second", QString("S%1").arg(i), "b", "basic", {}, &error));
 
-    backend.setNewPerDay(3);
+    backend.setNewCardAllowance(3);
     backend.selectDeck("Second");
     const QVariantList summaries = backend.deckSummaries();
     QCOMPARE(summaries.at(0).toMap().value("new").toInt(), 2);
@@ -2156,11 +2156,11 @@ void TestBackend::settingsClampAndPersist() {
         QVERIFY(backend.initialize(&error));
         QSignalSpy changed(&backend, &Backend::settingsChanged);
 
-        backend.setNewPerDay(-5);
-        QCOMPARE(backend.newPerDay(), 0);
+        backend.setNewCardAllowance(-5);
+        QCOMPARE(backend.newCardAllowance(), 0);
         QCOMPARE(changed.count(), 1);
-        backend.setNewPerDay(10000);
-        QCOMPARE(backend.newPerDay(), Config::kMaxNewPerDay);
+        backend.setNewCardAllowance(10000);
+        QCOMPARE(backend.newCardAllowance(), Config::kMaxNewPerDay);
         QCOMPARE(changed.count(), 2);
 
         backend.setDesiredRetention(0.1);
@@ -2183,7 +2183,7 @@ void TestBackend::settingsClampAndPersist() {
         Backend reopened(dir.path(), database);
         QString error;
         QVERIFY(reopened.initialize(&error));
-        QCOMPARE(reopened.newPerDay(), Config::kMaxNewPerDay);
+        QCOMPARE(reopened.newCardAllowance(), Config::kMaxNewPerDay);
         QCOMPARE(reopened.desiredRetention(), Config::kMaxRetention);
         QCOMPARE(reopened.dayStartHour(), Config::kMaxDayStartHour);
     }
@@ -2194,16 +2194,49 @@ void TestBackend::settingsClampAndPersist() {
         Store store(rawDatabase);
         QString error;
         QVERIFY(store.open(&error));
-        QVERIFY(store.setSetting("new_per_day", "100000"));
+        QVERIFY(store.setSetting("new_card_allowance", "100000"));
         QVERIFY(store.setSetting("desired_retention", "7.5"));
         QVERIFY(store.setSetting("day_start_hour", "77"));
     }
     Backend clamped(rawDir.path(), rawDatabase);
     QString error;
     QVERIFY(clamped.initialize(&error));
-    QCOMPARE(clamped.newPerDay(), Config::kMaxNewPerDay);
+    QCOMPARE(clamped.newCardAllowance(), Config::kMaxNewPerDay);
     QCOMPARE(clamped.desiredRetention(), Config::kMaxRetention);
     QCOMPARE(clamped.dayStartHour(), Config::kMaxDayStartHour);
+}
+
+void TestBackend::legacyAllowanceSettingMigratesAndMirrorsWrites() {
+    QTemporaryDir dir;
+    const QString database = dir.filePath("state.db");
+    const QString connection = QStringLiteral("omacards-backend-allowance-setup");
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
+        db.setDatabaseName(database);
+        QVERIFY(db.open());
+        QSqlQuery query(db);
+        QVERIFY(query.exec(QStringLiteral("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")));
+        QVERIFY(query.exec(QStringLiteral("INSERT INTO settings (key, value) VALUES ('new_per_day', '4')")));
+        db.close();
+        db = QSqlDatabase();
+    }
+    QSqlDatabase::removeDatabase(connection);
+
+    Backend backend(dir.path(), database);
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QCOMPARE(backend.newCardAllowance(), 4);
+
+    backend.setNewCardAllowance(6);
+    {
+        Store reader(database);
+        QVERIFY(reader.open(&error));
+        QCOMPARE(reader.setting(QStringLiteral("new_card_allowance")), QStringLiteral("6"));
+        QCOMPARE(reader.setting(QStringLiteral("new_per_day")), QStringLiteral("6"));
+    }
+    Backend reopened(dir.path(), database);
+    QVERIFY(reopened.initialize(&error));
+    QCOMPARE(reopened.newCardAllowance(), 6);
 }
 
 void TestBackend::signalContractsForRefreshAndNavigation() {

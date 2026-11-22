@@ -23,7 +23,7 @@ Card makeCard(const QString &id, const QString &question, const QString &answer)
     return card;
 }
 
-struct LoggedReview {
+struct RecordedRating {
     QString cardId;
     int rating = 0;
     qint64 at = 0;
@@ -51,8 +51,8 @@ public:
         m_hashes.insert(cardId, hash);
     }
 
-    void logReview(const QString &cardId, int rating, qint64 at, const FsrsState &state, int intervalDays,
-                   bool wasNew) override {
+    void recordRating(const QString &cardId, int rating, qint64 at, const FsrsState &state, int intervalDays,
+                      bool wasNew) override {
         m_reviews.append({cardId, rating, at, state, intervalDays, wasNew});
         if (!m_writeError.isEmpty())
             m_error = m_writeError;
@@ -69,12 +69,12 @@ public:
     void failReads(const QString &error) { m_readError = error; }
 
     FsrsState savedState(const QString &cardId) const { return m_states.value(cardId); }
-    QVector<LoggedReview> reviews() const { return m_reviews; }
+    QVector<RecordedRating> reviews() const { return m_reviews; }
 
 private:
     QHash<QString, FsrsState> m_states;
     QHash<QString, QString> m_hashes;
-    QVector<LoggedReview> m_reviews;
+    QVector<RecordedRating> m_reviews;
     QString m_writeError;
     QString m_readError;
     mutable QString m_error;
@@ -104,7 +104,7 @@ void TestRatingRecording::goodNewCardRecordsStateAndReturnsIntervalAndDue() {
     verifyState(result.state, 3.0412, 4.490943335350446, kNow + 3 * kDayMs, 1, 0);
     verifyState(store.savedState(card.id), 3.0412, 4.490943335350446, kNow + 3 * kDayMs, 1, 0);
 
-    const QVector<LoggedReview> reviews = store.reviews();
+    const QVector<RecordedRating> reviews = store.reviews();
     QCOMPARE(reviews.size(), 1);
     QCOMPARE(reviews.first().cardId, card.id);
     QCOMPARE(reviews.first().rating, 3);
@@ -136,7 +136,7 @@ void TestRatingRecording::againUsesStoredSchedulingState() {
     verifyState(result.state, 1.3807194683897863, 6.607894767180462, kNow + kDayMs, 3, 2);
     verifyState(store.savedState(card.id), 1.3807194683897863, 6.607894767180462, kNow + kDayMs, 3, 2);
 
-    const QVector<LoggedReview> reviews = store.reviews();
+    const QVector<RecordedRating> reviews = store.reviews();
     QCOMPARE(reviews.size(), 1);
     QCOMPARE(reviews.first().cardId, card.id);
     QCOMPARE(reviews.first().rating, 1);
@@ -186,7 +186,7 @@ void TestRatingRecording::reviewHistoryRecordsWhetherCardWasNew() {
     QVERIFY(recording.record(existing, Rating::Good, 0.9, kNow).ok);
     QVERIFY(recording.record(fresh, Rating::Good, 0.9, kNow).ok);
 
-    const QVector<LoggedReview> reviews = store.reviews();
+    const QVector<RecordedRating> reviews = store.reviews();
     QCOMPARE(reviews.size(), 2);
     QCOMPARE(reviews.at(0).cardId, existing.id);
     QVERIFY(!reviews.at(0).wasNew);

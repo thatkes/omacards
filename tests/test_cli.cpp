@@ -58,7 +58,10 @@ void TestCli::helpIsHeadless() {
     const QByteArray help = process.readAllStandardOutput();
     QVERIFY(help.contains("Usage:"));
     QVERIFY(help.contains("omacards use-deck NAME"));
-    QVERIFY(help.contains("omacards decks active"));
+    QVERIFY(help.contains("omacards decks current"));
+    QVERIFY(help.contains("(alias: active)"));
+    QVERIFY(help.contains("--new-card-allowance"));
+    QVERIFY(help.contains("--new-per-day"));
 }
 
 void TestCli::addCardsCreatesDeckBulk() {
@@ -417,7 +420,7 @@ void TestCli::cliConfigReportsWriteFailure() {
         QFile::setPermissions(database, QFile::ReadOwner | QFile::WriteOwner);
         QSKIP("file permissions are ignored for this user");
     }
-    QCOMPARE(Cli::run({"config", "--new-per-day", "5", "--json"}), 1);
+    QCOMPARE(Cli::run({"config", "--new-card-allowance", "5", "--json"}), 1);
     QFile::setPermissions(database, QFile::ReadOwner | QFile::WriteOwner);
 }
 
@@ -832,9 +835,9 @@ void TestCli::useDeckCommandContract() {
     QCOMPARE(runCliText({"use-deck", "Beta"}, decks, database, &code).trimmed(), QString("Using deck Beta"));
     QCOMPARE(code, 0);
 
-    const QJsonObject active = runCli({"decks", "active", "--json"}, decks, database, &code);
+    const QJsonObject current = runCli({"decks", "current", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
-    QCOMPARE(active.value(QStringLiteral("deck")).toString(), QString("Beta"));
+    QCOMPARE(current.value(QStringLiteral("deck")).toString(), QString("Beta"));
 
     const QJsonObject unknown = runCli({"use-deck", "Missing", "--json"}, decks, database, &code);
     QCOMPARE(code, 1);
@@ -852,11 +855,11 @@ void TestCli::useDeckCommandContract() {
     // A per-invocation --deck flag must not change the Current deck.
     runCli({"stats", "--deck", "Alpha", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
-    QCOMPARE(runCliText({"decks", "active"}, decks, database, &code).trimmed(), QString("Beta"));
+    QCOMPARE(runCliText({"decks", "current"}, decks, database, &code).trimmed(), QString("Beta"));
     QCOMPARE(code, 0);
 }
 
-void TestCli::decksActiveCommandContract() {
+void TestCli::decksCurrentCommandContract() {
     QTemporaryDir emptyDir;
     const QString emptyDecks = emptyDir.filePath("decks");
     const QString emptyDatabase = emptyDir.filePath("state.db");
@@ -864,14 +867,23 @@ void TestCli::decksActiveCommandContract() {
 
     int code = -1;
     QByteArray standardError;
-    const QJsonObject none = runCli({"decks", "active", "--json"}, emptyDecks, emptyDatabase, &code, &standardError);
+    const QJsonObject none = runCli({"decks", "current", "--json"}, emptyDecks, emptyDatabase, &code, &standardError);
     QCOMPARE(code, 1);
     QCOMPARE(sortedKeys(none), QStringList({"error", "ok"}));
     QVERIFY(!none.value(QStringLiteral("ok")).toBool());
-    QCOMPARE(none.value(QStringLiteral("error")).toString(), QString("No deck selected"));
+    QCOMPARE(none.value(QStringLiteral("error")).toString(), QString("No current deck"));
+    runCli({"decks", "current"}, emptyDecks, emptyDatabase, &code, &standardError);
+    QCOMPARE(code, 1);
+    QVERIFY(standardError.contains("No current deck"));
+
+    // `active` stays an accepted alias with the same output in both modes.
+    const QJsonObject emptyAlias =
+        runCli({"decks", "active", "--json"}, emptyDecks, emptyDatabase, &code, &standardError);
+    QCOMPARE(code, 1);
+    QCOMPARE(QJsonDocument(emptyAlias).toJson(), QJsonDocument(none).toJson());
     runCli({"decks", "active"}, emptyDecks, emptyDatabase, &code, &standardError);
     QCOMPARE(code, 1);
-    QVERIFY(standardError.contains("No deck selected"));
+    QVERIFY(standardError.contains("No current deck"));
 
     QTemporaryDir dir;
     const QString decks = dir.filePath("decks");
@@ -884,12 +896,15 @@ void TestCli::decksActiveCommandContract() {
         QVERIFY(owned->initialize(&error));
         QVERIFY(owned->createDeck("Only", &error));
     }
-    QCOMPARE(runCliText({"decks", "active"}, decks, database, &code).trimmed(), QString("Only"));
+    QCOMPARE(runCliText({"decks", "current"}, decks, database, &code).trimmed(), QString("Only"));
     QCOMPARE(code, 0);
-    const QJsonObject active = runCli({"decks", "active", "--json"}, decks, database, &code);
+    const QJsonObject current = runCli({"decks", "current", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
-    QCOMPARE(sortedKeys(active), QStringList({"deck", "ok"}));
-    QCOMPARE(active.value(QStringLiteral("deck")).toString(), QString("Only"));
+    QCOMPARE(sortedKeys(current), QStringList({"deck", "ok"}));
+    QCOMPARE(current.value(QStringLiteral("deck")).toString(), QString("Only"));
+    const QJsonObject alias = runCli({"decks", "active", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(QJsonDocument(alias).toJson(), QJsonDocument(current).toJson());
 }
 
 void TestCli::reviewCommandContract() {
@@ -1056,8 +1071,8 @@ void TestCli::reviewWrapsWriteStoreErrors() {
     QCOMPARE(sortedKeys(failure), QStringList({"error", "ok"}));
     QVERIFY(!failure.value(QStringLiteral("ok")).toBool());
     const QString message = failure.value(QStringLiteral("error")).toString();
-    QVERIFY2(message.startsWith(QStringLiteral("Cannot save review: ")), qPrintable(message));
-    QVERIFY(message.size() > QStringLiteral("Cannot save review: ").size());
+    QVERIFY2(message.startsWith(QStringLiteral("Cannot record rating: ")), qPrintable(message));
+    QVERIFY(message.size() > QStringLiteral("Cannot record rating: ").size());
 }
 
 void TestCli::cramCommandContract() {
@@ -1555,20 +1570,20 @@ void TestCli::configValidationAndPersistence() {
     };
     expectError({"config", "--retention", "0.69", "--json"}, "Retention must be between 0.70 and 0.99");
     expectError({"config", "--retention", "1.0", "--json"}, "Retention must be between 0.70 and 0.99");
-    expectError({"config", "--new-per-day", "10000", "--json"}, "New cards per day must be 9999 or less");
+    expectError({"config", "--new-card-allowance", "10000", "--json"}, "New-card allowance must be 9999 or less");
     expectError({"config", "--day-start-hour", "-2", "--json"}, "Day start hour must be between 0 and 23");
     expectError({"config", "--day-start-hour", "24", "--json"}, "Day start hour must be between 0 and 23");
 
     const QJsonObject boundaries =
-        runCli({"config", "--new-per-day", "0", "--retention", "0.99", "--day-start-hour", "23", "--json"}, decks,
-               database, &code);
+        runCli({"config", "--new-card-allowance", "0", "--retention", "0.99", "--day-start-hour", "23", "--json"},
+               decks, database, &code);
     QCOMPARE(code, 0);
     QCOMPARE(boundaries.value(QStringLiteral("newCardAllowance")).toInt(), 0);
     QCOMPARE(boundaries.value(QStringLiteral("retention")).toDouble(), 0.99);
     QCOMPARE(boundaries.value(QStringLiteral("dayStartHour")).toInt(), 23);
 
-    runCli({"config", "--new-per-day", "5", "--retention", "0.70", "--day-start-hour", "0", "--json"}, decks, database,
-           &code);
+    runCli({"config", "--new-card-allowance", "5", "--retention", "0.70", "--day-start-hour", "0", "--json"}, decks,
+           database, &code);
     QCOMPARE(code, 0);
     const QJsonObject reread = runCli({"config", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
@@ -1595,6 +1610,16 @@ void TestCli::configValidationAndPersistence() {
     QCOMPARE(code, 0);
     QCOMPARE(budget.value(QStringLiteral("newCardsOnStudyDay")).toInt(), 1);
     QCOMPARE(budget.value(QStringLiteral("newRemaining")).toInt(), 4);
+
+    // The legacy flag stays accepted and writes the canonical setting.
+    const QJsonObject alias = runCli({"config", "--new-per-day", "7", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(alias.value(QStringLiteral("newCardAllowance")).toInt(), 7);
+    const QString configText = runCliText({"config"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY(configText.contains(QStringLiteral("New-card allowance: 7")));
+    QVERIFY(configText.contains(QStringLiteral("new cards on Study day: ")));
+    QVERIFY(configText.contains(QStringLiteral("day-start hour: ")));
 }
 
 void TestCli::warmReportsRenderedAndCached() {
@@ -1755,4 +1780,12 @@ void TestCli::flagEqualsFormsMatchSeparateArgs() {
     QCOMPARE(codeSeparate, 0);
     QCOMPARE(codeEquals, 0);
     QCOMPARE(QJsonDocument(previewEquals).toJson(), QJsonDocument(previewSeparate).toJson());
+
+    const QJsonObject allowanceSeparate =
+        runCli({"config", "--new-card-allowance", "8", "--json"}, separateDecks, separateDb, &codeSeparate);
+    const QJsonObject allowanceEquals =
+        runCli({"config", "--new-card-allowance=8", "--json"}, equalsDecks, equalsDb, &codeEquals);
+    QCOMPARE(codeSeparate, 0);
+    QCOMPARE(codeEquals, 0);
+    QCOMPARE(QJsonDocument(allowanceEquals).toJson(), QJsonDocument(allowanceSeparate).toJson());
 }
