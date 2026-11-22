@@ -56,8 +56,18 @@ public:
     QVariantList deckSummaries(const QString &currentDeck) const;
     QVariantList cardList(const QString &currentDeck, const QString &filter, const QString &newText,
                           const QString &dueText) const;
-    QVariantMap statsSummary(const ReviewSummary &summary, int dueCount, int totalCards, int deckCount,
-                             int sessionReviewed, int sessionGood, double desiredRetention) const;
+    // Inputs to the stats summary: the review history plus the counts and
+    // settings measured when the summary is requested.
+    struct StatsSummaryInputs {
+        ReviewSummary summary;
+        int dueCount;
+        int totalCards;
+        int deckCount;
+        int sessionReviewed;
+        int sessionGood;
+        double desiredRetention;
+    };
+    QVariantMap statsSummary(const StatsSummaryInputs &inputs) const;
 
 private:
     struct StudySnapshot {

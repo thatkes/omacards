@@ -148,8 +148,9 @@ public slots:
     Q_INVOKABLE void requestShow();
     Q_INVOKABLE QString statsText() const;
     Q_INVOKABLE QVariantMap statsSummary() const {
-        return m_planner.statsSummary(m_store.summary(m_dayStartHour), dueCount(), totalCards(),
-                                      m_deckRepo.deckNames().size(), reviewed(), good(), m_desiredRetention);
+        return m_planner.statsSummary({m_store.summary(m_dayStartHour), dueCount(), totalCards(),
+                                       static_cast<int>(m_deckRepo.deckNames().size()), reviewed(), good(),
+                                       m_desiredRetention});
     }
 
 signals:

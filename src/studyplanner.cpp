@@ -203,24 +203,24 @@ QVariantList StudyPlanner::cardList(const QString &currentDeck, const QString &f
     return list;
 }
 
-QVariantMap StudyPlanner::statsSummary(const ReviewSummary &summary, int dueCount, int totalCards, int deckCount,
-                                       int sessionReviewed, int sessionGood, double desiredRetention) const {
+QVariantMap StudyPlanner::statsSummary(const StatsSummaryInputs &inputs) const {
     QVariantMap result;
-    result.insert("totalReviews", summary.total);
-    result.insert("today", summary.today);
-    result.insert("todayGood", summary.todayGood);
-    result.insert("streakDays", summary.streakDays);
-    result.insert("accuracy", summary.today > 0 ? qRound(100.0 * summary.todayGood / summary.today) : 0);
-    result.insert("due", dueCount);
-    result.insert("cards", totalCards);
-    result.insert("decks", deckCount);
-    result.insert("newToday", summary.newToday);
+    result.insert("totalReviews", inputs.summary.total);
+    result.insert("today", inputs.summary.today);
+    result.insert("todayGood", inputs.summary.todayGood);
+    result.insert("streakDays", inputs.summary.streakDays);
+    result.insert("accuracy",
+                  inputs.summary.today > 0 ? qRound(100.0 * inputs.summary.todayGood / inputs.summary.today) : 0);
+    result.insert("due", inputs.dueCount);
+    result.insert("cards", inputs.totalCards);
+    result.insert("decks", inputs.deckCount);
+    result.insert("newToday", inputs.summary.newToday);
     result.insert("newAvailable", newCount());
     result.insert("newPerDay", m_newPerDay);
-    result.insert("retention", qRound(desiredRetention * 100));
+    result.insert("retention", qRound(inputs.desiredRetention * 100));
     result.insert("dayStartHour", m_dayStartHour);
-    result.insert("sessionReviewed", sessionReviewed);
-    result.insert("sessionGood", sessionGood);
+    result.insert("sessionReviewed", inputs.sessionReviewed);
+    result.insert("sessionGood", inputs.sessionGood);
     return result;
 }
 

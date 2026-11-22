@@ -125,7 +125,7 @@ void TestStudyPlanner::noDecksIsSafe() {
     QVERIFY(planner.deckSummaries(QString()).isEmpty());
     QVERIFY(planner.cardList(QString(), "needle", "new", "due").isEmpty());
 
-    const QVariantMap stats = planner.statsSummary(store.summary(0), 0, 0, 0, 0, 0, Config::kDefaultRetention);
+    const QVariantMap stats = planner.statsSummary({store.summary(0), 0, 0, 0, 0, 0, Config::kDefaultRetention});
     QCOMPARE(stats.value("accuracy").toInt(), 0);
     QCOMPARE(stats.value("newAvailable").toInt(), 0);
     QCOMPARE(stats.value("streakDays").toInt(), 0);
@@ -671,7 +671,7 @@ void TestStudyPlanner::statsSummaryNumericContract() {
     planner.configure(2, 0);
     QVERIFY(planner.refresh(&error));
 
-    const QVariantMap summary = planner.statsSummary(store.summary(0), 7, 3, 1, 4, 3, 0.85);
+    const QVariantMap summary = planner.statsSummary({store.summary(0), 7, 3, 1, 4, 3, 0.85});
     QStringList keys = summary.keys();
     QStringList expected{"accuracy",        "cards",      "dayStartHour", "decks",     "due",
                          "newAvailable",    "newPerDay",  "newToday",     "retention", "sessionGood",
@@ -703,7 +703,7 @@ void TestStudyPlanner::statsSummaryNumericContract() {
     StorePlannerAdapter emptyAdapter(emptyStore);
     StudyPlanner emptyPlanner(emptyAdapter);
     emptyPlanner.configure(2, 0);
-    const QVariantMap empty = emptyPlanner.statsSummary(emptyStore.summary(0), 0, 0, 0, 0, 0, 0.9);
+    const QVariantMap empty = emptyPlanner.statsSummary({emptyStore.summary(0), 0, 0, 0, 0, 0, 0.9});
     QCOMPARE(empty.value("accuracy").toInt(), 0);
     QCOMPARE(empty.value("streakDays").toInt(), 0);
     QCOMPARE(empty.value("totalReviews").toInt(), 0);

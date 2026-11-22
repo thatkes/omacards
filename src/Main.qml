@@ -39,7 +39,7 @@ ApplicationWindow {
     property string editCardId: ""
     property string pendingDeck: ""
     property int cardIndex: 0
-    property string studyCardKey: ""
+    property string lastPresentedStudyState: ""
 
     function withAlpha(color, alpha) {
         return Qt.rgba(color.r, color.g, color.b, alpha)
@@ -178,8 +178,8 @@ ApplicationWindow {
         target: backend
         function onCardChanged() {
             const key = backend.currentCardId + ":" + backend.showingAnswer
-            if (key !== win.studyCardKey) {
-                win.studyCardKey = key
+            if (key !== win.lastPresentedStudyState) {
+                win.lastPresentedStudyState = key
                 win.resetStudyScroll()
             }
         }
