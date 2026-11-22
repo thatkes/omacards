@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$ROOT"
+
+# Keep local-only paths untracked on every push, as lint and pre-commit do.
+exec ./bin/check-local-only-files

@@ -1,0 +1,51 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 1 ]; then
+    printf 'Usage: %s <absolute-path-to-worktree>\n' "$0" >&2
+    exit 2
+fi
+
+target=$1
+case $target in
+    /*) ;;
+    *)
+        printf 'Target must be an absolute path: %s\n' "$target" >&2
+        exit 2
+        ;;
+esac
+
+source_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+source_git_dir=$(git -C "$source_root" rev-parse --path-format=absolute --git-common-dir)
+
+if [ ! -d "$target" ]; then
+    printf 'Target is not a directory: %s\n' "$target" >&2
+    exit 1
+fi
+
+target_root=$(git -C "$target" rev-parse --show-toplevel 2>/dev/null || true)
+if [ -z "$target_root" ]; then
+    printf 'Target is not a worktree of this repository: %s\n' "$target" >&2
+    exit 1
+fi
+
+target_git_dir=$(git -C "$target" rev-parse --path-format=absolute --git-common-dir)
+if [ "$target_git_dir" != "$source_git_dir" ]; then
+    printf 'Target is not a worktree of this repository: %s\n' "$target" >&2
+    exit 1
+fi
+
+if [ "$target_root" = "$source_root" ]; then
+    printf 'Target is the source worktree: %s\n' "$target" >&2
+    exit 1
+fi
+
+for path in AGENTS.md docs/agents docs/adr MISSION.md NOTES.md \
+    RESOURCES.md assets learning-records lessons reference; do
+    if [ -e "$source_root/$path" ]; then
+        parent=$(dirname -- "$path")
+        mkdir -p "$target_root/$parent"
+        cp -R "$source_root/$path" "$target_root/$parent/"
+        printf 'Copied %s to %s/%s\n' "$path" "$target_root" "$path"
+    fi
+done
