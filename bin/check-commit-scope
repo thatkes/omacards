@@ -26,6 +26,8 @@ if [ -z "$staged" ]; then
     exit 0
 fi
 
+newline='
+'
 bad=""
 while IFS= read -r f; do
     [ -z "$f" ] && continue
@@ -35,10 +37,10 @@ while IFS= read -r f; do
         AGENTS.md) ;;
         README*|CHANGELOG*) ;;
         */*) # files in subdirs other than docs/ are checked above
-            bad="${bad}${bad:+$'\n'}$f" ;;
+            bad="${bad}${bad:+$newline}$f" ;;
         *.md) ;; # root-level markdown
         *)
-            bad="${bad}${bad:+$'\n'}$f" ;;
+            bad="${bad}${bad:+$newline}$f" ;;
     esac
 done <<EOF
 $staged
