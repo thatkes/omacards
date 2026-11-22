@@ -5,7 +5,7 @@
 #include <QString>
 
 // Parsers for external card formats. They only produce card drafts; applying
-// them to decks and scheduling state stays in Backend.
+// them to decks and scheduling state is done in DeckRepository, reached through Backend.
 namespace DeckImport {
 
 struct Result {
