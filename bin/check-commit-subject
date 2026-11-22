@@ -27,8 +27,8 @@ else
     fi
     subject=$(awk '
       /^#/ { next }
-      /^[[:space:]]*$/ && !found { next }
-      !found { print; found = 1 }
+      /^[[:space:]]*$/ && !haveSubject { next }
+      !haveSubject { print; haveSubject = 1 }
     ' "$1")
     [ -n "$subject" ] || exit 0
     check_subject "$1" "$subject"
