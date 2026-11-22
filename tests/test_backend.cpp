@@ -4,7 +4,11 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
+#include <QMouseEvent>
+#include <QWheelEvent>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QRectF>
@@ -54,10 +58,29 @@ struct MainWindowHarness {
         return window ? window->findChild<QQuickItem *>(objectName) : nullptr;
     }
 
+    void settle() const {
+        QCoreApplication::processEvents();
+        QTest::qWait(30);
+    }
+
+    // DeckRepository debounces watcher signals for 120 ms; let one reload
+    // finish before asserting on study state after creating cards.
+    void settleFileWatcher() const {
+        QTest::qWait(200);
+        QCoreApplication::processEvents();
+    }
+
     QQmlEngine engine;
     Theme theme;
     QObject *window = nullptr;
 };
+
+QString manyCardLines(int count) {
+    QString text;
+    for (int i = 0; i < count; ++i)
+        text += QStringLiteral("<div>line %1 stays on one line</div>").arg(i);
+    return text;
+}
 
 } // namespace
 
@@ -388,6 +411,370 @@ void TestBackend::qmlCanNavigateLibraryCards() {
     QVERIFY(QMetaObject::invokeMethod(view.window, "removeSelectedCard"));
     QCOMPARE(backend.totalCards(), 2);
     QCOMPARE(backend.cardList().size(), 2);
+}
+
+void TestBackend::qmlStudyScrollViewClipsAndSizes() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Study", &error));
+    QVERIFY(backend.createCard("Study", "Short question", manyCardLines(40), "basic", {}, &error));
+    backend.selectDeck("Study");
+    backend.setMode("cram");
+    backend.refresh();
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    window->resize(window->minimumWidth(), window->minimumHeight());
+    QVERIFY(QMetaObject::invokeMethod(view.window, "startStudy", Q_ARG(QVariant, QStringLiteral("cram"))));
+    view.settleFileWatcher();
+    QCOMPARE(view.window->property("screen").toString(), QStringLiteral("study"));
+
+    auto *scroll = view.item(QStringLiteral("studyScrollView"));
+    auto *verticalBar = view.item(QStringLiteral("studyVerticalScrollBar"));
+    auto *horizontalBar = view.item(QStringLiteral("studyHorizontalScrollBar"));
+    auto *question = view.item(QStringLiteral("studyQuestionLabel"));
+    auto *answer = view.item(QStringLiteral("studyAnswerLabel"));
+    QVERIFY(scroll && verticalBar && horizontalBar && question && answer);
+    QVERIFY(scroll->findChild<QQuickItem *>(QStringLiteral("studyQuestionLabel")));
+    QVERIFY(scroll->findChild<QQuickItem *>(QStringLiteral("studyAnswerLabel")));
+    QVERIFY(scroll->property("clip").toBool());
+    QCOMPARE(horizontalBar->property("policy").toInt(), static_cast<int>(Qt::ScrollBarAlwaysOff));
+
+    auto *flickable = scroll->property("contentItem").value<QQuickItem *>();
+    QVERIFY(flickable);
+    QVERIFY(flickable->property("contentHeight").toReal() <= flickable->height() + 1.0);
+    QVERIFY(verticalBar->property("size").toDouble() >= 0.99);
+
+    auto visualRect = [](QQuickItem *item) { return item->mapRectToScene(item->boundingRect()); };
+    const QStringList fixedNames{"studyDeckLabel",   "studyModeLabel",  "studyShowAnswer", "studyHint",
+                                 "studyAgainButton", "studyGoodButton", "reviewGoodLabel"};
+    QList<QQuickItem *> fixed;
+    for (const QString &name : fixedNames) {
+        QQuickItem *item = view.item(name);
+        QVERIFY2(item, qPrintable(name + QStringLiteral(" is missing")));
+        QVERIFY2(!scroll->isAncestorOf(item), qPrintable(name + QStringLiteral(" is inside the viewport")));
+        fixed << item;
+    }
+    QList<QRectF> places;
+    for (QQuickItem *item : fixed)
+        places << visualRect(item);
+
+    QVERIFY(QMetaObject::invokeMethod(view.window, "flipAndResetStudyScroll"));
+    view.settle();
+    QVERIFY(backend.showingAnswer());
+
+    const qreal maxContentY = qMax<qreal>(0.0, flickable->property("contentHeight").toReal() - flickable->height());
+    QVERIFY2(maxContentY > 50.0, "long card content should overflow the viewport");
+    QVERIFY(verticalBar->property("size").toDouble() < 0.99);
+    flickable->setProperty("contentY", maxContentY / 2);
+    view.settle();
+
+    for (int i = 0; i < fixed.size(); ++i)
+        QCOMPARE(visualRect(fixed.at(i)), places.at(i));
+
+    const qreal shortViewportHeight = scroll->height();
+    const qreal heldPosition = flickable->property("contentY").toReal();
+    window->resize(1200, 900);
+    view.settle();
+    QVERIFY2(scroll->height() > shortViewportHeight + 100.0, "viewport did not grow with the window");
+    const qreal grownMax = qMax<qreal>(0.0, flickable->property("contentHeight").toReal() - flickable->height());
+    QVERIFY(qAbs(flickable->property("contentY").toReal() - qMin(heldPosition, grownMax)) < 1.0);
+}
+
+void TestBackend::qmlStudyScrollFirstKeysAndFlipFallbacks() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Study", &error));
+    QVERIFY(backend.createCard("Study", "Long card", manyCardLines(40), "basic", {}, &error));
+    backend.selectDeck("Study");
+    backend.setMode("cram");
+    backend.refresh();
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    window->resize(window->minimumWidth(), window->minimumHeight());
+    QVERIFY(QMetaObject::invokeMethod(view.window, "startStudy", Q_ARG(QVariant, QStringLiteral("cram"))));
+    view.settleFileWatcher();
+
+    auto *scroll = view.item(QStringLiteral("studyScrollView"));
+    QVERIFY(scroll);
+    auto *flickable = scroll->property("contentItem").value<QQuickItem *>();
+    QVERIFY(flickable);
+    auto press = [&](Qt::Key key) {
+        QTest::keyClick(window, key);
+        view.settle();
+    };
+    auto position = [&] { return flickable->property("contentY").toReal(); };
+    auto maxPosition = [&] {
+        return qMax<qreal>(0.0, flickable->property("contentHeight").toReal() - flickable->height());
+    };
+
+    QVERIFY(!backend.showingAnswer());
+    press(Qt::Key_Down); // the short question cannot scroll, so it flips
+    QVERIFY(backend.showingAnswer());
+    QVERIFY2(maxPosition() > 50.0, "the long answer should scroll");
+
+    press(Qt::Key_Down);
+    QVERIFY(backend.showingAnswer());
+    QVERIFY(position() > 0.0);
+    const qreal afterDown = position();
+    press(Qt::Key_Up);
+    QVERIFY(backend.showingAnswer());
+    QVERIFY(position() < afterDown);
+
+    press(Qt::Key_J);
+    QVERIFY(backend.showingAnswer());
+    QVERIFY(position() > 0.0);
+    const qreal afterJ = position();
+    press(Qt::Key_K);
+    QVERIFY(backend.showingAnswer());
+    QVERIFY(position() < afterJ);
+
+    flickable->setProperty("contentY", 0.0);
+    view.settle();
+    press(Qt::Key_K); // at the top, K flips
+    QVERIFY(!backend.showingAnswer());
+    press(Qt::Key_J); // the short question cannot scroll, so J flips
+    QVERIFY(backend.showingAnswer());
+    flickable->setProperty("contentY", maxPosition());
+    view.settle();
+    press(Qt::Key_Down); // at the bottom, Down flips
+    QVERIFY(!backend.showingAnswer());
+
+    flickable->setProperty("contentY", 0.0);
+    press(Qt::Key_Space);
+    QVERIFY(backend.showingAnswer());
+    press(Qt::Key_Return);
+    QVERIFY(!backend.showingAnswer());
+    press(Qt::Key_Enter);
+    QVERIFY(backend.showingAnswer());
+    QVERIFY(position() < 1.0);
+}
+
+void TestBackend::qmlStudyRatingKeysKeepTheirMeaning() {
+    const QList<QPair<Qt::Key, int>> cases{{Qt::Key_Left, 0}, {Qt::Key_Right, 1}, {Qt::Key_A, 0}, {Qt::Key_G, 1}};
+    for (const auto &entry : cases) {
+        QTemporaryDir dir;
+        Backend backend(dir.path(), dir.filePath("state.db"));
+        QString error;
+        QVERIFY(backend.initialize(&error));
+        QVERIFY(backend.createDeck("Study", &error));
+        QVERIFY(backend.createCard("Study", "Question?", "Answer", "basic", {}, &error));
+        backend.selectDeck("Study");
+
+        MainWindowHarness view(backend);
+        QVERIFY(view.window);
+        auto *window = qobject_cast<QQuickWindow *>(view.window);
+        QVERIFY(window);
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QVERIFY(QMetaObject::invokeMethod(view.window, "startStudy", Q_ARG(QVariant, QStringLiteral("review"))));
+        view.settleFileWatcher();
+
+        QTest::keyClick(window, Qt::Key_Space);
+        view.settle();
+        QVERIFY(backend.showingAnswer());
+        QTest::keyClick(window, entry.first);
+        view.settle();
+        QCOMPARE(backend.reviewed(), 1);
+        QCOMPARE(backend.good(), entry.second);
+    }
+}
+
+void TestBackend::qmlStudyResetsScrollOnFlipAndNewCard() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Study", &error));
+    QVERIFY(backend.createCard("Study", manyCardLines(30), manyCardLines(30), "basic", {}, &error));
+    QVERIFY(backend.createCard("Study", manyCardLines(30), "short", "basic", {}, &error));
+    backend.selectDeck("Study");
+    backend.setMode("review");
+    backend.refresh();
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    QVERIFY(QMetaObject::invokeMethod(view.window, "startStudy", Q_ARG(QVariant, QStringLiteral("review"))));
+    view.settleFileWatcher();
+
+    auto *scroll = view.item(QStringLiteral("studyScrollView"));
+    QVERIFY(scroll);
+    auto *flickable = scroll->property("contentItem").value<QQuickItem *>();
+    QVERIFY(flickable);
+    auto position = [&] { return flickable->property("contentY").toReal(); };
+    auto scrollDown = [&] {
+        flickable->setProperty("contentY", 90.0);
+        view.settle();
+        QVERIFY(position() > 0.0);
+    };
+
+    QTest::keyClick(window, Qt::Key_Space);
+    view.settle();
+    QVERIFY(backend.showingAnswer());
+    scrollDown();
+    QTest::keyClick(window, Qt::Key_Space);
+    view.settle();
+    QVERIFY(!backend.showingAnswer());
+    QCOMPARE(position(), qreal(0));
+
+    scrollDown();
+    QTest::keyClick(window, Qt::Key_Space);
+    view.settle();
+    QVERIFY(backend.showingAnswer());
+    const QString firstCard = backend.currentCardId();
+    QTest::keyClick(window, Qt::Key_Right);
+    view.settle();
+    QVERIFY(backend.currentCardId() != firstCard);
+    QCOMPARE(position(), qreal(0));
+}
+
+void TestBackend::qmlStudyPointerScrollAndClickFlip() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Study", &error));
+    QVERIFY(backend.createCard("Study", "Question?", manyCardLines(40), "basic", {}, &error));
+    backend.selectDeck("Study");
+    backend.setMode("cram");
+    backend.refresh();
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    QVERIFY(QMetaObject::invokeMethod(view.window, "startStudy", Q_ARG(QVariant, QStringLiteral("cram"))));
+    view.settleFileWatcher();
+    QTest::keyClick(window, Qt::Key_Space);
+    view.settle();
+    QVERIFY(backend.showingAnswer());
+
+    auto *scroll = view.item(QStringLiteral("studyScrollView"));
+    QVERIFY(scroll);
+    auto *flickable = scroll->property("contentItem").value<QQuickItem *>();
+    QVERIFY(flickable);
+    const QRectF viewportRect = scroll->mapRectToScene(scroll->boundingRect());
+    const QPoint center = viewportRect.center().toPoint();
+    auto *clickArea = view.item(QStringLiteral("studyClickArea"));
+    QVERIFY(clickArea);
+    const QPoint panelCorner = clickArea->mapRectToScene(clickArea->boundingRect()).topLeft().toPoint() + QPoint(8, 8);
+    QVERIFY(window->geometry().contains(center));
+
+    int cardChanges = 0;
+    QObject::connect(&backend, &Backend::cardChanged, &backend, [&] { ++cardChanges; });
+    const QPointF local = flickable->mapFromScene(QPointF(center));
+    QMouseEvent press(QEvent::MouseButtonPress, local, QPointF(center), QPointF(center), Qt::LeftButton, Qt::LeftButton,
+                      Qt::NoModifier);
+    QCoreApplication::sendEvent(flickable, &press);
+    for (int step = 1; step <= 8; ++step) {
+        const QPointF at = local + QPointF(0, -step * 16);
+        QMouseEvent move(QEvent::MouseMove, at, at, at, Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(flickable, &move);
+        view.settle();
+    }
+    QMouseEvent release(QEvent::MouseButtonRelease, local + QPointF(0, -128), local + QPointF(0, -128),
+                        local + QPointF(0, -128), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(flickable, &release);
+    view.settle();
+    QVERIFY2(flickable->property("contentY").toReal() > 10.0, "drag should pan the answer");
+    QVERIFY(backend.showingAnswer());
+    QCOMPARE(cardChanges, 0);
+
+    flickable->setProperty("contentY", 0.0);
+    view.settle();
+
+    QWheelEvent wheel(center, center, QPoint(), QPoint(0, -240), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase,
+                      false);
+    QCoreApplication::sendEvent(window, &wheel);
+    view.settle();
+    QVERIFY2(flickable->property("contentY").toReal() > 10.0, "wheel should pan the answer");
+    QVERIFY(backend.showingAnswer());
+    QCOMPARE(cardChanges, 0);
+
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, panelCorner);
+    view.settle();
+    QVERIFY(!backend.showingAnswer());
+}
+
+void TestBackend::qmlStudyScalesPicturesToWidth() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    view.settle();
+
+    auto scale = [&](const QString &html, double width, QString *out) {
+        QVariant result;
+        const bool invoked =
+            QMetaObject::invokeMethod(view.window, "scaleImagesToWidth", Q_RETURN_ARG(QVariant, result),
+                                      Q_ARG(QVariant, html), Q_ARG(QVariant, width));
+        *out = result.toString();
+        return invoked;
+    };
+    auto dimensions = [](const QString &tag) {
+        static const QRegularExpression widthPattern(QStringLiteral("\\bwidth\\s*=\\s*[\"']?([0-9.]+)[\"']?"));
+        static const QRegularExpression heightPattern(QStringLiteral("\\bheight\\s*=\\s*[\"']?([0-9.]+)[\"']?"));
+        const QRegularExpressionMatch width = widthPattern.match(tag);
+        const QRegularExpressionMatch height = heightPattern.match(tag);
+        if (!width.hasMatch() || !height.hasMatch())
+            return QPair<qreal, qreal>(-1, -1);
+        return QPair<qreal, qreal>(width.captured(1).toDouble(), height.captured(1).toDouble());
+    };
+
+    const QString svgUrl = QUrl::fromLocalFile(dir.filePath("math.svg")).toString();
+    const QString svgTag = QStringLiteral("<img src='%1' alt='x' width='600' height='200' align='middle' "
+                                          "style='vertical-align: middle;'>")
+                               .arg(svgUrl);
+    QString scaled;
+    QVERIFY(scale(svgTag, 300.0, &scaled));
+    QVERIFY(scaled.contains(QStringLiteral("width=\"300\"")));
+    QVERIFY(scaled.contains(QStringLiteral("height=\"100\"")));
+    QVERIFY(scaled.contains(QStringLiteral("alt='x'")));
+    QVERIFY(scaled.contains(QStringLiteral("align='middle'")));
+    QVERIFY(!scaled.contains(QStringLiteral("font-size")));
+
+    const QString pngPath = dir.filePath("wide.png");
+    QImage wide(600, 200, QImage::Format_ARGB32);
+    wide.fill(Qt::white);
+    QVERIFY(wide.save(pngPath));
+    const QString html =
+        QStringLiteral("<p>before</p><img src=\"%1\"><p>after</p>").arg(QUrl::fromLocalFile(pngPath).toString());
+    QVERIFY(scale(html, 300.0, &scaled));
+    QVERIFY(scaled.contains(QStringLiteral("<p>before</p>")));
+    QVERIFY(scaled.contains(QStringLiteral("<p>after</p>")));
+    const int imageStart = scaled.indexOf(QStringLiteral("<img"));
+    QVERIFY(imageStart >= 0);
+    const int imageEnd = scaled.indexOf('>', imageStart);
+    QVERIFY(imageEnd > imageStart);
+    const QPair<qreal, qreal> pngSize = dimensions(scaled.mid(imageStart, imageEnd - imageStart + 1));
+    QVERIFY(pngSize.first > 0);
+    QVERIFY(pngSize.second > 0);
+    QCOMPARE(pngSize.first, qreal(300));
+    QCOMPARE(pngSize.second, qreal(100));
+
+    const QString narrow = QStringLiteral("<img src='%1' width='120' height='40'>").arg(svgUrl);
+    QVERIFY(scale(narrow, 300.0, &scaled));
+    const QPair<qreal, qreal> narrowSize = dimensions(scaled);
+    QVERIFY(narrowSize.first > 0);
+    QVERIFY(narrowSize.second > 0);
+    QCOMPARE(narrowSize.first, qreal(120));
+    QCOMPARE(narrowSize.second, qreal(40));
 }
 
 void TestBackend::qmlCramLabelUsesCurrentBox() {

@@ -59,13 +59,14 @@ This is a one-time, global download of Tectonic's TeX bundle (stored in `~/.cach
 
 | Key | Action |
 | --- | --- |
-| `Space`, `↑`, `↓`, `Enter` | Flip the card / main action |
+| `Space`, `Enter`, `Return` | Start a review, flip the card, or continue |
+| `↑`, `↓` | Scroll a long card, or flip when there is no more to scroll |
+| `J` / `K` | Scroll a long card while studying; move the card selection in the library |
 | `1`, `A`, `←` | Again |
 | `2`, `G`, `→` | Good |
 | `N` | New card |
 | `D` | New deck |
 | `B` | Browse and search cards |
-| `J` / `K` | Move the card selection in the library |
 | `Enter` | Edit the selected card in the library |
 | `Delete` / `Backspace` | Delete the selected card in the library |
 | `/` | Focus library search |

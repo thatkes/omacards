@@ -39,6 +39,7 @@ ApplicationWindow {
     property string editCardId: ""
     property string pendingDeck: ""
     property int cardIndex: 0
+    property string studyCardKey: ""
 
     function withAlpha(color, alpha) {
         return Qt.rgba(color.r, color.g, color.b, alpha)
@@ -101,6 +102,87 @@ ApplicationWindow {
     function openStats() {
         statsData = backend.statsSummary()
         statsVisible = true
+    }
+
+    // Rich text sets <img> sizes from width/height attributes. Bring wide
+    // pictures down to the text column width without touching the text around
+    // them or the renderer that produced them.
+    function scaleImagesToWidth(html, maxWidth) {
+        if (!html || maxWidth <= 0)
+            return html || ""
+        const imageTags = /<img\b[^>]*>/gi
+        return html.replace(imageTags, function(tag) {
+            const widthMatch = /\bwidth\s*=\s*["']?([0-9]*\.?[0-9]+)["']?/i.exec(tag)
+            const heightMatch = /\bheight\s*=\s*["']?([0-9]*\.?[0-9]+)["']?/i.exec(tag)
+            const srcMatch = /\bsrc\s*=\s*["']([^"']+)["']/i.exec(tag)
+            let naturalWidth = widthMatch ? parseFloat(widthMatch[1]) : 0
+            let naturalHeight = heightMatch ? parseFloat(heightMatch[1]) : 0
+
+            if (!(naturalWidth > 0 && naturalHeight > 0)) {
+                if (!srcMatch)
+                    return tag
+                const source = srcMatch[1]
+                const url = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(source) ? source : Qt.resolvedUrl(source)
+                const probe = Qt.createQmlObject(
+                            'import QtQuick 2.15; Image { asynchronous: false; source: ' + JSON.stringify(url) + ' }',
+                            win.contentItem)
+                if (!probe || probe.status !== Image.Ready) {
+                    if (probe)
+                        probe.destroy()
+                    return tag
+                }
+                naturalWidth = probe.implicitWidth
+                naturalHeight = probe.implicitHeight
+                probe.destroy()
+            }
+
+            if (!(naturalWidth > 0 && naturalHeight > 0) || naturalWidth <= maxWidth)
+                return tag
+
+            const targetWidth = Math.round(maxWidth)
+            const targetHeight = Math.max(1, Math.round(naturalHeight * targetWidth / naturalWidth))
+            const stripped = tag.replace(/\s+(?:width|height)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+            const closing = stripped.slice(-2) === "/>" ? "/>" : ">"
+            const body = stripped.slice(0, stripped.length - closing.length)
+            const size = " width=\"" + targetWidth + "\" height=\"" + targetHeight + "\""
+            return closing === "/>" ? body + size + " />" : body + size + ">"
+        })
+    }
+
+    function resetStudyScroll() {
+        const flick = studyViewport.contentItem
+        if (flick) {
+            flick.contentX = 0
+            flick.contentY = 0
+        }
+    }
+
+    function flipAndResetStudyScroll() {
+        backend.flip()
+        resetStudyScroll()
+    }
+
+    function scrollStudy(direction) {
+        const flick = studyViewport.contentItem
+        if (!flick || !studyViewport.visible)
+            return false
+        const maxY = Math.max(0, flick.contentHeight - flick.height)
+        const target = Math.min(maxY, Math.max(0, flick.contentY + direction * 48))
+        if (Math.abs(target - flick.contentY) < 1)
+            return false
+        flick.contentY = target
+        return true
+    }
+
+    Connections {
+        target: backend
+        function onCardChanged() {
+            const key = backend.currentCardId + ":" + backend.showingAnswer
+            if (key !== win.studyCardKey) {
+                win.studyCardKey = key
+                win.resetStudyScroll()
+            }
+        }
     }
 
     function openEditor(card) {
@@ -398,23 +480,33 @@ ApplicationWindow {
                 if (screen === "study") {
                     switch (event.key) {
                     case Qt.Key_Space:
-                    case Qt.Key_Up:
-                    case Qt.Key_Down:
                     case Qt.Key_Return:
                     case Qt.Key_Enter:
-                        backend.flip()
+                        win.flipAndResetStudyScroll()
+                        event.accepted = true
+                        break
+                    case Qt.Key_Up:
+                    case Qt.Key_K:
+                        if (!win.scrollStudy(-1))
+                            win.flipAndResetStudyScroll()
+                        event.accepted = true
+                        break
+                    case Qt.Key_Down:
+                    case Qt.Key_J:
+                        if (!win.scrollStudy(1))
+                            win.flipAndResetStudyScroll()
                         event.accepted = true
                         break
                     case Qt.Key_1:
                     case Qt.Key_A:
                     case Qt.Key_Left:
-                        backend.showingAnswer ? backend.rate(1) : backend.flip()
+                        backend.showingAnswer ? backend.rate(1) : win.flipAndResetStudyScroll()
                         event.accepted = true
                         break
                     case Qt.Key_2:
                     case Qt.Key_G:
                     case Qt.Key_Right:
-                        backend.showingAnswer ? backend.rate(3) : backend.flip()
+                        backend.showingAnswer ? backend.rate(3) : win.flipAndResetStudyScroll()
                         event.accepted = true
                         break
                     case Qt.Key_R:
@@ -616,6 +708,7 @@ ApplicationWindow {
                                 ColumnLayout {
                                     spacing: 2
                                     Label {
+                                        objectName: "studyDeckLabel"
                                         text: backend.currentDeck.length > 0
                                               ? backend.currentDeck : qsTr("No deck")
                                         color: win.text
@@ -623,6 +716,7 @@ ApplicationWindow {
                                         font.weight: Font.DemiBold
                                     }
                                     Label {
+                                        objectName: "studyModeLabel"
                                         text: backend.mode === "cram"
                                               ? qsTr("Cram · endless, in-session boxes")
                                               : qsTr("Review · FSRS-5 scheduling")
@@ -634,6 +728,7 @@ ApplicationWindow {
                                 Item { Layout.fillWidth: true }
 
                                 ActionButton {
+                                    objectName: "studyReviewButton"
                                     compact: true
                                     label: qsTr("Review")
                                     hint: "R"
@@ -641,6 +736,7 @@ ApplicationWindow {
                                     onClicked: win.startStudy("review")
                                 }
                                 ActionButton {
+                                    objectName: "studyCramButton"
                                     compact: true
                                     label: qsTr("Cram")
                                     hint: "C"
@@ -648,6 +744,7 @@ ApplicationWindow {
                                     onClicked: win.startStudy("cram")
                                 }
                                 ActionButton {
+                                    objectName: "studyHomeButton"
                                     compact: true
                                     label: qsTr("Home")
                                     hint: "Esc"
@@ -661,9 +758,9 @@ ApplicationWindow {
                                 border.color: win.withAlpha(theme.accent, 0.32)
 
                                 ColumnLayout {
-                                    anchors.centerIn: parent
-                                    width: Math.min(parent.width - 96, 660)
-                                    spacing: 18
+                                    anchors.fill: parent
+                                    anchors.margins: 24
+                                    spacing: 14
 
                                     Label {
                                         Layout.alignment: Qt.AlignHCenter
@@ -680,47 +777,78 @@ ApplicationWindow {
                                         font.letterSpacing: 1.5
                                     }
 
-                                    Label {
+                                    ScrollView {
+                                        id: studyViewport
+                                        objectName: "studyScrollView"
                                         Layout.fillWidth: true
+                                        Layout.fillHeight: true
                                         visible: backend.hasCard
-                                        horizontalAlignment: Text.AlignHCenter
-                                        wrapMode: Text.Wrap
-                                        textFormat: Text.RichText
-                                        text: backend.question
-                                        color: win.text
-                                        font.pixelSize: 30
-                                        font.weight: Font.DemiBold
-                                        onLinkActivated: function(link) { Qt.openUrlExternally(link) }
-                                    }
+                                        clip: true
+                                        contentWidth: width
+                                        contentHeight: studyText.implicitHeight
+                                        ScrollBar.horizontal.objectName: "studyHorizontalScrollBar"
+                                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                                        ScrollBar.vertical.objectName: "studyVerticalScrollBar"
 
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        implicitHeight: 1
-                                        color: win.border
-                                        visible: backend.hasCard && backend.showingAnswer
-                                    }
+                                        Item {
+                                            width: studyViewport.width
+                                            height: studyText.implicitHeight
 
-                                    Label {
-                                        Layout.fillWidth: true
-                                        visible: backend.hasCard && backend.showingAnswer
-                                        horizontalAlignment: Text.AlignHCenter
-                                        wrapMode: Text.Wrap
-                                        textFormat: Text.RichText
-                                        text: backend.answer
-                                        color: theme.accent
-                                        font.pixelSize: 24
+                                            Column {
+                                                id: studyText
+                                                objectName: "studyTextColumn"
+                                                anchors.horizontalCenter: parent.horizontalCenter
+                                                width: Math.min(studyViewport.width - 96, 660)
+                                                spacing: 18
+
+                                                Label {
+                                                    objectName: "studyQuestionLabel"
+                                                    width: parent.width
+                                                    horizontalAlignment: Text.AlignHCenter
+                                                    wrapMode: Text.Wrap
+                                                    textFormat: Text.RichText
+                                                    text: win.scaleImagesToWidth(backend.question, studyText.width)
+                                                    color: win.text
+                                                    font.pixelSize: 30
+                                                    font.weight: Font.DemiBold
+                                                    onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+                                                }
+
+                                                Rectangle {
+                                                    objectName: "studySeparator"
+                                                    width: parent.width
+                                                    height: 1
+                                                    color: win.border
+                                                    visible: backend.showingAnswer
+                                                }
+
+                                                Label {
+                                                    objectName: "studyAnswerLabel"
+                                                    width: parent.width
+                                                    visible: backend.showingAnswer
+                                                    horizontalAlignment: Text.AlignHCenter
+                                                    wrapMode: Text.Wrap
+                                                    textFormat: Text.RichText
+                                                    text: win.scaleImagesToWidth(backend.answer, studyText.width)
+                                                    color: theme.accent
+                                                    font.pixelSize: 24
+                                                }
+                                            }
+                                        }
                                     }
 
                                     ActionButton {
+                                        objectName: "studyShowAnswer"
                                         Layout.alignment: Qt.AlignHCenter
                                         visible: backend.hasCard && !backend.showingAnswer
                                         primary: true
                                         label: qsTr("Show answer")
                                         hint: "Space"
-                                        onClicked: backend.flip()
+                                        onClicked: win.flipAndResetStudyScroll()
                                     }
 
                                     Label {
+                                        objectName: "studyHint"
                                         Layout.fillWidth: true
                                         visible: backend.hasCard && !backend.showingAnswer
                                         horizontalAlignment: Text.AlignHCenter
@@ -729,51 +857,59 @@ ApplicationWindow {
                                         font.pixelSize: 12
                                     }
 
-                                    ColumnLayout {
+                                    Item {
+                                        objectName: "studyEmptyMessage"
                                         Layout.fillWidth: true
+                                        Layout.fillHeight: true
                                         visible: !backend.hasCard
-                                        spacing: 18
 
-                                        Label {
-                                            Layout.fillWidth: true
-                                            horizontalAlignment: Text.AlignHCenter
-                                            text: backend.waitingForRepeat ? qsTr("One more try in a moment…") : qsTr("All caught up.")
-                                            color: win.text
-                                            font.pixelSize: 34
-                                            font.weight: Font.DemiBold
-                                        }
-                                        Label {
-                                            Layout.fillWidth: true
-                                            horizontalAlignment: Text.AlignHCenter
-                                            wrapMode: Text.Wrap
-                                            text: backend.waitingForRepeat
-                                                  ? qsTr("A card you got wrong is coming back shortly.")
-                                                  : qsTr("Nothing is waiting in this deck. Add a card, import a file, or keep the material warm with cram.")
-                                            color: win.soft
-                                            font.pixelSize: 15
-                                        }
-                                        RowLayout {
-                                            Layout.alignment: Qt.AlignHCenter
-                                            spacing: 10
-                                            ActionButton {
-                                                primary: true
-                                                label: qsTr("Cram this deck")
-                                                hint: "C"
-                                                onClicked: win.startStudy("cram")
+                                        ColumnLayout {
+                                            anchors.centerIn: parent
+                                            width: Math.min(parent.width - 96, 660)
+                                            spacing: 18
+
+                                            Label {
+                                                Layout.fillWidth: true
+                                                horizontalAlignment: Text.AlignHCenter
+                                                text: backend.waitingForRepeat ? qsTr("One more try in a moment…") : qsTr("All caught up.")
+                                                color: win.text
+                                                font.pixelSize: 34
+                                                font.weight: Font.DemiBold
                                             }
-                                            ActionButton {
-                                                label: qsTr("Back home")
-                                                hint: "Esc"
-                                                onClicked: win.goHome()
+                                            Label {
+                                                Layout.fillWidth: true
+                                                horizontalAlignment: Text.AlignHCenter
+                                                wrapMode: Text.Wrap
+                                                text: backend.waitingForRepeat
+                                                      ? qsTr("A card you got wrong is coming back shortly.")
+                                                      : qsTr("Nothing is waiting in this deck. Add a card, import a file, or keep the material warm with cram.")
+                                                color: win.soft
+                                                font.pixelSize: 15
+                                            }
+                                            RowLayout {
+                                                Layout.alignment: Qt.AlignHCenter
+                                                spacing: 10
+                                                ActionButton {
+                                                    primary: true
+                                                    label: qsTr("Cram this deck")
+                                                    hint: "C"
+                                                    onClicked: win.startStudy("cram")
+                                                }
+                                                ActionButton {
+                                                    label: qsTr("Back home")
+                                                    hint: "Esc"
+                                                    onClicked: win.goHome()
+                                                }
                                             }
                                         }
                                     }
                                 }
 
                                 MouseArea {
+                                    objectName: "studyClickArea"
                                     anchors.fill: parent
                                     enabled: backend.hasCard
-                                    onClicked: backend.flip()
+                                    onClicked: win.flipAndResetStudyScroll()
                                     z: -1
                                 }
                             }
@@ -783,6 +919,7 @@ ApplicationWindow {
                                 spacing: 12
 
                                 ActionButton {
+                                    objectName: "studyAgainButton"
                                     danger: true
                                     label: qsTr("Again")
                                     hint: "1"
@@ -791,6 +928,7 @@ ApplicationWindow {
                                 }
 
                                 ActionButton {
+                                    objectName: "studyGoodButton"
                                     primary: true
                                     label: qsTr("Good")
                                     hint: "2"
@@ -1535,12 +1673,13 @@ ApplicationWindow {
 
                 Repeater {
                     model: [
-                        { keys: "Space", action: qsTr("Start review, flip the card, or continue") },
+                        { keys: "Space", action: qsTr("Start review, always flip the card, or continue") },
+                        { keys: "↑ / ↓", action: qsTr("Scroll a long card, or flip at the end") },
                         { keys: "1 / A / ←", action: qsTr("Again") },
                         { keys: "2 / G / →", action: qsTr("Good") },
                         { keys: "R / C", action: qsTr("Review or cram mode") },
                         { keys: "B", action: qsTr("Open the library") },
-                        { keys: "J / K", action: qsTr("Move the card selection in the library") },
+                        { keys: "J / K", action: qsTr("Scroll a long card, or move the library selection") },
                         { keys: "Enter", action: qsTr("Edit the selected card in the library") },
                         { keys: "Del", action: qsTr("Delete the selected card in the library") },
                         { keys: "/", action: qsTr("Focus library search") },

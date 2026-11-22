@@ -17,6 +17,12 @@ private slots:
     void backendAppliesDayStartToDueCards();
     void backendReportsNewCountAndDeckSummaries();
     void qmlCanNavigateLibraryCards();
+    void qmlStudyScrollViewClipsAndSizes();
+    void qmlStudyScrollFirstKeysAndFlipFallbacks();
+    void qmlStudyRatingKeysKeepTheirMeaning();
+    void qmlStudyResetsScrollOnFlipAndNewCard();
+    void qmlStudyPointerScrollAndClickFlip();
+    void qmlStudyScalesPicturesToWidth();
     void qmlCramLabelUsesCurrentBox();
     void qmlGoodLabelUsesGoodCount();
     void qmlSettingsRowsFitTheirContent();
