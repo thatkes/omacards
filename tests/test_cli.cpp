@@ -73,6 +73,47 @@ void TestCli::helpIsHeadless() {
     QVERIFY(help.contains("omacards decks current [--json]  Show the Current deck\n"));
     QVERIFY(help.contains("--new-card-allowance"));
     QVERIFY(help.contains("--day-start-hour"));
+
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    EnvGuard env(decks, database);
+
+    // Every real command path accepts both help flags through the process
+    // boundary: purpose, flags and an example, exit 0, and no state write.
+    for (const QString &path : paths) {
+        const QString token = path.section(' ', 0, 0);
+        if (Cli::isHelpCommand(token))
+            continue; // top-level help flags keep their usage() contract
+        for (const QString &flag : {QStringLiteral("--help"), QStringLiteral("-h")}) {
+            int code = -1;
+            QByteArray errors;
+            const QByteArray output = runCliRaw({token, flag}, decks, database, &code, &errors);
+            const QString text = QString::fromUtf8(output);
+            QVERIFY2(code == 0, qPrintable(token + " " + flag + " exited " + QString::number(code)));
+            QVERIFY2(text.contains(token), qPrintable(token));
+            QVERIFY2(text.contains("Purpose:"), qPrintable(token));
+            QVERIFY2(text.contains("Flags:"), qPrintable(token));
+            QVERIFY2(text.contains("Example:"), qPrintable(token));
+            QVERIFY2(errors.isEmpty(), qPrintable(errors));
+        }
+    }
+    QVERIFY2(!QFileInfo::exists(decks) || QDir(decks).entryList(QDir::NoDotAndDotDot).isEmpty(),
+             "Help probes must not create a Deck");
+    QVERIFY2(!QFileInfo::exists(database), "Help probes must not create the state database");
+
+    // A help flag is never a positional name and never runs the command.
+    int code = -1;
+    const QByteArray checkHelp = runCliRaw({"check", "--help", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY(checkHelp.contains("Purpose:"));
+    QVERIFY(!checkHelp.contains("\"decks\""));
+
+    const QByteArray topLevel = runCliRaw({"help"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    const QByteArray topLevelWithFlag = runCliRaw({"help", "--help"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(topLevelWithFlag, topLevel);
 }
 
 void TestCli::addCardsCreatesDeckBulk() {
@@ -586,6 +627,14 @@ void TestCli::headlessCommandDetectionIsComplete() {
     QVERIFY(Cli::needsOffscreen({"banana"}));
     QVERIFY(Cli::needsOffscreen({"banana", "--json"}));
     QVERIFY(Cli::needsOffscreen({"check", "open"}));
+
+    // A help flag routes every registry path through the CLI, including the
+    // GUI command, so probing syntax cannot start an event loop.
+    for (const QString &path : Cli::commandPaths()) {
+        const QString token = path.section(' ', 0, 0);
+        QVERIFY2(Cli::needsOffscreen({token, "--help"}), qPrintable(path));
+        QVERIFY2(Cli::needsOffscreen({token, "-h"}), qPrintable(path));
+    }
 }
 
 void TestCli::unknownCommandJsonError() {
