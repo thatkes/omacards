@@ -78,6 +78,27 @@ sed -i 's|src/skill/SKILL.md|LICENSE|' "$divergent/pkgbuild/PKGBUILD"
 check_case package_skill_diverges 1 \
     'Packaged skill differs from src/skill/SKILL.md' "$divergent"
 
+# /bin/sh is bash on some hosts, which hides the CI failure where it is dash.
+# A marker bash on PATH makes the replay interpreter observable everywhere:
+# the PKGBUILD uses bash arrays, so the replay must reach bash to succeed.
+shim="$tmp/bash-shim"
+mkdir -p "$shim"
+real_bash=$(command -v bash)
+cat > "$shim/bash" <<EOF
+#!/bin/sh
+printf 'PKGBUILD replay shell: bash\n'
+exec "$real_bash" "\$@"
+EOF
+chmod +x "$shim/bash"
+
+bash_replay="$tmp/bash_replay"
+make_root "$bash_replay"
+saved_path=$PATH
+PATH="$shim:$PATH"
+check_case package_skill_replay_uses_bash 0 \
+    'PKGBUILD replay shell: bash' "$bash_replay"
+PATH="$saved_path"
+
 if [ "$failures" -ne 0 ]; then
     printf '%s check-package-skill-install case(s) failed\n' "$failures"
     exit 1

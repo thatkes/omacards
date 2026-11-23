@@ -5,6 +5,8 @@ cd "$ROOT"
 
 # Replay package() with an isolated HOME and pkgdir. Lint runs before build in
 # CI, so this must not need the compiled binary or a real user's skill copy.
+# PKGBUILD is a bash file: its arch=(...) arrays make dash (CI's /bin/sh) fail
+# to parse it, so name bash explicitly instead of relying on /bin/sh.
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
@@ -20,7 +22,7 @@ cp LICENSE "$root/LICENSE"
 chmod +x "$root/build/omacards"
 
 HOME="$home" startdir="$root/pkgbuild" pkgdir="$pkgdir" pkgname=omacards \
-    /bin/sh -ec '. "$startdir/PKGBUILD"; package'
+    bash -ec '. "$startdir/PKGBUILD"; package'
 
 installed="$home/.agents/skills/omacards/SKILL.md"
 if [ ! -f "$installed" ]; then
