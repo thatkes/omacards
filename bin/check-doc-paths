@@ -2,10 +2,11 @@
 set -eu
 
 # Guard the two documented command lists against src/command-paths.txt in
-# both directions, and check the README Layout block's path tokens against
-# the filesystem. Parsing stays shallow: first fenced block after a heading,
-# command paths followed by bracketed/angled arguments, and one layout-token
-# matcher. An optional root argument exists for the self-test.
+# both directions, check help metadata blocks against the same registry, and
+# check the README Layout block's path tokens against the filesystem. Parsing
+# stays shallow: first fenced block after a heading, command paths followed by
+# bracketed/angled arguments, and one layout-token matcher. An optional root
+# argument exists for the self-test.
 
 if [ "$#" -gt 1 ]; then
     printf 'Usage: %s [root]\n' "$0" >&2
@@ -19,6 +20,7 @@ cd "$root"
 registry="$root/src/command-paths.txt"
 readme="$root/README.md"
 skill="$root/src/skill/SKILL.md"
+help_metadata="$root/src/command-help.txt"
 
 for file in "$registry" "$readme" "$skill"; do
     if [ ! -f "$file" ]; then
@@ -189,6 +191,93 @@ while IFS= read -r path; do
         "$path" >&2
     status=1
 done < "$tmp/missing-paths"
+
+# Help wording is a tracked resource read as text, so drift is caught without
+# building the app. Fixtures that do not embed the resource keep the older
+# doc-only contract; when the file exists, every block is checked in isolation.
+# Completeness across registry paths belongs to a separate check.
+if [ -f "$help_metadata" ]; then
+    awk '
+        function finish(    p) {
+            if (!has_path && !has_purpose && !has_flags && !has_example)
+                return
+            if (has_path) {
+                p = path
+                if (seen[p]++)
+                    printf "%d: duplicate help metadata path: %s\n", path_line, p
+                if (!(p in known))
+                    printf "%d: help metadata path not in src/command-paths.txt: %s\n", path_line, p
+            } else {
+                printf "%d: help metadata block without a path\n", block_line
+            }
+            if (has_purpose && purpose == "")
+                printf "%d: empty help metadata field: Purpose\n", purpose_line
+            if (has_flags && flags == "")
+                printf "%d: empty help metadata field: Flags\n", flags_line
+            if (has_example && example == "")
+                printf "%d: empty help metadata field: Example\n", example_line
+            if (!has_purpose)
+                printf "%d: missing help metadata field: Purpose\n", block_line
+            if (!has_flags)
+                printf "%d: missing help metadata field: Flags\n", block_line
+            if (!has_example)
+                printf "%d: missing help metadata field: Example\n", block_line
+            has_path = has_purpose = has_flags = has_example = 0
+            path = purpose = flags = example = ""
+            in_block = 0
+        }
+        FNR == NR { known[$0] = 1; next }
+        {
+            raw = $0
+            sub(/\r$/, "", raw)
+            if (raw ~ /^[[:space:]]*$/ || raw ~ /^[[:space:]]*#/) {
+                if (in_block) finish()
+                next
+            }
+            if (!in_block) {
+                in_block = 1
+                block_line = FNR
+            }
+            colon = index(raw, ":")
+            if (colon == 0) {
+                printf "%d: unexpected help metadata line: %s\n", FNR, raw
+                next
+            }
+            field = substr(raw, 1, colon - 1)
+            value = substr(raw, colon + 1)
+            sub(/^[[:space:]]+/, "", value)
+            sub(/[[:space:]]+$/, "", value)
+            if (field == "Path") {
+                if (has_path)
+                    printf "%d: duplicate help metadata field: Path\n", FNR
+                path = value
+                path_line = FNR
+                has_path = 1
+            } else if (field == "Purpose") {
+                purpose = value
+                purpose_line = FNR
+                has_purpose = 1
+            } else if (field == "Flags") {
+                flags = value
+                flags_line = FNR
+                has_flags = 1
+            } else if (field == "Example") {
+                example = value
+                example_line = FNR
+                has_example = 1
+            } else {
+                printf "%d: unknown help metadata field: %s\n", FNR, field
+            }
+        }
+        END { if (in_block) finish() }
+    ' "$tmp/registry" "$help_metadata" > "$tmp/help-errors"
+    while IFS= read -r error; do
+        line=${error%%:*}
+        text=${error#*: }
+        printf 'src/command-help.txt:%s: %s\n' "$line" "$text" >&2
+        status=1
+    done < "$tmp/help-errors"
+fi
 
 extract_block "$readme" '## Layout' > "$tmp/layout.raw"
 if [ ! -s "$tmp/layout.raw" ]; then

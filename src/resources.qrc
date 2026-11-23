@@ -2,6 +2,7 @@
     <qresource prefix="/">
         <file alias="Main.qml">Main.qml</file>
         <file alias="command-paths.txt">command-paths.txt</file>
+        <file alias="command-help.txt">command-help.txt</file>
         <file alias="i18n/en.json">i18n/en.json</file>
         <file alias="skill/SKILL.md">skill/SKILL.md</file>
     </qresource>

@@ -515,98 +515,55 @@ struct CommandHelpText {
     QString example;
 };
 
-// Help prose for the registry's command paths. Command discovery still comes
-// from commandPaths(); this table only supplies the wording for each path.
+// Help prose lives beside the registry in src/command-help.txt and is embedded
+// as a Qt resource, so lint can read the same wording without building the app.
+// Command discovery still comes from commandPaths(); this only supplies text.
+QHash<QString, CommandHelpText> readCommandHelpTexts() {
+    QHash<QString, CommandHelpText> texts;
+    QFile help(QStringLiteral(":/command-help.txt"));
+    if (!help.open(QIODevice::ReadOnly | QIODevice::Text))
+        return texts;
+
+    QString path;
+    CommandHelpText text;
+    const auto storeBlock = [&]() {
+        if (!path.isEmpty())
+            texts.insert(path, text);
+        path.clear();
+        text = CommandHelpText();
+    };
+    while (!help.atEnd()) {
+        const QString line = QString::fromUtf8(help.readLine()).trimmed();
+        if (line.isEmpty()) {
+            storeBlock();
+            continue;
+        }
+        if (line.startsWith(QLatin1Char('#')))
+            continue;
+        const int colon = line.indexOf(QLatin1Char(':'));
+        if (colon < 0)
+            continue;
+        const QString field = line.left(colon);
+        const QString value = line.mid(colon + 1).trimmed();
+        if (field == QLatin1String("Path"))
+            path = value;
+        else if (field == QLatin1String("Purpose"))
+            text.purpose = value;
+        else if (field == QLatin1String("Flags"))
+            text.flags = value;
+        else if (field == QLatin1String("Example"))
+            text.example = value;
+    }
+    storeBlock();
+    return texts;
+}
+
 QString commandHelp(const QString &command) {
     if (command.isEmpty() || Cli::isHelpCommand(command.section(QLatin1Char(' '), 0, 0)) ||
         !Cli::commandPaths().contains(command))
         return usage();
 
-    static const QHash<QString, CommandHelpText> texts = {
-        {QStringLiteral("add-card"),
-         {QStringLiteral("Add a Card to a Deck."),
-          QStringLiteral("-q Q, -a A, [-d D], [--type T], [--tags a,b], [--json], --help, -h"),
-          QStringLiteral("omacards add-card -q \"Two plus two?\" -a four --json")}},
-        {QStringLiteral("add-cards"),
-         {QStringLiteral("Add Cards from JSON or stdin."),
-          QStringLiteral("--deck D, [--description TEXT], [--input FILE|-], [--json], --help, -h"),
-          QStringLiteral("omacards add-cards --deck Calculus --input cards.json --json")}},
-        {QStringLiteral("add-deck"),
-         {QStringLiteral("Create a Deck."), QStringLiteral("NAME, [--description TEXT], [--json], --help, -h"),
-          QStringLiteral("omacards add-deck Calculus --json")}},
-        {QStringLiteral("cards"),
-         {QStringLiteral("List Cards, optionally in one Deck."), QStringLiteral("[-d D], [--json], --help, -h"),
-          QStringLiteral("omacards cards -d Calculus --json")}},
-        {QStringLiteral("check"),
-         {QStringLiteral("Show decks, Cards, due count, math and Deck issues."),
-          QStringLiteral("[--deck NAME], [--math], [--strict], [--json], --help, -h"),
-          QStringLiteral("omacards check --deck Calculus --json")}},
-        {QStringLiteral("config"),
-         {QStringLiteral("Show or change Settings."),
-          QStringLiteral("[--new-card-allowance N], [--day-start-hour H], [--retention 0.70-0.99], "
-                         "[--json], --help, -h"),
-          QStringLiteral("omacards config --new-card-allowance 7 --json")}},
-        {QStringLiteral("cram"),
-         {QStringLiteral("Simulate a Cram session."), QStringLiteral("[-d D], [--steps N], [--json], --help, -h"),
-          QStringLiteral("omacards cram -d Calculus --steps 4 --json")}},
-        {QStringLiteral("decks"),
-         {QStringLiteral("List decks."), QStringLiteral("[--json], --help, -h"),
-          QStringLiteral("omacards decks --json")}},
-        {QStringLiteral("decks current"),
-         {QStringLiteral("Show the Current deck."), QStringLiteral("[--json], --help, -h"),
-          QStringLiteral("omacards decks current --json")}},
-        {QStringLiteral("delete-card"),
-         {QStringLiteral("Delete a Card."), QStringLiteral("-c ID, [-d D], [--json], --help, -h"),
-          QStringLiteral("omacards delete-card -c cdbec825f20d --json")}},
-        {QStringLiteral("delete-deck"),
-         {QStringLiteral("Delete a Deck."), QStringLiteral("NAME, [--json], --help, -h"),
-          QStringLiteral("omacards delete-deck Calculus --json")}},
-        {QStringLiteral("due"),
-         {QStringLiteral("List Cards due on the current Study day."), QStringLiteral("[-d D], [--json], --help, -h"),
-          QStringLiteral("omacards due -d Calculus --json")}},
-        {QStringLiteral("edit-card"),
-         {QStringLiteral("Edit a Card's Question, Answer, type or Tags."),
-          QStringLiteral("-c ID, [-q Q], [-a A], [--type T], [--tags a,b], [--json], --help, -h"),
-          QStringLiteral("omacards edit-card -c cdbec825f20d -a five --json")}},
-        {QStringLiteral("edit-deck"),
-         {QStringLiteral("Change a Deck's description without adding Cards."),
-          QStringLiteral("NAME, --description TEXT, [--json], --help, -h"),
-          QStringLiteral("omacards edit-deck Calculus --description 'New description' --json")}},
-        {QStringLiteral("import"),
-         {QStringLiteral("Import Cards from a file."), QStringLiteral("PATH, [-d D], [--json], --help, -h"),
-          QStringLiteral("omacards import cards.json -d Calculus --json")}},
-        {QStringLiteral("open"),
-         {QStringLiteral("Start the GUI."), QStringLiteral("--help, -h"), QStringLiteral("omacards open")}},
-        {QStringLiteral("preview"),
-         {QStringLiteral("Preview a Deck's Cards."),
-          QStringLiteral("--deck D, [--card ID], [--format text|html|markdown], [--json], --help, -h"),
-          QStringLiteral("omacards preview --deck Calculus --json")}},
-        {QStringLiteral("review"),
-         {QStringLiteral("Record a Rating for a Card."), QStringLiteral("-c ID, -r 1|3, [--json], --help, -h"),
-          QStringLiteral("omacards review -c cdbec825f20d -r 3 --json")}},
-        {QStringLiteral("search"),
-         {QStringLiteral("Search Cards."), QStringLiteral("TERM, [--deck D], [--json], --help, -h"),
-          QStringLiteral("omacards search Taylor --json")}},
-        {QStringLiteral("skill"),
-         {QStringLiteral("Manage the agent skill. Bare `omacards skill` shows status and help without installing."),
-          QStringLiteral("[install], [--json], --help, -h"), QStringLiteral("omacards skill --help")}},
-        {QStringLiteral("skill install"),
-         {QStringLiteral("Install the agent skill."), QStringLiteral("[--json], --help, -h"),
-          QStringLiteral("omacards skill install --json")}},
-        {QStringLiteral("skill status"),
-         {QStringLiteral("Report whether the agent skill is installed, where, and whether it matches the bundled "
-                         "source."),
-          QStringLiteral("[--json], --help, -h"), QStringLiteral("omacards skill status --json")}},
-        {QStringLiteral("stats"),
-         {QStringLiteral("Show study statistics."), QStringLiteral("[--json], --help, -h"),
-          QStringLiteral("omacards stats --json")}},
-        {QStringLiteral("use-deck"),
-         {QStringLiteral("Choose the Current deck."), QStringLiteral("NAME, [--json], --help, -h"),
-          QStringLiteral("omacards use-deck Calculus --json")}},
-        {QStringLiteral("warm"),
-         {QStringLiteral("Render a Deck's math SVGs ahead of study."), QStringLiteral("--deck D, [--json], --help, -h"),
-          QStringLiteral("omacards warm --deck Calculus --json")}},
-    };
+    static const QHash<QString, CommandHelpText> texts = readCommandHelpTexts();
     const CommandHelpText text = texts.value(command);
     const QString purpose = text.purpose.isEmpty() ? QObject::tr("Run the %1 command.").arg(command) : text.purpose;
     const QString flags = text.flags.isEmpty() ? QStringLiteral("--help, -h") : text.flags;

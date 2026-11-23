@@ -181,6 +181,77 @@ mv "$tmp/glob-token.md" "$matched_glob/README.md"
 expect_result concrete_path_instead_of_glob_passes 0 'Doc references OK' \
     "$matched_glob" 'FAIL'
 
+# Help metadata is parsed from src/command-help.txt as text. A valid file must
+# stay clean, and a malformed block must fail even when the docs are correct.
+valid_help_metadata="$tmp/valid-help-metadata"
+make_root "$valid_help_metadata"
+cat > "$valid_help_metadata/src/command-help.txt" <<'EOF'
+# Help wording for the command-path registry.
+Path: check
+Purpose: Show deck issues.
+Flags: --help, -h
+Example: omacards check --help
+
+Path: decks
+Purpose: List decks.
+Flags: [--json], --help, -h
+Example: omacards decks --json
+EOF
+expect_result valid_help_metadata_passes 0 'Doc references OK' \
+    "$valid_help_metadata" 'FAIL'
+
+unknown_help_path="$tmp/unknown-help-path"
+make_root "$unknown_help_path"
+cat > "$unknown_help_path/src/command-help.txt" <<'EOF'
+Path: mystery
+Purpose: Do something.
+Flags: --help, -h
+Example: omacards mystery --help
+EOF
+expect_result help_metadata_path_outside_registry_fails 1 \
+    'src/command-help.txt:1: help metadata path not in src/command-paths.txt: mystery' \
+    "$unknown_help_path" 'Doc references OK'
+
+empty_help_field="$tmp/empty-help-field"
+make_root "$empty_help_field"
+cat > "$empty_help_field/src/command-help.txt" <<'EOF'
+Path: check
+Purpose:
+Flags: --help, -h
+Example: omacards check --help
+EOF
+expect_result help_metadata_empty_field_fails 1 \
+    'src/command-help.txt:2: empty help metadata field: Purpose' \
+    "$empty_help_field" 'Doc references OK'
+
+missing_help_field="$tmp/missing-help-field"
+make_root "$missing_help_field"
+cat > "$missing_help_field/src/command-help.txt" <<'EOF'
+Path: check
+Purpose: Show deck issues.
+Example: omacards check --help
+EOF
+expect_result help_metadata_missing_field_fails 1 \
+    'src/command-help.txt:1: missing help metadata field: Flags' \
+    "$missing_help_field" 'Doc references OK'
+
+duplicate_help_path="$tmp/duplicate-help-path"
+make_root "$duplicate_help_path"
+cat > "$duplicate_help_path/src/command-help.txt" <<'EOF'
+Path: check
+Purpose: Show deck issues.
+Flags: --help, -h
+Example: omacards check --help
+
+Path: check
+Purpose: Another purpose.
+Flags: --help, -h
+Example: omacards check --help
+EOF
+expect_result help_metadata_duplicate_path_fails 1 \
+    'src/command-help.txt:6: duplicate help metadata path: check' \
+    "$duplicate_help_path" 'Doc references OK'
+
 if [ "$failures" -ne 0 ]; then
     printf '%s check-doc-paths case(s) failed\n' "$failures"
     exit 1
