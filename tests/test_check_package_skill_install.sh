@@ -6,40 +6,15 @@ set -eu
 # compiled binary and never touches the real installed skill.
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 CHECKER="$ROOT/bin/check-package-skill-install"
+. "$ROOT/tests/checker_test_support.sh"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 failures=0
 
-expect_result() {
-    name=$1
-    want_status=$2
-    want_text=$3
-    got_status=$4
-    output=$5
-    if [ "$got_status" -ne "$want_status" ]; then
-        printf 'FAIL %s: status %s, wanted %s\n%s\n' \
-            "$name" "$got_status" "$want_status" "$output"
-        failures=$((failures + 1))
-        return
-    fi
-    case "$output" in
-        *"$want_text"*) ;;
-        *)
-            printf 'FAIL %s: output did not contain %s\n%s\n' \
-                "$name" "$want_text" "$output"
-            failures=$((failures + 1))
-            return
-            ;;
-    esac
-    printf 'PASS %s\n' "$name"
-}
-
-make_root() {
+populate_root() {
     root=$1
-    mkdir -p "$root/bin" "$root/pkgbuild" "$root/src/skill" "$root/build"
-    cp "$CHECKER" "$root/bin/check-package-skill-install"
-    chmod +x "$root/bin/check-package-skill-install"
+    mkdir -p "$root/pkgbuild" "$root/src/skill" "$root/build"
     cp "$ROOT/pkgbuild/PKGBUILD" "$root/pkgbuild/PKGBUILD"
     cp "$ROOT/pkgbuild/omacards.svg" "$ROOT/pkgbuild/omacards.desktop" \
         "$root/pkgbuild/"
@@ -47,18 +22,6 @@ make_root() {
     cp "$ROOT/LICENSE" "$root/LICENSE"
     : > "$root/build/omacards"
     chmod +x "$root/build/omacards"
-}
-
-check_case() {
-    name=$1
-    want_status=$2
-    want_text=$3
-    root=$4
-    set +e
-    output="$("$root/bin/check-package-skill-install" 2>&1)"
-    got_status=$?
-    set -e
-    expect_result "$name" "$want_status" "$want_text" "$got_status" "$output"
 }
 
 present="$tmp/present"

@@ -8,39 +8,15 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 CHECKER="$ROOT/bin/check-sync-worktree-local-docs"
 HELPER="$ROOT/bin/sync-worktree-local-docs"
 PARSER="$ROOT/bin/local-only-sync-paths.sh"
+. "$ROOT/tests/checker_test_support.sh"
+CHECKER_TAKES_ROOT=1
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 failures=0
 
-expect_result() {
-    name=$1
-    want_status=$2
-    want_text=$3
-    got_status=$4
-    output=$5
-    if [ "$got_status" -ne "$want_status" ]; then
-        printf 'FAIL %s: status %s, wanted %s\n%s\n' \
-            "$name" "$got_status" "$want_status" "$output"
-        failures=$((failures + 1))
-        return
-    fi
-    case "$output" in
-        *"$want_text"*) ;;
-        *)
-            printf 'FAIL %s: output did not contain %s\n%s\n' \
-                "$name" "$want_text" "$output"
-            failures=$((failures + 1))
-            return
-            ;;
-    esac
-    printf 'PASS %s\n' "$name"
-}
-
-make_root() {
+populate_root() {
     root=$1
-    mkdir -p "$root/bin"
-    cp "$CHECKER" "$root/bin/check-sync-worktree-local-docs"
     cp "$HELPER" "$root/bin/sync-worktree-local-docs"
     cp "$PARSER" "$root/bin/local-only-sync-paths.sh"
     chmod +x "$root/bin/check-sync-worktree-local-docs" \
@@ -66,18 +42,6 @@ make_root() {
 # Inert while this file is tracked; applies if it is ever untracked.
 /.gitignore
 EOF
-}
-
-check_case() {
-    name=$1
-    want_status=$2
-    want_text=$3
-    root=$4
-    set +e
-    output="$("$root/bin/check-sync-worktree-local-docs" "$root" 2>&1)"
-    got_status=$?
-    set -e
-    expect_result "$name" "$want_status" "$want_text" "$got_status" "$output"
 }
 
 check_both_cases() {
