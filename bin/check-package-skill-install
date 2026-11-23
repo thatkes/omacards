@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$ROOT"
+
+# Replay package() with an isolated HOME and pkgdir. Lint runs before build in
+# CI, so this must not need the compiled binary or a real user's skill copy.
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+
+home="$tmp/home"
+pkgdir="$tmp/pkgdir"
+root="$tmp/repo"
+mkdir -p "$home" "$pkgdir" "$root/pkgbuild" "$root/src/skill" "$root/build"
+cp pkgbuild/PKGBUILD "$root/pkgbuild/PKGBUILD"
+cp pkgbuild/omacards.svg pkgbuild/omacards.desktop "$root/pkgbuild/"
+cp src/skill/SKILL.md "$root/src/skill/SKILL.md"
+cp LICENSE "$root/LICENSE"
+: > "$root/build/omacards"
+chmod +x "$root/build/omacards"
+
+HOME="$home" startdir="$root/pkgbuild" pkgdir="$pkgdir" pkgname=omacards \
+    /bin/sh -ec '. "$startdir/PKGBUILD"; package'
+
+installed="$home/.agents/skills/omacards/SKILL.md"
+if [ ! -f "$installed" ]; then
+    printf 'Package install did not create %s\n' "$installed" >&2
+    exit 1
+fi
+if ! cmp -s src/skill/SKILL.md "$installed"; then
+    printf 'Packaged skill differs from src/skill/SKILL.md\n' >&2
+    exit 1
+fi
+printf 'Package install placed the agent skill at the CLI target path\n'
