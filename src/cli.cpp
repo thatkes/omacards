@@ -55,6 +55,7 @@ struct Options {
     bool typeSet = false;
     bool tagsSet = false;
     bool help = false;
+    bool descriptionSet = false;
 };
 
 // The one GUI command path. Every other first token is an attempted CLI
@@ -126,9 +127,10 @@ Options parse(const QStringList &arguments) {
             options.card = value();
         else if (arg == "--input" || arg == "-i")
             options.input = value();
-        else if (arg == "--description")
+        else if (arg == "--description") {
             options.description = value();
-        else if (arg == "--format")
+            options.descriptionSet = true;
+        } else if (arg == "--format")
             options.format = value();
         else if (arg == "--rating" || arg == "-r")
             options.rating = value().toInt();
@@ -150,9 +152,10 @@ Options parse(const QStringList &arguments) {
             options.answerSet = true;
         } else if (arg.startsWith("--input="))
             options.input = arg.section('=', 1);
-        else if (arg.startsWith("--description="))
+        else if (arg.startsWith("--description=")) {
             options.description = arg.section('=', 1);
-        else if (arg.startsWith("--format="))
+            options.descriptionSet = true;
+        } else if (arg.startsWith("--format="))
             options.format = arg.section('=', 1);
         else if (arg.startsWith("--new-card-allowance="))
             options.newCardAllowance = arg.section('=', 1).toInt();
@@ -485,6 +488,7 @@ QString usage() {
                           "  omacards add-cards --deck NAME [--description TEXT] [--input FILE|-] [--json]\n"
                           "  omacards add-card -q Q -a A [-d D] [--type cloze] [--tags a,b] [--json]\n"
                           "  omacards edit-card -c ID [-q Q] [-a A] [--type T] [--tags a,b] [--json]\n"
+                          "  omacards edit-deck NAME --description TEXT [--json]\n"
                           "  omacards delete-card -c ID [-d D] [--json]\n"
                           "  omacards delete-deck NAME [--json]\n"
                           "  omacards rename-deck OLD NEW [--json]\n"
@@ -561,6 +565,10 @@ QString commandHelp(const QString &command) {
          {QStringLiteral("Edit a Card's Question, Answer, type or Tags."),
           QStringLiteral("-c ID, [-q Q], [-a A], [--type T], [--tags a,b], [--json], --help, -h"),
           QStringLiteral("omacards edit-card -c cdbec825f20d -a five --json")}},
+        {QStringLiteral("edit-deck"),
+         {QStringLiteral("Change a Deck's description without adding Cards."),
+          QStringLiteral("NAME, --description TEXT, [--json], --help, -h"),
+          QStringLiteral("omacards edit-deck Calculus --description 'New description' --json")}},
         {QStringLiteral("import"),
          {QStringLiteral("Import Cards from a file."), QStringLiteral("PATH, [-d D], [--json], --help, -h"),
           QStringLiteral("omacards import cards.json -d Calculus --json")}},
@@ -1225,6 +1233,36 @@ int run(const QStringList &arguments) {
         object.insert("renamedCards", result.cards);
         object.insert("preservedIds", result.preservedIds);
         write(object, json, QObject::tr("Renamed deck %1 to %2").arg(options.path, result.name));
+        return 0;
+    }
+
+    if (options.command == "edit-deck") {
+        const QString name = options.path.trimmed();
+        if (name.isEmpty())
+            return fail(QObject::tr("Give a deck name"), json);
+        if (!options.descriptionSet)
+            return fail(QObject::tr("Use --description TEXT"), json);
+        const QString targetPath = resolveDeckPath(decks, backend.decksDirectory(), name);
+        if (targetPath.isEmpty())
+            return fail(QObject::tr("No such deck: %1").arg(name), json);
+        if (!backend.setDeckDescription(name, options.description, &error))
+            return fail(error, json);
+
+        // backend refreshes after the write, so the stored Deck supplies the
+        // trimmed description reported in the JSON response.
+        QString description = options.description.trimmed();
+        for (const Deck &deck : backend.allDecks()) {
+            if (deck.path == targetPath) {
+                description = deck.description;
+                break;
+            }
+        }
+        QJsonObject object;
+        object.insert("ok", true);
+        object.insert("deck", name);
+        object.insert("path", targetPath);
+        object.insert("description", description);
+        write(object, json, QObject::tr("Updated description of deck %1").arg(name));
         return 0;
     }
 
