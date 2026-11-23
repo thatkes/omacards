@@ -20,6 +20,31 @@ case "$subject" in
         ;;
 esac
 
+# A staged C/C++ source file is allowed in a docs: commit only when every
+# added or removed line is blank or a C/C++ comment line. With -U0 there is
+# no context, so every '+' or '-' line inside a hunk is a changed line.
+# Gating on the hunk header also keeps a source line starting with '--' or
+# '++' from being mistaken for a diff file header.
+comment_only_source() {
+    file=$1
+    git diff --cached -U0 -- "$file" | awk '
+        /^@@/ { in_hunk = 1; next }
+        !in_hunk { next }
+        /^[-+]/ {
+            line = substr($0, 2)
+            sub(/^[[:space:]]+/, "", line)
+            sub(/[[:space:]]+$/, "", line)
+            if (line == "") next
+            # "//", "/*", "*" and "*/" after optional leading whitespace.
+            if (line ~ /^\/\//) next
+            if (line ~ /^\/\*/) next
+            if (line ~ /^\*/) next
+            bad = 1
+        }
+        END { exit bad }
+    '
+}
+
 # Gather staged files (added/copied/modified/renamed)
 staged="$(git diff --cached --name-only --diff-filter=ACMR || true)"
 if [ -z "$staged" ]; then
@@ -36,7 +61,15 @@ while IFS= read -r f; do
         GLOSSARY.md) ;;
         AGENTS.md) ;;
         README*|CHANGELOG*) ;;
-        */*) # files in subdirs other than docs/ are checked above
+        LICENSE) ;;
+        src/*.h|src/*.cpp)
+            if ! comment_only_source "$f"; then
+                printf 'commit-msg: %s has non-comment source changes\n' \
+                    "$f" >&2
+                bad="${bad}${bad:+$newline}$f"
+            fi
+            ;;
+        */*) # files in subdirs other than docs/ and src/ are checked above
             bad="${bad}${bad:+$newline}$f" ;;
         *.md) ;; # root-level markdown
         *)
@@ -47,8 +80,9 @@ $staged
 EOF
 
 if [ -n "$bad" ]; then
-    printf 'commit-msg: docs: commit must only include docs files (docs/*, GLOSSARY.md, AGENTS.md, README*, CHANGELOG*, root *.md).\n' >&2
-    printf 'Staged files outside that allowlist:\n' >&2
+    printf 'commit-msg: docs: commit must only include docs files, LICENSE,\n' >&2
+    printf 'root markdown and comment-only src/*.h or src/*.cpp edits.\n' >&2
+    printf 'Staged files outside the allowlist or with non-comment source lines:\n' >&2
     printf '%s\n' "$bad" >&2
     exit 1
 fi
