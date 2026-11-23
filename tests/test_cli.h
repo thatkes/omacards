@@ -8,6 +8,7 @@ class TestCli : public QObject {
 private slots:
     void helpIsHeadless();
     void missingSkillNudge();
+    void skillStatusReportsInstallState();
     void addCardsCreatesDeckBulk();
     void addCardsJsonMetadataContract();
     void addCardsPathKeepsRelativeDecksDir();
