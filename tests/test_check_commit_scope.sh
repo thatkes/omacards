@@ -113,6 +113,43 @@ EOF
 git -C "$comments" add docs/guide.md src/cli.cpp src/theme.h
 check_hook comment_only_src_accepted 0 '' "$comments"
 
+# Changing only a block-comment continuation line stays allowed.
+continuation="$tmp/continuation-docs"
+make_repo "$continuation"
+cat > "$continuation/src/cli.cpp" <<'EOF'
+// Old entry point header.
+/*
+ * Old explanation.
+ */
+int main(void) { return 0; }
+EOF
+git -C "$continuation" add src/cli.cpp
+git -C "$continuation" -c user.name=Tester \
+    -c user.email=tester@example.invalid commit -qm baseline
+cat > "$continuation/src/cli.cpp" <<'EOF'
+// Old entry point header.
+/*
+ * New explanation.
+ */
+int main(void) { return 0; }
+EOF
+git -C "$continuation" add docs/guide.md src/cli.cpp
+check_hook block_comment_continuation_accepted 0 '' "$continuation"
+
+# Blank lines and every comment opener or closer still pass on their own.
+forms="$tmp/comment-forms-docs"
+make_baseline_repo "$forms"
+cat > "$forms/src/cli.cpp" <<'EOF'
+
+// New entry point header.
+/*
+ * Explanation of the entry point.
+ */
+int main(void) { return 0; }
+EOF
+git -C "$forms" add docs/guide.md src/cli.cpp
+check_hook comment_forms_accepted 0 '' "$forms"
+
 # A non-comment source line fails even when it sits beside comment lines.
 code="$tmp/code-docs"
 make_baseline_repo "$code"
@@ -123,6 +160,27 @@ EOF
 git -C "$code" add docs/guide.md src/cli.cpp
 check_hook code_src_rejected 1 \
     'docs: commit must only include docs files' "$code"
+
+# A star-prefixed dereference is source code, not a block-comment line.
+deref="$tmp/deref-docs"
+make_repo "$deref"
+cat > "$deref/src/cli.cpp" <<'EOF'
+// Old entry point header.
+void set(int *p) {
+}
+EOF
+git -C "$deref" add src/cli.cpp
+git -C "$deref" -c user.name=Tester \
+    -c user.email=tester@example.invalid commit -qm baseline
+cat > "$deref/src/cli.cpp" <<'EOF'
+// Old entry point header.
+void set(int *p) {
+    *p = 1;
+}
+EOF
+git -C "$deref" add docs/guide.md src/cli.cpp
+check_hook star_deref_src_rejected 1 \
+    'docs: commit must only include docs files' "$deref"
 
 # Lines that look like diff headers are still source lines, not headers.
 operators="$tmp/operators-docs"

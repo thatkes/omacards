@@ -35,10 +35,14 @@ comment_only_source() {
             sub(/^[[:space:]]+/, "", line)
             sub(/[[:space:]]+$/, "", line)
             if (line == "") next
-            # "//", "/*", "*" and "*/" after optional leading whitespace.
+            # "//", "/*" and "*/" after optional leading whitespace. The
+            # remaining "*" branch accepts only block-comment continuations:
+            # the star must be followed by whitespace or end the line, so a
+            # dereference such as "*p = 1;" is source code, not a comment.
             if (line ~ /^\/\//) next
             if (line ~ /^\/\*/) next
-            if (line ~ /^\*/) next
+            if (line ~ /^\*\//) next
+            if (line ~ /^\*([[:space:]]|$)/) next
             bad = 1
         }
         END { exit bad }
