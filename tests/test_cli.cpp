@@ -807,6 +807,8 @@ void TestCli::readCommandJsonContracts() {
     QCOMPARE(search.value(QStringLiteral("count")).toInt(), 2);
     const QJsonObject scoped = runCli({"search", "alpha", "--deck", "Beta", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
+    QCOMPARE(sortedKeys(scoped), QStringList({"cards", "count", "ok"}));
+    QVERIFY(scoped.value(QStringLiteral("ok")).toBool());
     QCOMPARE(scoped.value(QStringLiteral("count")).toInt(), 0);
 
     const QJsonObject due = runCli({"due", "--deck", "Alpha", "--json"}, decks, database, &code);
@@ -814,6 +816,25 @@ void TestCli::readCommandJsonContracts() {
     QCOMPARE(sortedKeys(due), QStringList({"cards", "count", "ok", "totalDue"}));
     QCOMPARE(due.value(QStringLiteral("count")).toInt(), 2);
     QCOMPARE(due.value(QStringLiteral("totalDue")).toInt(), 2);
+
+    const QJsonObject missingCards = runCli({"cards", "--deck", "Missing", "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QCOMPARE(sortedKeys(missingCards), QStringList({"error", "ok"}));
+    QVERIFY(!missingCards.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(missingCards.value(QStringLiteral("error")).toString(), QString("No such deck: Missing"));
+
+    const QJsonObject missingSearch =
+        runCli({"search", "alpha", "--deck", "Missing", "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QCOMPARE(sortedKeys(missingSearch), QStringList({"error", "ok"}));
+    QVERIFY(!missingSearch.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(missingSearch.value(QStringLiteral("error")).toString(), QString("No such deck: Missing"));
+
+    const QJsonObject missingDue = runCli({"due", "--deck", "Missing", "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QCOMPARE(sortedKeys(missingDue), QStringList({"error", "ok"}));
+    QVERIFY(!missingDue.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(missingDue.value(QStringLiteral("error")).toString(), QString("No such deck: Missing"));
 
     runCli({"review", "-c", cardId, "-r", "3", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);

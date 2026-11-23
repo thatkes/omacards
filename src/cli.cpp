@@ -816,6 +816,8 @@ int run(const QStringList &arguments) {
     }
 
     if (options.command == "cards") {
+        if (!options.deck.isEmpty() && resolveDeckPath(decks, backend.decksDirectory(), options.deck).isEmpty())
+            return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
         QJsonArray array;
         for (const Card &card : allCards(decks, options.deck))
             array << cardJson(card);
@@ -830,6 +832,8 @@ int run(const QStringList &arguments) {
     }
 
     if (options.command == "search") {
+        if (!options.deck.isEmpty() && resolveDeckPath(decks, backend.decksDirectory(), options.deck).isEmpty())
+            return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
         const QVector<Card> matches = backend.searchCards(options.path, options.deck);
         QJsonArray array;
         for (const Card &card : matches)
@@ -1046,6 +1050,8 @@ int run(const QStringList &arguments) {
     }
 
     if (options.command == "due") {
+        if (!options.deck.isEmpty() && resolveDeckPath(decks, backend.decksDirectory(), options.deck).isEmpty())
+            return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
         const QVector<Card> cards = backend.dueCards(options.deck);
         QJsonArray array;
         for (const Card &card : cards)
