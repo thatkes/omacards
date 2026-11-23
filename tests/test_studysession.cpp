@@ -331,12 +331,73 @@ void TestStudySession::statsChangedSeesPresentedLeitnerBox() {
 
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
 
-    // A subscriber must never see the just-rated Flashcard's box. Every
-    // statsChanged from rate() carries the next Flashcard's Leitner box.
-    QVERIFY(!boxesAtSignal.isEmpty());
+    // A subscriber must never see the just-rated Flashcard's box. The one
+    // statsChanged from rate() carries the next Flashcard's settled box.
+    QCOMPARE(boxesAtSignal.size(), 1);
     QCOMPARE(fixture.session.currentLeitnerBox(), 1);
     for (int box : boxesAtSignal)
         QCOMPARE(box, fixture.session.currentLeitnerBox());
+}
+
+void TestStudySession::waitingExitEmitsOneSettledStatsNotification() {
+    AgainDelayGuard guard;
+    qputenv("OMACARDS_AGAIN_DELAY_MS", "2000");
+    SessionFixture fixture;
+    QString error;
+    QVERIFY(prepareSession(fixture, "Waiting", {"Q1", "Q2"}, &error));
+    QVERIFY(error.isEmpty());
+
+    QVector<int> reviewedAtSignal;
+    QVector<int> goodAtSignal;
+    QStringList statusAtSignal;
+    QObject::connect(&fixture.session, &StudySession::statsChanged, &fixture.session,
+                     [&fixture, &reviewedAtSignal, &goodAtSignal, &statusAtSignal] {
+                         reviewedAtSignal << fixture.session.reviewed();
+                         goodAtSignal << fixture.session.good();
+                         statusAtSignal << fixture.session.status();
+                     });
+
+    QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention)); // Q1 waits; Q2 is shown
+    QCOMPARE(reviewedAtSignal.size(), 1);
+    QCOMPARE(reviewedAtSignal.last(), 1);
+    QCOMPARE(goodAtSignal.last(), 0);
+    QVERIFY(fixture.session.hasCard());
+
+    reviewedAtSignal.clear();
+    goodAtSignal.clear();
+    statusAtSignal.clear();
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention)); // Q2 done; only Q1 still waits
+    QCOMPARE(reviewedAtSignal.size(), 1);
+    QCOMPARE(reviewedAtSignal.last(), 2);
+    QCOMPARE(goodAtSignal.last(), 1);
+    QCOMPARE(statusAtSignal.last(), fixture.session.status());
+    QVERIFY(fixture.session.waitingForRepeat());
+    QVERIFY(!fixture.session.hasCard());
+}
+
+void TestStudySession::finishedExitEmitsOneSettledStatsNotification() {
+    SessionFixture fixture;
+    QString error;
+    QVERIFY(prepareSession(fixture, "Finished", {"Q1"}, &error));
+    QVERIFY(error.isEmpty());
+
+    QVector<int> reviewedAtSignal;
+    QVector<int> goodAtSignal;
+    QStringList statusAtSignal;
+    QObject::connect(&fixture.session, &StudySession::statsChanged, &fixture.session,
+                     [&fixture, &reviewedAtSignal, &goodAtSignal, &statusAtSignal] {
+                         reviewedAtSignal << fixture.session.reviewed();
+                         goodAtSignal << fixture.session.good();
+                         statusAtSignal << fixture.session.status();
+                     });
+
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
+    QCOMPARE(reviewedAtSignal.size(), 1);
+    QCOMPARE(reviewedAtSignal.last(), 1);
+    QCOMPARE(goodAtSignal.last(), 1);
+    QCOMPARE(statusAtSignal.last(), fixture.session.status());
+    QVERIFY(fixture.session.status().contains(QStringLiteral("All caught up")));
+    QVERIFY(!fixture.session.hasCard());
 }
 
 void TestStudySession::invalidRatingsAreNoOps() {

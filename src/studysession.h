@@ -71,7 +71,9 @@ signals:
 
 private:
     void startRepeatTimer(qint64 waitMs);
-    void presentCard();
+    // Ratings own their single settled notification; other callers keep the
+    // notification presentation has always emitted.
+    void presentCard(bool notifyStats = true);
     void answerCram(Rating rating);
     void answerReview(Rating rating, double desiredRetention);
     void refreshDueCount();
