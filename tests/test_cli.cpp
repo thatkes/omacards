@@ -673,6 +673,71 @@ void TestCli::addDeckDescriptionAndJsonImport() {
     QVERIFY2(error.isEmpty(), qPrintable(error));
     QCOMPARE(imported.description, QString("from import"));
     QCOMPARE(imported.cards.size(), 1);
+
+    // edit-deck changes the description through the process boundary without
+    // adding, removing or re-id'ing a Card.
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    int code = -1;
+    const QJsonObject added =
+        runCli({"add-card", "--deck", "Imported", "-q", "Q?", "-a", "A", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    const QString cardId = added.value(QStringLiteral("id")).toString();
+    QVERIFY(!cardId.isEmpty());
+    error.clear();
+    const Deck beforeEdit = DeckIO::load(QDir(decks).filePath("Imported.txt"), &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QStringList idsBefore;
+    for (const Card &card : beforeEdit.cards)
+        idsBefore << card.id;
+    idsBefore.sort();
+
+    const QJsonObject edited =
+        runCli({"edit-deck", "Imported", "--description", "Fresh description", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY(edited.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(sortedKeys(edited), QStringList({"deck", "description", "ok", "path"}));
+    QCOMPARE(edited.value(QStringLiteral("deck")).toString(), QString("Imported"));
+    QCOMPARE(edited.value(QStringLiteral("description")).toString(), QString("Fresh description"));
+    QCOMPARE(edited.value(QStringLiteral("path")).toString(), QDir(decks).filePath("Imported.txt"));
+
+    error.clear();
+    const Deck reread = DeckIO::load(QDir(decks).filePath("Imported.txt"), &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(reread.description, QString("Fresh description"));
+    QStringList idsAfter;
+    for (const Card &card : reread.cards)
+        idsAfter << card.id;
+    idsAfter.sort();
+    QCOMPARE(idsAfter, idsBefore);
+    QVERIFY(idsAfter.contains(cardId));
+    const QJsonObject cards = runCli({"cards", "--deck", "Imported", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    const QJsonArray items = cards.value(QStringLiteral("cards")).toArray();
+    QCOMPARE(items.size(), idsBefore.size());
+
+    const QString confirmation =
+        runCliText({"edit-deck", "Imported", "--description", "Terse"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY(confirmation.contains(QStringLiteral("Imported")));
+    QCOMPARE(confirmation.trimmed().count('\n'), 0);
+
+    QFile deckFile(QDir(decks).filePath("Imported.txt"));
+    QVERIFY(deckFile.open(QIODevice::ReadOnly));
+    const QByteArray before = deckFile.readAll();
+    deckFile.close();
+    const QJsonObject missing = runCli({"edit-deck", "Ghost", "--description", "x", "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QCOMPARE(sortedKeys(missing), QStringList({"error", "ok"}));
+    QCOMPARE(missing.value(QStringLiteral("error")).toString(), QString("No such deck: Ghost"));
+    QVERIFY(!missing.value(QStringLiteral("ok")).toBool());
+    QVERIFY(deckFile.open(QIODevice::ReadOnly));
+    QCOMPARE(deckFile.readAll(), before);
+    deckFile.close();
+
+    const QJsonObject noText = runCli({"edit-deck", "Imported", "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QVERIFY(noText.value(QStringLiteral("error")).toString().contains(QStringLiteral("--description")));
 }
 
 void TestCli::cliConfigReportsWriteFailure() {

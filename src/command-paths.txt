@@ -13,6 +13,7 @@ delete-card
 delete-deck
 due
 edit-card
+edit-deck
 help
 import
 open

@@ -13,6 +13,7 @@
 #include "filehistory.h"
 #include "fsrs.h"
 #include "store.h"
+#include "test_support.h"
 
 namespace {
 
@@ -541,6 +542,7 @@ void TestDeckRepository::removeDeckKeepsUnrelatedCurrent() {
 void TestDeckRepository::setDeckDescriptionTrimsAndSkipsNoOp() {
     RepoFixture f;
     QVERIFY(setup(f));
+    TestSupport::EnvGuard env(f.dir.filePath("decks"), f.dir.filePath("state.db"));
     QString error;
     QVERIFY(f.repo.createDeck("Desc", &f.current, &error, "Original"));
     QVERIFY(f.repo.setDeckDescription("Desc", "  Updated  ", &error));
@@ -553,6 +555,33 @@ void TestDeckRepository::setDeckDescriptionTrimsAndSkipsNoOp() {
     error.clear();
     QVERIFY(!f.repo.setDeckDescription("Ghost", "x", &error));
     QVERIFY(error.contains(QStringLiteral("No such deck: Ghost")));
+
+    // The CLI path must touch only the description: the Card keeps its id and
+    // the written Deck still reports the same single Card.
+    QVERIFY(f.repo.createCard("Desc", &f.current, "Q", "A", "basic", {}, &error));
+    const QString cardId = f.repo.deckByName("Desc")->cards.first().id;
+    int code = -1;
+    const QJsonObject changed = TestSupport::runCli({"edit-deck", "Desc", "--description", "  Via CLI  ", "--json"},
+                                                    f.dir.filePath("decks"), f.dir.filePath("state.db"), &code);
+    QCOMPARE(code, 0);
+    QStringList keys = changed.keys();
+    keys.sort();
+    QCOMPARE(keys, QStringList({"deck", "description", "ok", "path"}));
+    QVERIFY(changed.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(changed.value(QStringLiteral("deck")).toString(), QString("Desc"));
+    QCOMPARE(changed.value(QStringLiteral("description")).toString(), QString("Via CLI"));
+    QCOMPARE(changed.value(QStringLiteral("path")).toString(), QDir(f.dir.filePath("decks")).filePath("Desc.txt"));
+
+    error.clear();
+    const Deck stored = DeckIO::load(QDir(f.dir.filePath("decks")).filePath("Desc.txt"), &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(stored.description, QString("Via CLI"));
+    QCOMPARE(stored.cards.size(), 1);
+    QCOMPARE(stored.cards.first().id, cardId);
+
+    f.repo.load(&f.current);
+    QCOMPARE(f.repo.deckByName("Desc")->cards.size(), 1);
+    QCOMPARE(f.repo.deckByName("Desc")->cards.first().id, cardId);
 }
 
 void TestDeckRepository::setDeckDescriptionRejectsInvalidSerializedDeck() {
