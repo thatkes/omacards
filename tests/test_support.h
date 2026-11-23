@@ -74,6 +74,24 @@ struct EnvGuard {
     }
 };
 
+// Isolates the home directory that QDir::homePath() resolves for the bundled
+// agent skill. No other environment variable controls the install target, and
+// runCli*() inherits this HOME through the child process environment.
+class HomeGuard {
+public:
+    explicit HomeGuard(const QString &home) : m_previous(qgetenv("HOME")) { qputenv("HOME", home.toUtf8()); }
+
+    ~HomeGuard() {
+        if (!m_previous.isNull())
+            qputenv("HOME", m_previous);
+        else
+            qunsetenv("HOME");
+    }
+
+private:
+    QByteArray m_previous;
+};
+
 inline QString appBinary() {
     return QDir(QString(OMACARDS_SOURCE_DIR)).filePath("../build/omacards");
 }

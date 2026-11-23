@@ -102,6 +102,82 @@ void TestCli::helpIsHeadless() {
              "Help probes must not create a Deck");
     QVERIFY2(!QFileInfo::exists(database), "Help probes must not create the state database");
 
+    // HOME alone controls the skill target. An isolated HOME keeps every probe
+    // below away from the agent's real installed copy.
+    QTemporaryDir homeDir;
+    QVERIFY(homeDir.isValid());
+    HomeGuard home(homeDir.path());
+    const QString skillPath = homeDir.filePath(QStringLiteral(".agents/skills/omacards/SKILL.md"));
+    QVERIFY2(!QFileInfo::exists(skillPath), "The isolated HOME must start without an installed skill");
+
+    // Bare `skill` is a probe: it reports status and help, and installs nothing.
+    int skillCode = -1;
+    QByteArray skillErrors;
+    const QByteArray bareSkill = runCliRaw({"skill"}, decks, database, &skillCode, &skillErrors);
+    QCOMPARE(skillCode, 0);
+    QVERIFY2(skillErrors.isEmpty(), qPrintable(skillErrors));
+    const QString bareText = QString::fromUtf8(bareSkill);
+    QVERIFY2(bareText.contains(QStringLiteral("Skill installed: no")), qPrintable(bareText));
+    QVERIFY2(bareText.contains(skillPath), qPrintable(bareText));
+    QVERIFY2(bareText.contains(QStringLiteral("Purpose:")), qPrintable(bareText));
+    QVERIFY2(bareText.contains(QStringLiteral("Flags:")), qPrintable(bareText));
+    QVERIFY2(bareText.contains(QStringLiteral("Example:")), qPrintable(bareText));
+    QVERIFY2(!QFileInfo::exists(skillPath), "Bare skill must not install the skill");
+
+    // JSON status stays parseable and names the same target.
+    const QJsonObject status = runCli({"skill", "--json"}, decks, database, &skillCode, &skillErrors);
+    QCOMPARE(skillCode, 0);
+    QCOMPARE(sortedKeys(status), QStringList({"installed", "matches", "ok", "path"}));
+    QVERIFY(status.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(status.value(QStringLiteral("path")).toString(), skillPath);
+    QVERIFY(!status.value(QStringLiteral("installed")).toBool());
+    QVERIFY(!QFileInfo::exists(skillPath));
+    QVERIFY2(!QFileInfo::exists(database), "Skill probes must not initialize the state database");
+
+    // Skill help explains where the copy goes, that installs are idempotent,
+    // how a changed generated copy is treated, and when the agent reloads it.
+    for (const QString &command : {QStringLiteral("skill"), QStringLiteral("skill install")}) {
+        for (const QString &flag : {QStringLiteral("--help"), QStringLiteral("-h")}) {
+            QStringList arguments = command.split(QLatin1Char(' '));
+            arguments << flag;
+            int code = -1;
+            QByteArray errors;
+            const QString text = QString::fromUtf8(runCliRaw(arguments, decks, database, &code, &errors));
+            QCOMPARE(code, 0);
+            QVERIFY2(errors.isEmpty(), qPrintable(errors));
+            QVERIFY2(text.contains(skillPath), qPrintable(text));
+            QVERIFY2(text.contains(QStringLiteral("idempotent"), Qt::CaseInsensitive), qPrintable(text));
+            QVERIFY2(text.contains(QStringLiteral("overwritten"), Qt::CaseInsensitive), qPrintable(text));
+            QVERIFY2(text.contains(QStringLiteral("Restart the agent"), Qt::CaseInsensitive), qPrintable(text));
+        }
+    }
+    QVERIFY2(!QFileInfo::exists(skillPath), "Help probes must not install the skill");
+    QVERIFY2(!QFileInfo::exists(database), "Skill help probes must not initialize the state database");
+
+    // A blocked target keeps the two-key failure shape from issue #107.
+    const QString agentsDir = homeDir.filePath(QStringLiteral(".agents"));
+    QVERIFY(writeFile(agentsDir, "not a directory"));
+    const QJsonObject failure = runCli({"skill", "install", "--json"}, decks, database, &skillCode, &skillErrors);
+    QCOMPARE(skillCode, 1);
+    QCOMPARE(sortedKeys(failure), QStringList({"error", "ok"}));
+    QVERIFY(!failure.value(QStringLiteral("ok")).toBool());
+    QVERIFY2(failure.value(QStringLiteral("error")).toString().contains(skillPath),
+             qPrintable(failure.value(QStringLiteral("error")).toString()));
+    QVERIFY2(skillErrors.isEmpty(), qPrintable(skillErrors));
+    QVERIFY2(!QFileInfo::exists(skillPath), "A failed install must not create the skill");
+
+    QVERIFY(QFile::remove(agentsDir));
+    const QJsonObject installed = runCli({"skill", "install", "--json"}, decks, database, &skillCode, &skillErrors);
+    QCOMPARE(skillCode, 0);
+    QVERIFY(installed.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(installed.value(QStringLiteral("path")).toString(), skillPath);
+    QVERIFY(QFileInfo::exists(skillPath));
+    QFile installedSkill(skillPath);
+    QFile bundledSkill(QStringLiteral(":/skill/SKILL.md"));
+    QVERIFY(installedSkill.open(QIODevice::ReadOnly));
+    QVERIFY(bundledSkill.open(QIODevice::ReadOnly));
+    QCOMPARE(installedSkill.readAll(), bundledSkill.readAll());
+
     // A help flag is never a positional name and never runs the command.
     int code = -1;
     const QByteArray checkHelp = runCliRaw({"check", "--help", "--json"}, decks, database, &code);
