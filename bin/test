@@ -8,7 +8,7 @@ mkdir -p "$ROOT/build/tests"
 cd "$ROOT/build/tests"
 qmake6 "$ROOT/tests/omacards_tests.pro"
 make -j"$(nproc)"
-LOG="$ROOT/build/tests/last-run.log"
+LOG="$(mktemp "$ROOT/build/tests/run.XXXXXX")"
 status=0
 QT_QPA_PLATFORM=offscreen ./omacards_tests "$@" > "$LOG" 2>&1 || status=$?
 cat "$LOG"
