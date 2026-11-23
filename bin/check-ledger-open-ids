@@ -1,0 +1,113 @@
+#!/bin/sh
+set -eu
+
+# Compare the ledger's current-id table with the open GitHub issue ids. Tests
+# pass both inputs as fixtures; normal use reads the ledger from this repo and
+# the ids from gh.
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+
+usage() {
+    printf 'Usage: check-ledger-open-ids [--ledger PATH] [--issues-file PATH]\n' >&2
+}
+
+ledger="$ROOT/docs/agents/wiki/backlog-queue-ledger.md"
+issues_file=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --ledger)
+            [ "$#" -ge 2 ] || { usage; exit 2; }
+            ledger=$2
+            shift 2
+            ;;
+        --issues-file)
+            [ "$#" -ge 2 ] || { usage; exit 2; }
+            issues_file=$2
+            shift 2
+            ;;
+        *)
+            usage
+            exit 2
+            ;;
+    esac
+done
+
+if [ ! -f "$ledger" ]; then
+    printf 'ERROR no such ledger: %s\n' "$ledger" >&2
+    exit 1
+fi
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+
+if [ -n "$issues_file" ]; then
+    issues_source=$issues_file
+else
+    issues_source="$tmp/gh-ids"
+    if ! gh issue list --state open --limit 100 --json number \
+        --jq '.[].number' > "$issues_source"; then
+        printf 'ERROR could not list open issue ids\n' >&2
+        exit 1
+    fi
+fi
+
+if ! awk -F '[|]' '
+    BEGIN { starts = 0; ends = 0; inside = 0; bad = 0 }
+    /<!-- ledger-current-ids-start -->/ {
+        starts++
+        if (inside) bad = 1
+        inside = 1
+        next
+    }
+    /<!-- ledger-current-ids-end -->/ {
+        ends++
+        if (!inside) bad = 1
+        inside = 0
+        next
+    }
+    inside && /^\|/ {
+        if (NF < 4) { bad = 1; next }
+        id = $2
+        state = $3
+        gsub(/^[ \t]+|[ \t]+$/, "", id)
+        gsub(/^[ \t]+|[ \t]+$/, "", state)
+        gsub(/`/, "", state)
+        if (id == "id" || id ~ /^-+$/) next
+        if (id !~ /^#[0-9]+$/ || state == "") { bad = 1; next }
+        if (state == "merged") next
+        gsub(/[#`]/, "", id)
+        print id
+    }
+    END {
+        if (starts != 1 || ends != 1 || inside || bad) exit 1
+    }
+' "$ledger" > "$tmp/ledger.raw"; then
+    printf 'ERROR malformed ledger current-id section: %s\n' "$ledger" >&2
+    exit 1
+fi
+
+awk '
+    {
+        gsub(/^[ \t]+|[ \t]+$/, "", $0)
+        gsub(/[#`]/, "", $0)
+        if ($0 != "") print
+    }
+' "$issues_source" > "$tmp/issues.raw"
+
+LC_ALL=C sort -u "$tmp/ledger.raw" > "$tmp/ledger.ids"
+LC_ALL=C sort -u "$tmp/issues.raw" > "$tmp/issues.ids"
+
+if ! cmp -s "$tmp/ledger.ids" "$tmp/issues.ids"; then
+    missing=$(LC_ALL=C comm -23 "$tmp/issues.ids" "$tmp/ledger.ids" | paste -sd ' ' -)
+    stale=$(LC_ALL=C comm -13 "$tmp/issues.ids" "$tmp/ledger.ids" | paste -sd ' ' -)
+    printf 'LEDGER MISMATCH\n'
+    if [ -n "$missing" ]; then
+        printf 'missing from ledger: %s\n' "$missing"
+    fi
+    if [ -n "$stale" ]; then
+        printf 'stale in ledger: %s\n' "$stale"
+    fi
+    exit 1
+fi
+
+count=$(wc -l < "$tmp/ledger.ids" | tr -d ' ')
+printf 'LEDGER OK %s open ids\n' "$count"

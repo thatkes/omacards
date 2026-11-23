@@ -1,0 +1,158 @@
+#!/bin/sh
+set -eu
+
+# Summarise the wave timing log between its markers. Rows are validated before
+# any totals are printed; chain waits use the previous link's merged time.
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+
+usage() {
+    printf 'Usage: wave-timing [--ledger PATH] [--check] [--threshold SECONDS]\n' >&2
+}
+
+ledger="$ROOT/docs/agents/wiki/backlog-queue-ledger.md"
+check_only=0
+threshold=120
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --ledger)
+            [ "$#" -ge 2 ] || { usage; exit 2; }
+            ledger=$2
+            shift 2
+            ;;
+        --check)
+            check_only=1
+            shift
+            ;;
+        --threshold)
+            [ "$#" -ge 2 ] || { usage; exit 2; }
+            threshold=$2
+            shift 2
+            ;;
+        *)
+            usage
+            exit 2
+            ;;
+    esac
+done
+
+case "$threshold" in
+    ''|*[!0-9]*) usage; exit 2 ;;
+esac
+
+if [ ! -f "$ledger" ]; then
+    printf 'ERROR no such ledger: %s\n' "$ledger" >&2
+    exit 1
+fi
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+
+if ! awk -F '[|]' '
+    function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+    function clean(s) { gsub(/`/, "", s); return trim(s) }
+    function secs(t,    p) {
+        t = clean(t)
+        if (t == "-") return -1
+        if (t !~ /^[0-9][0-9]:[0-9][0-9]:[0-9][0-9]$/) return -2
+        split(t, p, ":")
+        if (p[1] > 23 || p[2] > 59 || p[3] > 59) return -2
+        return p[1] * 3600 + p[2] * 60 + p[3]
+    }
+    BEGIN { starts = 0; ends = 0; inside = 0; bad = 0; rows = 0 }
+    /<!-- wave-timing-start -->/ {
+        starts++
+        if (inside) bad = 1
+        inside = 1
+        next
+    }
+    /<!-- wave-timing-end -->/ {
+        ends++
+        if (!inside) bad = 1
+        inside = 0
+        next
+    }
+    inside && /^\|/ {
+        if (NF != 7) { bad = 1; next }
+        id = clean($2)
+        chain = clean($3)
+        dispatched = secs($4)
+        finished = secs($5)
+        merged = secs($6)
+        if (id == "id" || id ~ /^-+$/) next
+        if (id !~ /^#[0-9]+$/ || dispatched == -2 || finished == -2 || merged == -2) {
+            bad = 1
+            next
+        }
+        if (chain == "-") {
+            name = "-"
+            order = -1
+        } else {
+            if (chain !~ /^[A-Za-z0-9_.-]+\/[0-9]+$/) { bad = 1; next }
+            slash = index(chain, "/")
+            name = substr(chain, 1, slash - 1)
+            order = substr(chain, slash + 1) + 0
+        }
+        sub(/^#/, "", id)
+        printf "%s\t%s\t%d\t%d\t%d\t%d\t%s\n", \
+            id, chain, dispatched, finished, merged, order, name
+        rows++
+    }
+    END {
+        if (starts != 1 || ends != 1 || inside || bad || rows == 0) exit 1
+    }
+' "$ledger" > "$tmp/rows"; then
+    printf 'ERROR malformed wave timing section: %s\n' "$ledger" >&2
+    exit 1
+fi
+
+awk -F '\t' '
+    function clock(t,    h, m, s) {
+        h = int(t / 3600)
+        m = int((t % 3600) / 60)
+        s = t % 60
+        return sprintf("%02d:%02d:%02d", h, m, s)
+    }
+    {
+        if ($3 >= 0 && (first == "" || $3 < first)) first = $3
+        for (i = 3; i <= 5; i++) {
+            if ($i >= 0 && (last == "" || $i > last)) last = $i
+        }
+        if ($3 >= 0 && $4 >= 0) agent += $4 - $3
+        if ($4 >= 0 && $5 >= 0) lag += $5 - $4
+    }
+    END {
+        printf "WAVE window %s..%s (%ds)\n", clock(first), clock(last), last - first
+        printf "AGENT total %ds\n", agent
+        printf "MERGE_LAG total %ds\n", lag
+    }
+' "$tmp/rows" > "$tmp/totals"
+
+tab=$(printf '\t')
+LC_ALL=C sort -t "$tab" -k7,7 -k6,6n "$tmp/rows" > "$tmp/sorted"
+awk -F '\t' -v threshold="$threshold" '
+    $6 >= 0 {
+        if (name != $7) {
+            prev_id = ""
+            prev_merged = -1
+        }
+        if (prev_merged >= 0 && $3 >= 0) {
+            wait = $3 - prev_merged
+            if (wait > threshold) {
+                printf "CHAIN %s #%s waited %ds after #%s merged (threshold %ds)\n", \
+                    $7, $1, wait, prev_id, threshold
+            }
+        }
+        name = $7
+        prev_id = $1
+        prev_merged = $5
+    }
+' "$tmp/sorted" > "$tmp/chains"
+
+cat "$tmp/totals" "$tmp/chains"
+
+if [ "$check_only" -eq 1 ]; then
+    breaches=$(grep -c '^CHAIN ' "$tmp/chains" || true)
+    if [ "$breaches" -gt 0 ]; then
+        exit 1
+    fi
+fi
