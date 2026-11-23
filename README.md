@@ -143,6 +143,7 @@ omacards help  # aliases: --help, -h
 omacards import <file> [--deck <deck>] [--json]
 omacards open  # start the GUI
 omacards preview [--deck <deck>] [--card <card-id>] [--format <format>] [--json]
+omacards rename-deck <old-name> <new-name> [--json]
 omacards review -c <card-id> -r <rating> [--json]
 omacards search <term> [--deck <deck>] [--json]
 omacards skill <subcommand> [--json]
