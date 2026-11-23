@@ -116,7 +116,7 @@ Questions and answers may span multiple lines: indent every continuation line wi
 
 A card's id is a hash of its deck, question and answer, so editing a card resets its Scheduling state but keeps the file readable. An explicit `id:` line pins the identity across edits.
 
-Anki `.apkg` imports preserve HTML entities, tags, and cloze note types (`{{c1::answer}}`; `::hint` is dropped). Referenced media is extracted next to the deck files under `media/<deck>/` and image sources are rewritten to local `file://` URLs, so images still render in the study view. CSV/TSV files with a `question,answer,tags` header are imported as basic cards.
+Anki `.apkg` imports preserve HTML entities, tags, and cloze note types (`{{c1::answer}}`; `::hint` is dropped). Referenced media is extracted next to the deck files under `media/<sanitized-deck>/` and image sources are rewritten to local `file://` URLs, so images still render in the study view. CSV files use commas between columns and TSV files use tabs. Columns hold the question, answer and an optional comma-separated tags list. An optional header row is skipped when its first cell contains `question` or the Anki alias `front`. Both import as basic cards.
 
 ## Agent CLI
 
