@@ -1954,6 +1954,7 @@ void TestCli::configValidationAndPersistence() {
     auto expectError = [&](const QStringList &args, const QString &message) {
         const QJsonObject result = runCli(args, decks, database, &code);
         QCOMPARE(code, 1);
+        QCOMPARE(sortedKeys(result), QStringList({"error", "ok"}));
         QVERIFY(!result.value(QStringLiteral("ok")).toBool());
         QCOMPARE(result.value(QStringLiteral("error")).toString(), message);
     };
@@ -2015,6 +2016,16 @@ void TestCli::configValidationAndPersistence() {
     QCOMPARE(runCliText({"config", "--new-per-day", "7"}, decks, database, &code, &rejectedStderr), QString());
     QCOMPARE(code, 1);
     QVERIFY(rejectedStderr.contains("Unknown flag: --new-per-day"));
+
+    // --deck has no meaning for config: reject both spellings before a Setting
+    // write, even when the named Deck exists and other flags are valid.
+    const QJsonObject beforeDeck = runCli({"config", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    expectError({"config", "--deck", "Budget", "--new-card-allowance", "7", "--json"}, "Unknown flag: --deck");
+    expectError({"config", "--deck=Missing", "--new-card-allowance", "9", "--json"}, "Unknown flag: --deck");
+    const QJsonObject afterDeck = runCli({"config", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(QJsonDocument(afterDeck).toJson(), QJsonDocument(beforeDeck).toJson());
 
     const QString configText = runCliText({"config"}, decks, database, &code);
     QCOMPARE(code, 0);

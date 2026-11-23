@@ -50,6 +50,7 @@ struct Options {
     bool json = false;
     bool math = false;
     bool strict = false;
+    bool deckSet = false;
     bool questionSet = false;
     bool answerSet = false;
     bool typeSet = false;
@@ -109,9 +110,10 @@ Options parse(const QStringList &arguments) {
     for (int i = 0; i < rest.size(); ++i) {
         const QString arg = rest.at(i);
         auto value = [&]() { return i + 1 < rest.size() ? rest.at(++i) : QString(); };
-        if (arg == "--deck" || arg == "-d")
+        if (arg == "--deck" || arg == "-d") {
             options.deck = value();
-        else if (arg == "--question" || arg == "-q") {
+            options.deckSet = true;
+        } else if (arg == "--question" || arg == "-q") {
             options.question = value();
             options.questionSet = true;
         } else if (arg == "--answer" || arg == "-a") {
@@ -142,9 +144,10 @@ Options parse(const QStringList &arguments) {
             options.dayStartHour = value().toInt();
         else if (arg == "--retention")
             options.retention = value().toDouble();
-        else if (arg.startsWith("--deck="))
+        else if (arg.startsWith("--deck=")) {
             options.deck = arg.section('=', 1);
-        else if (arg.startsWith("--question=")) {
+            options.deckSet = true;
+        } else if (arg.startsWith("--question=")) {
             options.question = arg.section('=', 1);
             options.questionSet = true;
         } else if (arg.startsWith("--answer=")) {
@@ -686,6 +689,10 @@ int run(const QStringList &arguments) {
         return fail(QObject::tr("Unknown command: %1").arg(options.command), options.json);
     if (!options.unknownFlag.isEmpty())
         return fail(QObject::tr("Unknown flag: %1").arg(options.unknownFlag), options.json);
+    // config changes global Settings only. A Deck scope is meaningless there,
+    // so reject the flag before Backend initialization can write anything.
+    if (options.command == "config" && options.deckSet)
+        return fail(QObject::tr("Unknown flag: %1").arg(QStringLiteral("--deck")), options.json);
 
     // Bare `skill` and `skill status` are read-only probes: report the shared
     // status snapshot and skip backend initialization so neither the state
