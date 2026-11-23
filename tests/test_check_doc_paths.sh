@@ -5,55 +5,16 @@ set -eu
 # and the Layout matcher, so no tracked doc or source file is modified.
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 CHECKER="$ROOT/bin/check-doc-paths"
+. "$ROOT/tests/checker_test_support.sh"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 failures=0
 
-expect_result() {
-    name=$1
-    want_status=$2
-    want_text=$3
-    root=$4
-    forbidden=${5:-}
-    set +e
-    output="$("$root/bin/check-doc-paths" "$root" 2>&1)"
-    got_status=$?
-    set -e
-    if [ "$got_status" -ne "$want_status" ]; then
-        printf 'FAIL %s: status %s, wanted %s\n%s\n' \
-            "$name" "$got_status" "$want_status" "$output"
-        failures=$((failures + 1))
-        return
-    fi
-    case "$output" in
-        *"$want_text"*) ;;
-        *)
-            printf 'FAIL %s: output did not contain %s\n%s\n' \
-                "$name" "$want_text" "$output"
-            failures=$((failures + 1))
-            return
-            ;;
-    esac
-    if [ -n "$forbidden" ]; then
-        case "$output" in
-            *"$forbidden"*)
-                printf 'FAIL %s: output unexpectedly contained %s\n%s\n' \
-                    "$name" "$forbidden" "$output"
-                failures=$((failures + 1))
-                return
-                ;;
-        esac
-    fi
-    printf 'PASS %s\n' "$name"
-}
-
-make_root() {
+populate_root() {
     root=$1
-    mkdir -p "$root/bin" "$root/src/skill" "$root/src/i18n" \
-        "$root/tests" "$root/pkgbuild"
-    cp "$CHECKER" "$root/bin/check-doc-paths"
-    chmod +x "$root/bin/check-doc-paths"
+    mkdir -p "$root/src/skill" "$root/src/i18n" "$root/tests" \
+        "$root/pkgbuild"
     cat > "$root/src/command-paths.txt" <<'EOF'
 --help
 -h

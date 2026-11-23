@@ -5,49 +5,11 @@ set -eu
 # the checker is exercised without touching the real (local-only) wiki index.
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 CHECKER="$ROOT/bin/check-wiki-index-bullets"
+. "$ROOT/tests/checker_test_support.sh"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 failures=0
-
-expect_result() {
-    name=$1
-    want_status=$2
-    want_text=$3
-    forbidden=${4:-}
-    shift 4
-    set +e
-    output="$("$CHECKER" "$@" 2>&1)"
-    got_status=$?
-    set -e
-    last_output=$output
-    if [ "$got_status" -ne "$want_status" ]; then
-        printf 'FAIL %s: status %s, wanted %s\n%s\n' \
-            "$name" "$got_status" "$want_status" "$output"
-        failures=$((failures + 1))
-        return
-    fi
-    case "$output" in
-        *"$want_text"*) ;;
-        *)
-            printf 'FAIL %s: output did not contain %s\n%s\n' \
-                "$name" "$want_text" "$output"
-            failures=$((failures + 1))
-            return
-            ;;
-    esac
-    if [ -n "$forbidden" ]; then
-        case "$output" in
-            *"$forbidden"*)
-                printf 'FAIL %s: output unexpectedly contained %s\n%s\n' \
-                    "$name" "$forbidden" "$output"
-                failures=$((failures + 1))
-                return
-                ;;
-        esac
-    fi
-    printf 'PASS %s\n' "$name"
-}
 
 cat > "$tmp/short.md" <<'EOF'
 # Fixture index
