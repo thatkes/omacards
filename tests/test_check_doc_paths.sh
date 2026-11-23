@@ -157,6 +157,21 @@ Path: decks
 Purpose: List decks.
 Flags: [--json], --help, -h
 Example: omacards decks --json
+
+Path: decks current
+Purpose: Show the Current deck.
+Flags: [--json], --help, -h
+Example: omacards decks current --json
+
+Path: skill
+Purpose: Manage the agent skill.
+Flags: [install], [--json], --help, -h
+Example: omacards skill --help
+
+Path: skill install
+Purpose: Install the agent skill.
+Flags: [--json], --help, -h
+Example: omacards skill install --json
 EOF
 expect_result valid_help_metadata_passes 0 'Doc references OK' \
     "$valid_help_metadata" 'FAIL'
@@ -212,6 +227,47 @@ EOF
 expect_result help_metadata_duplicate_path_fails 1 \
     'src/command-help.txt:6: duplicate help metadata path: check' \
     "$duplicate_help_path" 'Doc references OK'
+
+# Completeness: help paths route to usage() and need no block, but every other
+# registry path must have one even when the blocks that do exist are valid.
+complete_help_metadata="$tmp/complete-help-metadata"
+make_root "$complete_help_metadata"
+cat > "$complete_help_metadata/src/command-help.txt" <<'EOF'
+Path: check
+Purpose: Show deck issues.
+Flags: --help, -h
+Example: omacards check --help
+
+Path: decks
+Purpose: List decks.
+Flags: [--json], --help, -h
+Example: omacards decks --json
+
+Path: decks current
+Purpose: Show the Current deck.
+Flags: [--json], --help, -h
+Example: omacards decks current --json
+
+Path: skill
+Purpose: Manage the agent skill.
+Flags: [install], [--json], --help, -h
+Example: omacards skill --help
+
+Path: skill install
+Purpose: Install the agent skill.
+Flags: [--json], --help, -h
+Example: omacards skill install --json
+EOF
+expect_result help_metadata_covers_registry_without_help_paths 0 'Doc references OK' \
+    "$complete_help_metadata" 'FAIL'
+
+incomplete_help_metadata="$tmp/incomplete-help-metadata"
+make_root "$incomplete_help_metadata"
+sed '/^Path: skill install$/,$d' "$complete_help_metadata/src/command-help.txt" \
+    > "$incomplete_help_metadata/src/command-help.txt"
+expect_result help_metadata_missing_command_path_fails 1 \
+    'src/command-help.txt: missing help metadata for command path: skill install' \
+    "$incomplete_help_metadata" 'Doc references OK'
 
 if [ "$failures" -ne 0 ]; then
     printf '%s check-doc-paths case(s) failed\n' "$failures"

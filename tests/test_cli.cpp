@@ -98,6 +98,17 @@ void TestCli::helpIsHeadless() {
             QVERIFY2(errors.isEmpty(), qPrintable(errors));
         }
     }
+
+    // rename-deck has its own wording rather than the generic fallback.
+    int renameCode = -1;
+    const QString renameHelp = QString::fromUtf8(runCliRaw({"rename-deck", "--help"}, decks, database, &renameCode));
+    QCOMPARE(renameCode, 0);
+    QVERIFY2(renameHelp.contains(QStringLiteral("Purpose: Rename a Deck.")), qPrintable(renameHelp));
+    QVERIFY2(renameHelp.contains(QStringLiteral("Flags: OLD, NEW, [--json], --help, -h")), qPrintable(renameHelp));
+    QVERIFY2(renameHelp.contains(QStringLiteral("Example: omacards rename-deck Calculus Analysis --json")),
+             qPrintable(renameHelp));
+    QVERIFY2(!renameHelp.contains(QStringLiteral("Run the rename-deck command.")), qPrintable(renameHelp));
+
     QVERIFY2(!QFileInfo::exists(decks) || QDir(decks).entryList(QDir::NoDotAndDotDot).isEmpty(),
              "Help probes must not create a Deck");
     QVERIFY2(!QFileInfo::exists(database), "Help probes must not create the state database");
