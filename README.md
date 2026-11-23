@@ -158,17 +158,26 @@ Cram needs no persistent state, must never end, and should re-show weak cards qu
 ## Layout
 
 ```text
-src/backend.{h,cpp}      cards, files, SQLite, modes, study sessions
+src/backend.{h,cpp}      QML/CLI facade: validation, current deck, settings and forwarded state
+src/cli.{h,cpp}          deterministic headless agent commands (--json, no GUI)
 src/importer.{h,cpp}     CSV/TSV and Anki parsing into card drafts
 src/domain.{h,cpp}       shared mode, rating and card-type values
 src/filehistory.{h,cpp}  atomic undo/redo of whole deck files
 src/fsrs.{h,cpp}         FSRS-5 model (Again=1, Good=3)
 src/deck.{h,cpp}         plain-text deck parser/writer
+src/deckrepository.{h,cpp}  deck files, in-memory cards and the file watcher
 src/store.{h,cpp}        SQLite sidecar
 src/insessionprogression.{h,cpp}  Leitner boxes and Pending repeats
+src/studyplanner.{h,cpp}  due counts and availability from a scheduling snapshot
+src/studysession.{h,cpp}  one study sitting: cards, ratings and live counters
+src/ratingrecording.{h,cpp}  FSRS rating writes to scheduling state and review history
 src/mathrender.{h,cpp}   LaTeX to SVG with Unicode fallback
-src/main.cpp             app setup, system tray, CLI dispatch
+src/traycontroller.{h,cpp}  system tray icon, menu and activation
+src/main.cpp             app setup, CLI dispatch and QML wiring
 src/Main.qml             window, keyboard, layout
+src/config.h             study defaults and bounds shared by GUI, CLI and scheduler
+src/resources.qrc        Qt resources: Main.qml, translations and skill template
+src/i18n/                translation catalogues (en.json)
 src/theme.* src/translator.*  live Omarchy theme and language
 tests/                   Qt Test suite
 pkgbuild/                Arch package, desktop entry, icon
@@ -183,6 +192,5 @@ Theme watching follows Omacut and Monologue (MIT, David Heinemeier Hansson).
 - Fix tray entry
 - Update README.md pictures
 - Redo deck format in README.md
-- Update layout in README.md
 - Ensure switching themes works properly
 - Investigate LaTeX rendered size discrepancy: `\sqrt{10}` in the local Taylor-Series-Worked-Problems (“Worked”) deck renders at a different size than the surrounding math. Check SVG root width/height scaling in `src/mathrender.cpp` (`scaleSvgRoot`, `svgPixelSize`) and the `<img>` sizing emitted for rich text; reproduce with `omacards preview --deck Taylor-Series-Worked-Problems --format html` and add a regression check for the fix.
