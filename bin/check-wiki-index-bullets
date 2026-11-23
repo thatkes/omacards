@@ -1,0 +1,79 @@
+#!/bin/sh
+set -eu
+
+# Keep wiki index bullets short enough to read at a wave boundary. Tests pass
+# an index fixture; the default is the real (local-only) wiki index, which CI
+# does not have.
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+
+usage() {
+    printf 'Usage: check-wiki-index-bullets [--index PATH] [--max N]\n' >&2
+}
+
+index="$ROOT/docs/agents/wiki/index.md"
+max=150
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --index)
+            [ "$#" -ge 2 ] || { usage; exit 2; }
+            index=$2
+            shift 2
+            ;;
+        --max)
+            [ "$#" -ge 2 ] || { usage; exit 2; }
+            max=$2
+            shift 2
+            ;;
+        *)
+            usage
+            exit 2
+            ;;
+    esac
+done
+
+case "$max" in
+    ''|*[!0-9]*)
+        printf 'ERROR --max must be a non-negative integer: %s\n' "$max" >&2
+        exit 2
+        ;;
+esac
+
+if [ ! -f "$index" ]; then
+    printf 'Wiki index not found at %s; skipping check\n' "$index" >&2
+    exit 0
+fi
+
+# A line starting with "- " opens a bullet; whitespace-prefixed lines extend
+# it. Joining with one space and counting once per logical bullet stops a
+# wrapped bullet from passing by staying short on each physical line.
+report="$(awk -v cap="$max" '
+    function flush() {
+        if (start == 0) return
+        if (length(text) > cap)
+            printf "line %d: %d characters (max %d)\n", start, length(text), cap
+        start = 0
+        text = ""
+    }
+    /^- / {
+        flush()
+        start = NR
+        text = substr($0, 3)
+        next
+    }
+    start && /^[[:space:]]+/ {
+        continuation = $0
+        sub(/^[[:space:]]+/, "", continuation)
+        text = text " " continuation
+        next
+    }
+    { flush() }
+    END { flush() }
+' "$index")"
+
+if [ -n "$report" ]; then
+    printf 'WIKI INDEX BULLETS TOO LONG\n%s\n' "$report" >&2
+    exit 1
+fi
+
+count=$(awk '/^- / { n++ } END { print n + 0 }' "$index")
+printf 'WIKI INDEX OK %s bullets within %s characters\n' "$count" "$max"
