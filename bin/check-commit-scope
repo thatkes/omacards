@@ -22,12 +22,14 @@ esac
 
 # A staged C/C++ source file is allowed in a docs: commit only when every
 # added or removed line is blank or a C/C++ comment line. With -U0 there is
-# no context, so every '+' or '-' line is a changed line; the '---' and
-# '+++' file headers are skipped.
+# no context, so every '+' or '-' line inside a hunk is a changed line.
+# Gating on the hunk header also keeps a source line starting with '--' or
+# '++' from being mistaken for a diff file header.
 comment_only_source() {
     file=$1
     git diff --cached -U0 -- "$file" | awk '
-        /^--- / || /^\+\+\+ / { next }
+        /^@@/ { in_hunk = 1; next }
+        !in_hunk { next }
         /^[-+]/ {
             line = substr($0, 2)
             sub(/^[[:space:]]+/, "", line)

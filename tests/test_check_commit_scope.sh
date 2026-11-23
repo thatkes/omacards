@@ -124,6 +124,18 @@ git -C "$code" add docs/guide.md src/cli.cpp
 check_hook code_src_rejected 1 \
     'docs: commit must only include docs files' "$code"
 
+# Lines that look like diff headers are still source lines, not headers.
+operators="$tmp/operators-docs"
+make_repo "$operators"
+printf '// Old header.\n-- counter;\n' > "$operators/src/cli.cpp"
+git -C "$operators" add src/cli.cpp
+git -C "$operators" -c user.name=Tester \
+    -c user.email=tester@example.invalid commit -qm baseline
+printf '// New header.\n++ counter;\n' > "$operators/src/cli.cpp"
+git -C "$operators" add docs/guide.md src/cli.cpp
+check_hook operator_src_rejected 1 \
+    'docs: commit must only include docs files' "$operators"
+
 # Documentation outside the allowlist is still rejected.
 outside="$tmp/outside-docs"
 make_repo "$outside"
