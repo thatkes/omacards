@@ -130,8 +130,7 @@ omacards check --deck Spanish
 omacards check --math --json                  # also list mathWarnings
 omacards check --strict --json                # exit 1 if any Deck issue exists
 omacards decks
-omacards decks current                        # Current deck (alias: active)
-omacards decks active
+omacards decks current                        # Current deck
 omacards use-deck Spanish
 omacards cards --deck Spanish
 omacards search gato --deck Spanish
@@ -154,7 +153,6 @@ omacards cram --deck Spanish --steps 20
 omacards stats
 omacards config
 omacards config --new-card-allowance 10 --day-start-hour 3 --retention 0.9
-omacards config --new-per-day 10               # alias for --new-card-allowance
 omacards skill install
 omacards help                                 # also --help or -h
 omacards open                                 # start the GUI

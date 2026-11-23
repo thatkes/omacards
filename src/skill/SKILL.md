@@ -47,7 +47,7 @@ omacards check --deck Spanish --json         # scope decks, cards and Deck issue
 omacards check --math --json                 # also add a mathWarnings array
 omacards check --strict --json               # exit 1 if any Deck issue exists
 omacards decks --json
-omacards decks active --json                 # Current deck (alias: decks current)
+omacards decks current --json                # Current deck
 omacards use-deck Spanish --json             # choose the Current deck
 omacards cards --deck Spanish --json
 omacards search gato --json
@@ -75,7 +75,7 @@ omacards skill install
 ```
 
 `add-card` without `--deck` writes to the Current deck, so check
-`omacards decks active --json` first.
+`omacards decks current --json` first.
 
 ## Bulk deck creation (preferred)
 
@@ -225,9 +225,8 @@ until the deck is clean.
 
 `omacards config` reads the New-card allowance, the Day-start hour and Desired
 retention. Defaults are `20`, `0` and `0.9`. Use `--new-card-allowance N`
-(`--new-per-day N` is an accepted alias, `0..9999`), `--day-start-hour H`
-(`0..23`) and `--retention R` (`0.70..0.99`) to change them. Pass `-1` for any
-of the three to leave it unchanged.
+(`0..9999`), `--day-start-hour H` (`0..23`) and `--retention R` (`0.70..0.99`)
+to change them. Pass `-1` for any of the three to leave it unchanged.
 
 A card is due once the Study day containing its FSRS due time has begun:
 `studyDay(due) <= studyDay(now)`. With `--day-start-hour 3`, a card due at
