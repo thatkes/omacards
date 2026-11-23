@@ -44,9 +44,13 @@ QString checkDeckIssueLine(const QJsonObject &issue) {
 } // namespace
 
 void TestCli::helpIsHeadless() {
-    QVERIFY(Cli::needsOffscreen({"--help"}));
-    QVERIFY(Cli::needsOffscreen({"-h"}));
-    QVERIFY(Cli::needsOffscreen({"help"}));
+    const QStringList paths = Cli::commandPaths();
+    QVERIFY2(!paths.isEmpty(), "The command-path registry must be available");
+    for (const QString &path : paths) {
+        const QString first = path.section(' ', 0, 0);
+        if (Cli::isHelpCommand(first))
+            QVERIFY2(Cli::needsOffscreen({first}), qPrintable(first));
+    }
     QVERIFY(!Cli::needsOffscreen({"open"}));
 
     if (!QFileInfo::exists(appBinary()))
@@ -57,8 +61,14 @@ void TestCli::helpIsHeadless() {
     QCOMPARE(process.exitCode(), 0);
     const QByteArray help = process.readAllStandardOutput();
     QVERIFY(help.contains("Usage:"));
-    QVERIFY(help.contains("omacards use-deck NAME"));
-    QVERIFY(help.contains("omacards decks current"));
+    // Every documented command path comes from the same registry the CLI uses.
+    // `open` is shown as [open] and help flags are covered above.
+    for (const QString &path : paths) {
+        if (path == QLatin1String("open") || Cli::isHelpCommand(path.section(' ', 0, 0)))
+            continue;
+        QVERIFY2(help.contains(QStringLiteral("omacards %1").arg(path).toUtf8()), qPrintable(path));
+    }
+    // Runtime still accepts the legacy aliases; only the registry omits them.
     QVERIFY(help.contains("(alias: active)"));
     QVERIFY(help.contains("--new-card-allowance"));
     QVERIFY(help.contains("--new-per-day"));
@@ -569,13 +579,19 @@ oops: not a key
 }
 
 void TestCli::headlessCommandDetectionIsComplete() {
-    const QStringList commands{
-        "check",       "decks",       "cards",    "search", "add-deck", "add-cards", "add-card", "edit-card",
-        "delete-card", "delete-deck", "import",   "due",    "review",   "cram",      "preview",  "skill",
-        "stats",       "config",      "use-deck", "help",   "--help",   "-h",        "warm",
-    };
+    const QStringList commands = Cli::headlessCommands();
+    QVERIFY2(!commands.isEmpty(), "The command-path registry must be available");
     for (const QString &command : commands)
         QVERIFY2(Cli::needsOffscreen({command}), qPrintable(command));
+
+    // Every registry path's first token is either headless or the GUI command.
+    for (const QString &path : Cli::commandPaths()) {
+        const QString first = path.section(' ', 0, 0);
+        QVERIFY2(commands.contains(first) || first == QLatin1String("open"), qPrintable(path));
+    }
+    // The legacy aliases stay accepted at runtime but are not registry paths.
+    QVERIFY(!Cli::commandPaths().contains(QStringLiteral("decks active")));
+    QVERIFY(!Cli::commandPaths().contains(QStringLiteral("--new-per-day")));
 
     QVERIFY(!Cli::needsOffscreen({}));
     QVERIFY(!Cli::needsOffscreen({""}));

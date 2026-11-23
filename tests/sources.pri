@@ -40,3 +40,7 @@ SOURCES += \
     $$PWD/../src/studysession.cpp \
     $$PWD/../src/theme.cpp \
     $$PWD/../src/translator.cpp
+
+# The CLI reads its command-path registry from the Qt resource system, so the
+# test binary must embed the same resource as the app.
+RESOURCES += $$PWD/../src/resources.qrc
