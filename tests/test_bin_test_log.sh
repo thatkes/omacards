@@ -27,13 +27,23 @@ cat > "$repo/build/tests/omacards_tests" <<'EOF'
 set -eu
 mode=
 group=
+all_suites=
 for arg in "$@"; do
+    if [ "$arg" = "--list-suites" ]; then
+        printf 'OMACARDS_TEST_MODE: info\n'
+        printf 'OMACARDS_TEST_SUITE: %s\n' TestCli TestBackend TestDynamic
+        exit 0
+    fi
     case "$arg" in
         run-a|run-b|fail|partial|info) mode=$arg ;;
-        Test*) if [ -z "$group" ]; then group=$arg; fi ;;
+        Test*)
+            all_suites="$all_suites $arg"
+            if [ -z "$group" ]; then group=$arg; fi
+            ;;
     esac
 done
 printf 'GROUP: %s\n' "$group"
+printf 'ALL_SUITES:%s\n' "$all_suites"
 printf 'ENV: HOME=%s XDG_CACHE_HOME=%s OMACARDS_STATE_DB=%s TMPDIR=%s\n' \
     "${HOME:-unset}" "${XDG_CACHE_HOME:-unset}" "${OMACARDS_STATE_DB:-unset}" "${TMPDIR:-unset}"
 if [ "$mode" = info ]; then
@@ -146,6 +156,7 @@ assert_matches run_a_has_two_groups 2 "$(count_matches "$tmp/out-a.log" 'GROUP: 
 assert_matches run_b_has_two_groups 2 "$(count_matches "$tmp/out-b.log" 'GROUP: ')"
 assert_contains run_a_has_cli_group "$tmp/out-a.log" 'GROUP: TestCli'
 assert_contains run_a_has_backend_group "$tmp/out-a.log" 'GROUP: TestBackend'
+assert_contains run_a_uses_binary_suite_list "$tmp/out-a.log" 'ALL_SUITES: TestBackend TestDynamic'
 assert_contains run_a_aggregated_announcement "$tmp/out-a.log" 'OMACARDS_TEST_SUITES: 5'
 assert_contains run_a_combined_summary "$tmp/out-a.log" 'across 5 suites'
 assert_contains run_b_combined_summary "$tmp/out-b.log" 'across 5 suites'

@@ -9,14 +9,6 @@ cd "$ROOT/build/tests"
 qmake6 "$ROOT/tests/omacards_tests.pro"
 make -j"$(nproc)"
 
-# Keep these names in step with tests/test_main.cpp. TestCli is the long pole,
-# so it runs alone while every other suite shares the second group; a plain run
-# still executes all 17 suites exactly once.
-CLI_SUITES='TestCli'
-OTHER_SUITES='TestBackend TestInSessionProgression TestStore TestFsrs TestTheme TestDeck TestMathRender
-TestFileHistory TestConfig TestDomain TestStudyPlanner TestStudySession TestRatingRecording
-TestImporter TestDeckRepository TestTranslator'
-
 focused=0
 for arg in "$@"; do
     if [ "$arg" = "--suite" ]; then
@@ -24,6 +16,40 @@ for arg in "$@"; do
         break
     fi
 done
+
+# The test binary owns the suite registry. TestCli is the long pole, so every
+# suite with that prefix runs alone and all the others share the second group.
+# A suite registered in tests/test_main.cpp lands in a group without an edit
+# here; focused runs keep their single-group contract.
+cli_suites=
+other_suites=
+if [ "$focused" -eq 0 ]; then
+    suite_list="$(QT_QPA_PLATFORM=offscreen ./omacards_tests --list-suites)"
+    case "$suite_list" in
+        *'OMACARDS_TEST_MODE: info'*) ;;
+        *)
+            printf 'ERROR: test binary did not report info mode\n' >&2
+            printf '%s\n' "$suite_list" >&2
+            exit 1
+            ;;
+    esac
+    suite_names="$(printf '%s\n' "$suite_list" | sed -n 's/^OMACARDS_TEST_SUITE: //p')"
+    if [ -z "$suite_names" ]; then
+        printf 'ERROR: test binary did not report suite names\n' >&2
+        printf '%s\n' "$suite_list" >&2
+        exit 1
+    fi
+    for suite in $suite_names; do
+        case "$suite" in
+            TestCli*) cli_suites="$cli_suites $suite" ;;
+            *) other_suites="$other_suites $suite" ;;
+        esac
+    done
+    if [ -z "$cli_suites" ] || [ -z "$other_suites" ]; then
+        printf 'ERROR: test suites did not form two groups\n' >&2
+        exit 1
+    fi
+fi
 
 group_logs=
 pids=
@@ -67,8 +93,8 @@ cleanup_group_envs() {
 if [ "$focused" -eq 1 ]; then
     launch_group "$@"
 else
-    launch_group $CLI_SUITES "$@"
-    launch_group $OTHER_SUITES "$@"
+    launch_group $cli_suites "$@"
+    launch_group $other_suites "$@"
 fi
 
 status=0

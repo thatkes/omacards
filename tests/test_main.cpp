@@ -76,6 +76,23 @@ void printSuites(const QVector<Suite> &suites) {
         err << "  " << suite.name << '\n';
 }
 
+bool takeListSuites(int &argc, char **argv) {
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--list-suites") != 0)
+            continue;
+        for (int j = i + 1; j < argc; ++j)
+            argv[j - 1] = argv[j];
+        --argc;
+        return true;
+    }
+    return false;
+}
+
+void printSuiteNames(QTextStream &out, const QVector<Suite> &suites) {
+    for (const Suite &suite : suites)
+        out << "OMACARDS_TEST_SUITE: " << suite.name << '\n';
+}
+
 // Update this when registering a suite; the runtime check keeps the vector
 // and the announced suite count from drifting apart.
 constexpr int kExpectedSuiteCount = 17;
@@ -140,6 +157,8 @@ int main(int argc, char **argv) {
         return 2;
     }
 
+    const bool listSuites = takeListSuites(argc, argv);
+
     QStringList selected;
     if (!takeSelectedSuites(argc, argv, suites, &selected)) {
         QTextStream err(stderr);
@@ -164,10 +183,13 @@ int main(int argc, char **argv) {
 
     // bin/check-test-summary compares this with the number of Totals lines.
     // Announce the plan before any suite runs so a truncated run cannot pass.
-    if (isInformationalMode(argc, argv)) {
+    if (listSuites || isInformationalMode(argc, argv)) {
         QTextStream out(stdout);
         out << "OMACARDS_TEST_MODE: info\n";
+        printSuiteNames(out, suites);
         out.flush();
+        if (listSuites)
+            return 0;
     } else {
         const int plannedSuites = selected.isEmpty() ? kExpectedSuiteCount : selected.size();
         QTextStream out(stdout);
