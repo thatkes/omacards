@@ -195,6 +195,26 @@ omacards warm [--deck <deck>] [--json]
 
 Deck-writing commands (`add-deck`, `add-cards`, `add-card`, `import`, `edit-card` and `delete-card`) reload the file they just wrote and run the same deck checks as `check`. If a write would introduce an Error, the previous file is restored (or a newly created deck is removed), no history entry is recorded, and the command exits 1 with an Error that includes a fix hint. Warnings, such as duplicate questions or unsupported math macros, do not block a write, and decks that already contain Deck issues can still be edited.
 
+## Isolated probes
+
+Agents without a source checkout can point the CLI at throwaway Decks, state
+and cache by setting all three paths before running any command:
+
+```sh
+probe="$(mktemp -d)"
+trap 'rm -rf "$probe"' EXIT
+export OMACARDS_DECKS_DIR="$probe/decks"
+export OMACARDS_STATE_DB="$probe/state.db"
+export XDG_CACHE_HOME="$probe/cache"
+omacards decks --json
+```
+
+This recipe leaves `$OMACARDS_DECKS_DIR` absent. Because the directory does
+not exist yet, the first run creates it and seeds a `Welcome` Deck with two
+Cards, so probes start from a known non-empty state. If the directory already
+exists, seeding is skipped and the Deck list is empty; the checkout helper
+`bin/with-temp-env` takes that case because it pre-creates the directory.
+
 ## Why Leitner for cram?
 
 Cram needs no persistent state, must never end, and should re-show weak cards quickly. A queue of five Leitner boxes gives exactly that: Good ratings promote a card to a longer card-count interval, Again resets it to Leitner box 1, and the queue is refilled forever. FSRS remains the long-term scheduler where spaced intervals and Desired retention matter.
