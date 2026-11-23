@@ -779,6 +779,24 @@ void TestCli::previewRendersMathAsText() {
     const QJsonObject item = items.at(0).toObject();
     QCOMPARE(item.value(QStringLiteral("question")).toString(), QString("Expand x²"));
     QCOMPARE(item.value(QStringLiteral("answer")).toString(), QString("(1)/(2)"));
+
+    const QString markdownInput = dir.filePath("markdown.json");
+    QVERIFY(writeFile(markdownInput, R"json({"cards":[{"question":"Expand \\(x^2\\)",
+                                                       "answer":"line one\n$$y$$ and \\(z\\) and $x$"}]})json"));
+    runCli({"add-cards", "-d", "Markdown", "-i", markdownInput, "--json"}, dir.filePath("decks"),
+           dir.filePath("state.db"), &code);
+    QCOMPARE(code, 0);
+
+    const QJsonObject markdown = runCli({"preview", "--deck", "Markdown", "--format", "markdown", "--json"},
+                                        dir.filePath("decks"), dir.filePath("state.db"), &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(markdown.value(QStringLiteral("format")).toString(), QString("markdown"));
+    const QJsonArray markdownItems = markdown.value(QStringLiteral("items")).toArray();
+    QCOMPARE(markdownItems.size(), 1);
+    const QJsonObject markdownItem = markdownItems.at(0).toObject();
+    QCOMPARE(sortedKeys(markdownItem), QStringList({"answer", "id", "question"}));
+    QCOMPARE(markdownItem.value(QStringLiteral("question")).toString(), QString("Expand \\(x^2\\)"));
+    QCOMPARE(markdownItem.value(QStringLiteral("answer")).toString(), QString("line one\n$$y$$ and \\(z\\) and $x$"));
 }
 
 void TestCli::checkMathReportsUnsupportedCommands() {
@@ -1639,7 +1657,7 @@ void TestCli::previewJsonContracts() {
     const QJsonObject badFormat =
         runCli({"preview", "--deck", "P", "--format", "xml", "--json"}, decks, database, &code);
     QCOMPARE(code, 1);
-    QCOMPARE(badFormat.value(QStringLiteral("error")).toString(), QString("--format must be text or html"));
+    QCOMPARE(badFormat.value(QStringLiteral("error")).toString(), QString("--format must be text, html or markdown"));
 
     const QJsonObject noCards = runCli({"preview", "--deck", "Missing", "--json"}, decks, database, &code);
     QCOMPARE(code, 1);
@@ -1710,6 +1728,30 @@ void TestCli::previewJsonContracts() {
     // preview scale 1.6 gives 21 x 11. Apostrophes must not change what Qt
     // parses back from the Answer's image markup.
     QCOMPARE(parsedMathImageSize(answerHtml), QSize(21, 11));
+
+    // Markdown keeps the source notation instead of images or the Unicode
+    // fallback, even while the same fake LaTeX toolchain is available.
+    const QJsonObject markdown =
+        runCli({"preview", "--deck", "P", "--format", "markdown", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(markdown.value(QStringLiteral("format")).toString(), QString("markdown"));
+    QCOMPARE(sortedKeys(markdown), QStringList({"deck", "format", "items", "ok"}));
+    const QJsonArray markdownItems = markdown.value(QStringLiteral("items")).toArray();
+    QCOMPARE(markdownItems.size(), 4);
+    bool markdownQuestionFound = false;
+    bool markdownAnswerFound = false;
+    for (const QJsonValue &value : markdownItems) {
+        const QJsonObject item = value.toObject();
+        QCOMPARE(sortedKeys(item), QStringList({"answer", "id", "question"}));
+        const QString question = item.value(QStringLiteral("question")).toString();
+        const QString answer = item.value(QStringLiteral("answer")).toString();
+        QVERIFY(!question.contains(QStringLiteral("data:image/svg+xml;base64,")));
+        QVERIFY(!answer.contains(QStringLiteral("data:image/svg+xml;base64,")));
+        markdownQuestionFound |= question.contains(QStringLiteral("\\(z^2\\)"));
+        markdownAnswerFound |= answer.contains(QStringLiteral("\\(f'''(x)\\)"));
+    }
+    QVERIFY(markdownQuestionFound);
+    QVERIFY(markdownAnswerFound);
 }
 
 void TestCli::previewZeroCardDeckIssues() {

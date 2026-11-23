@@ -479,7 +479,7 @@ QString usage() {
                           "  omacards use-deck NAME [--json] Choose the Current deck\n"
                           "  omacards cards [--deck D] [--json]\n"
                           "  omacards search TERM [--deck D] [--json]\n"
-                          "  omacards preview --deck D [--card ID] [--format text|html] [--json]\n"
+                          "  omacards preview --deck D [--card ID] [--format text|html|markdown] [--json]\n"
                           "  omacards warm --deck D [--json]          Render a Deck's math SVGs ahead of study\n"
                           "  omacards add-deck NAME [--description TEXT] [--json]\n"
                           "  omacards add-cards --deck NAME [--description TEXT] [--input FILE|-] [--json]\n"
@@ -568,7 +568,7 @@ QString commandHelp(const QString &command) {
          {QStringLiteral("Start the GUI."), QStringLiteral("--help, -h"), QStringLiteral("omacards open")}},
         {QStringLiteral("preview"),
          {QStringLiteral("Preview a Deck's Cards."),
-          QStringLiteral("--deck D, [--card ID], [--format text|html], [--json], --help, -h"),
+          QStringLiteral("--deck D, [--card ID], [--format text|html|markdown], [--json], --help, -h"),
           QStringLiteral("omacards preview --deck Calculus --json")}},
         {QStringLiteral("review"),
          {QStringLiteral("Record a Rating for a Card."), QStringLiteral("-c ID, -r 1|3, [--json], --help, -h"),
@@ -851,8 +851,9 @@ int run(const QStringList &arguments) {
     if (options.command == "preview") {
         if (options.deck.isEmpty())
             return fail(QObject::tr("Use --deck / -d"), json);
-        if (options.format != QLatin1String("text") && options.format != QLatin1String("html"))
-            return fail(QObject::tr("--format must be text or html"), json);
+        if (options.format != QLatin1String("text") && options.format != QLatin1String("html") &&
+            options.format != QLatin1String("markdown"))
+            return fail(QObject::tr("--format must be text, html or markdown"), json);
         QVector<Card> cards = allCards(decks, options.deck);
         const bool deckHasNoCards = cards.isEmpty();
         if (!options.card.isEmpty()) {
@@ -875,15 +876,21 @@ int run(const QStringList &arguments) {
 
         constexpr double previewMathScale = 1.6;              // Match the review answer label size.
         const QString previewInk = QStringLiteral("#000000"); // HTML stays readable on light backgrounds.
+        const bool html = options.format == QLatin1String("html");
+        const bool markdown = options.format == QLatin1String("markdown");
         MathRenderer renderer;
+        const auto renderPreviewField = [&](const QString &text) {
+            if (html)
+                return renderer.render(text, previewInk, previewMathScale);
+            if (markdown)
+                return text;
+            return renderer.renderPlain(text);
+        };
         QJsonArray items;
         QStringList lines;
         for (const Card &card : cards) {
-            const bool html = options.format == QLatin1String("html");
-            const QString question = html ? renderer.render(card.question, previewInk, previewMathScale)
-                                          : renderer.renderPlain(card.question);
-            const QString answer =
-                html ? renderer.render(card.answer, previewInk, previewMathScale) : renderer.renderPlain(card.answer);
+            const QString question = renderPreviewField(card.question);
+            const QString answer = renderPreviewField(card.answer);
             QJsonObject item;
             item.insert("id", card.id);
             item.insert(html ? QStringLiteral("questionHtml") : QStringLiteral("question"), question);
