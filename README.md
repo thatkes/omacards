@@ -72,6 +72,7 @@ Add `--json` for `rendered` and `cached` counts. The first render may download T
 | `Space`, `Enter`, `Return` | Start a review, Reveal the Flashcard, or continue |
 | `↑`, `↓` | Scroll a long card, or Reveal the Flashcard when there is no more to scroll |
 | `J` / `K` | Scroll a long card while studying; move the card selection in the library |
+| `[` / `]` | Open the Deck selector on Home or in the Study header, move the Candidate deck, commit with Enter or cancel with Escape |
 | `1`, `A`, `←` | Again |
 | `2`, `G`, `→` | Good |
 | `N` | New card |

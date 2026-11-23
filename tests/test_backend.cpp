@@ -909,6 +909,25 @@ void TestBackend::qmlHelpOverlayNamesDeckSelector() {
     QVERIFY2(text.contains(QStringLiteral("Deck selector")), qPrintable(text));
     QVERIFY2(text.contains(QStringLiteral("Home")), qPrintable(text));
     QVERIFY2(text.contains(QStringLiteral("Study header")), qPrintable(text));
+
+    const QStringList steps{QStringLiteral("open"),  QStringLiteral("move"),   QStringLiteral("candidate deck"),
+                            QStringLiteral("enter"), QStringLiteral("commit"), QStringLiteral("esc"),
+                            QStringLiteral("cancel")};
+    const QString lower = text.toLower();
+    for (const QString &step : steps) {
+        QVERIFY2(lower.contains(step), qPrintable(QStringLiteral("missing '%1' in: %2").arg(step, text)));
+    }
+
+    QQuickItem *keysRow = view.visualItem(QStringLiteral("helpDeckSelectorKeysRow"));
+    QVERIFY(keysRow);
+    QVERIFY(keysRow->isVisible());
+    QQuickItem *keysLine = view.visualItem(QStringLiteral("helpDeckSelectorKeysRowText"));
+    QVERIFY(keysLine);
+    const QString keysText = keysLine->property("text").toString();
+    const QString keysLower = keysText.toLower();
+    for (const QString &step : steps) {
+        QVERIFY2(keysLower.contains(step), qPrintable(QStringLiteral("missing '%1' in: %2").arg(step, keysText)));
+    }
 }
 
 void TestBackend::qmlStudySelectorSwitchesDeckFresh() {

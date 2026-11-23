@@ -2185,10 +2185,14 @@ ApplicationWindow {
                         { keys: "1 / A / ←", action: qsTr("Again") },
                         { keys: "2 / G / →", action: qsTr("Good") },
                         { keys: "R / C", action: qsTr("Review or cram mode") },
-                        { keys: "[ / ]", action: qsTr("Previous or next deck on Home or Study") },
+                        {
+                            keys: "[ / ]",
+                            action: qsTr("Open the Deck selector on Home or in the Study header, move the Candidate deck, commit with Enter or cancel with Escape"),
+                            objectName: "helpDeckSelectorKeysRow"
+                        },
                         {
                             keys: "",
-                            action: qsTr("Deck selector: choose a deck on Home or in the Study header"),
+                            action: qsTr("Deck selector on Home or in the Study header: click to open, [ / ] moves the Candidate deck, Enter commits, Escape cancels"),
                             objectName: "helpDeckSelectorRow"
                         },
                         { keys: "B", action: qsTr("Open the library") },
