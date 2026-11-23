@@ -16,6 +16,15 @@ namespace DeckImport {
 struct Result;
 }
 
+namespace DeckRename {
+struct Result {
+    QString name;         // new Deck name
+    QString path;         // file the renamed Deck is stored in
+    int cards = 0;        // Cards whose deck reference was changed
+    int preservedIds = 0; // generated ids pinned by this rename
+};
+} // namespace DeckRename
+
 // Owns deck files, in-memory deck data and the file watcher. Scheduling state
 // is read and written through the shared Store; Backend still owns settings,
 // the Current deck and all QML-facing state.
@@ -43,6 +52,8 @@ public:
     QVector<Card> searchCards(const QString &text, const QString &deckName = {}) const;
 
     bool createDeck(const QString &name, QString *currentDeck, QString *error, const QString &description = {});
+    bool renameDeck(const QString &oldName, const QString &newName, QString *currentDeck, DeckRename::Result *result,
+                    QString *error);
     bool setDeckDescription(const QString &deckName, const QString &description, QString *error);
     bool createCards(const QString &deckName, QString *currentDeck, const QVector<CardDraft> &drafts,
                      const QString *description, QStringList *createdIds, QString *error);
@@ -68,6 +79,8 @@ signals:
 
 private:
     void recordHistory(const QString &path, const QByteArray &before, bool existedBefore, const QString &description);
+    void recordRename(const QString &from, const QByteArray &before, const QString &to, const QByteArray &after,
+                      const QString &description);
     bool commitDeckEdit(Deck *deck, const Deck &original, const QByteArray &before, const QString &description,
                         QString *error);
     bool commitImport(const DeckImport::Result &result, QString *currentDeck, QString *error);

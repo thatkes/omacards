@@ -15,6 +15,7 @@ public:
         bool existedBefore = false;
         bool existsAfter = true;
         QString description;
+        QString movedTo; // rename only: path -> movedTo, with the bytes at movedTo in after
     };
 
     static QByteArray readBytes(const QString &path);
@@ -22,6 +23,9 @@ public:
 
     // Returns false when the file did not actually change.
     bool record(const QString &path, const QByteArray &before, bool existedBefore, const QString &description);
+    // A rename is one undo step across both paths; `after` is the bytes at `to`.
+    bool recordRename(const QString &from, const QByteArray &before, const QString &to, const QByteArray &after,
+                      const QString &description);
     bool undo(QString *error, QString *description);
     bool redo(QString *error, QString *description);
 

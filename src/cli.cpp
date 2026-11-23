@@ -6,6 +6,7 @@
 #include "backend.h"
 #include "config.h"
 #include "deck.h"
+#include "deckrepository.h"
 #include "domain.h"
 #include "insessionprogression.h"
 #include "mathrender.h"
@@ -35,6 +36,7 @@ struct Options {
     QString tags;
     QString card;
     QString path;
+    QString newName;
     QString input;
     QString description;
     QString format = "text";
@@ -143,7 +145,12 @@ Options parse(const QStringList &arguments) {
             options.format = arg.section('=', 1);
         else if (arg.startsWith("--new-card-allowance=") || arg.startsWith("--new-per-day="))
             options.newCardAllowance = arg.section('=', 1).toInt();
-        else if (options.path.isEmpty())
+        else if (options.command == "rename-deck") {
+            if (options.path.isEmpty())
+                options.path = arg;
+            else if (options.newName.isEmpty())
+                options.newName = arg;
+        } else if (options.path.isEmpty())
             options.path = arg;
     }
     options.json = arguments.contains(QString("--json"));
@@ -411,6 +418,7 @@ QString usage() {
                           "  omacards edit-card -c ID [-q Q] [-a A] [--type T] [--tags a,b] [--json]\n"
                           "  omacards delete-card -c ID [-d D] [--json]\n"
                           "  omacards delete-deck NAME [--json]\n"
+                          "  omacards rename-deck OLD NEW [--json]\n"
                           "  omacards import PATH [-d D] [--json]\n"
                           "  omacards due [-d D] [--json]\n"
                           "  omacards review -c ID -r 1|3 [--json]\n"
@@ -979,6 +987,22 @@ int run(const QStringList &arguments) {
         object.insert("ok", true);
         object.insert("deck", name);
         write(object, json, QObject::tr("Removed deck %1").arg(name));
+        return 0;
+    }
+
+    if (options.command == "rename-deck") {
+        if (options.path.isEmpty() || options.newName.isEmpty())
+            return fail(QObject::tr("Give the old and new deck names"), json);
+        DeckRename::Result result;
+        if (!backend.renameDeck(options.path, options.newName, &result, &error))
+            return fail(error, json);
+        QJsonObject object;
+        object.insert("ok", true);
+        object.insert("deck", result.name);
+        object.insert("path", result.path);
+        object.insert("renamedCards", result.cards);
+        object.insert("preservedIds", result.preservedIds);
+        write(object, json, QObject::tr("Renamed deck %1 to %2").arg(options.path, result.name));
         return 0;
     }
 

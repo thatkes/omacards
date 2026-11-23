@@ -18,7 +18,18 @@ bool FileHistory::record(const QString &path, const QByteArray &before, bool exi
     const QByteArray after = existsAfter ? readBytes(path) : QByteArray();
     if (existedBefore == existsAfter && before == after)
         return false;
-    m_undoStack.append(Snapshot{path, before, after, existedBefore, existsAfter, description});
+    m_undoStack.append(Snapshot{path, before, after, existedBefore, existsAfter, description, {}});
+    if (m_undoStack.size() > 50)
+        m_undoStack.removeFirst();
+    m_redoStack.clear();
+    return true;
+}
+
+bool FileHistory::recordRename(const QString &from, const QByteArray &before, const QString &to,
+                               const QByteArray &after, const QString &description) {
+    if (from == to && before == after)
+        return false;
+    m_undoStack.append(Snapshot{from, before, after, true, true, description, to});
     if (m_undoStack.size() > 50)
         m_undoStack.removeFirst();
     m_redoStack.clear();
@@ -51,9 +62,23 @@ bool FileHistory::restore(const QString &path, const QByteArray &bytes, bool exi
 }
 
 bool FileHistory::apply(const Snapshot &snapshot, bool restoreBefore, QString *error) {
-    const bool exists = restoreBefore ? snapshot.existedBefore : snapshot.existsAfter;
+    if (snapshot.movedTo.isEmpty()) {
+        const bool exists = restoreBefore ? snapshot.existedBefore : snapshot.existsAfter;
+        const QByteArray &bytes = restoreBefore ? snapshot.before : snapshot.after;
+        return restore(snapshot.path, bytes, exists, error);
+    }
+
+    // Undo puts the original file back and clears the renamed copy; redo does
+    // the reverse. A failed removal leaves the snapshot on the stack.
+    const QString &removePath = restoreBefore ? snapshot.movedTo : snapshot.path;
+    if (QFileInfo::exists(removePath) && !QFile::remove(removePath)) {
+        if (error)
+            *error = QCoreApplication::translate("FileHistory", "Cannot remove %1").arg(removePath);
+        return false;
+    }
+    const QString &writePath = restoreBefore ? snapshot.path : snapshot.movedTo;
     const QByteArray &bytes = restoreBefore ? snapshot.before : snapshot.after;
-    return restore(snapshot.path, bytes, exists, error);
+    return restore(writePath, bytes, true, error);
 }
 
 bool FileHistory::undo(QString *error, QString *description) {

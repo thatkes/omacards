@@ -127,6 +127,8 @@ public:
                     const QString &type, const QString &tags, QString *error = nullptr, QString *finalId = nullptr);
     bool deleteCard(const QString &deckName, const QString &cardId, QString *error = nullptr);
     bool removeDeck(const QString &name, QString *error = nullptr);
+    bool renameDeck(const QString &oldName, const QString &newName, DeckRename::Result *result,
+                    QString *error = nullptr);
     bool importFile(const QString &path, const QString &deckName, QString *error = nullptr);
     bool importCsv(const QString &path, const QString &deckName, QString *error = nullptr);
     bool importApkg(const QString &path, const QString &deckName, QString *error = nullptr);
