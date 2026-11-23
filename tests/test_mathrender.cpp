@@ -463,6 +463,14 @@ void TestMathRender::pdftocairoPixelUnitsScaleImageAndSvg() {
     // Supersampling happens once at generation time; scale changes only the
     // <img> size, so a 20px SVG stays 40px in the file at every scale.
     QVERIFY(svgText.contains("width=\"40px\" height=\"20px\""));
+
+    // A single-quoted alt attribute left apostrophes literal, so Qt parsed the
+    // width and height as 0x0 and fell back to the SVG's intrinsic size. The
+    // parsed box must stay 40 x 20: half the 40px x 20px SVG root, scaled 2.0.
+    QCOMPARE(parsedMathImageSize(html), QSize(40, 20));
+    const QString apostrophes = renderer.renderExpression("f'''(x)", QString(), 2.0);
+    QVERIFY(apostrophes.startsWith("<img src='data:image/svg+xml;base64,"));
+    QCOMPARE(parsedMathImageSize(apostrophes), QSize(40, 20));
 }
 
 void TestMathRender::cachedSvgSkipsSecondToolchainRun() {

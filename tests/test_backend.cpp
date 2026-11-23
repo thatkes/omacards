@@ -252,12 +252,6 @@ private:
     }
 };
 
-QSize mathImageSize(const QString &html) {
-    static const QRegularExpression image(R"re(<img\b[^>]*\bwidth=['"]?(\d+)['"]?[^>]*\bheight=['"]?(\d+)['"]?)re");
-    const QRegularExpressionMatch match = image.match(html);
-    return match.hasMatch() ? QSize(match.captured(1).toInt(), match.captured(2).toInt()) : QSize();
-}
-
 QString manyCardLines(int count) {
     QString text;
     for (int i = 0; i < count; ++i)
@@ -2520,7 +2514,7 @@ void TestBackend::qmlStudyShowsMathPlaceholderUntilSvgArrives() {
     StudyViewFixture fixture;
     QVERIFY(fixture.initialize());
     QVERIFY(fixture.createDeck());
-    QVERIFY(fixture.createCard(QStringLiteral("What is \\(x^2\\)?"), QStringLiteral("plain answer")));
+    QVERIFY(fixture.createCard(QStringLiteral("What is \\(f'''(x)\\)?"), QStringLiteral("plain answer")));
     fixture.selectDeck();
     QVERIFY(fixture.loadWindow());
     QVERIFY(fixture.enterStudy(QStringLiteral("review")));
@@ -2539,7 +2533,7 @@ void TestBackend::qmlStudyShowsMathPlaceholderUntilSvgArrives() {
     QVERIFY(!text.contains(QStringLiteral("font-family: monospace")));
     // The font-metric reservation must differ from the SVG's eventual size;
     // otherwise the fixture would hide the bug again.
-    const QSize reserved = mathImageSize(text);
+    const QSize reserved = parsedMathImageSize(text);
     QVERIFY(!reserved.isEmpty());
     QVERIFY(reserved != svgImageSize);
 
@@ -2552,7 +2546,10 @@ void TestBackend::qmlStudyShowsMathPlaceholderUntilSvgArrives() {
     const QString swapped = question->property("text").toString();
     QVERIFY(swapped.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
     QVERIFY(svgFromMathHtml(swapped).contains(QStringLiteral("width=\"120px\" height=\"48px\"")));
-    QCOMPARE(mathImageSize(swapped), reserved);
+    // The apostrophes used to close the alt attribute early, so Qt parsed the
+    // finished image as 0x0 and the SVG took its intrinsic size. It must parse
+    // back to the box the placeholder reserved.
+    QCOMPARE(parsedMathImageSize(swapped), reserved);
 
     const QSizeF questionSizeAfter(question->property("contentWidth").toReal(),
                                    question->property("contentHeight").toReal());

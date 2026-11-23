@@ -186,9 +186,12 @@ QString mathImageHtml(const QString &path, const QString &expression, const QStr
     // Renders with no placeholder (cached display, preview, warming) size from
     // the SVG, which preserves its aspect ratio.
     const QSize pixels = reservedSize.isEmpty() ? reservedMathSize(expression, scale, path) : reservedSize;
+    // toHtmlEscaped() leaves apostrophes literal, which would close this
+    // single-quoted attribute. Qt then loses the width and height that follow.
+    const QString alt = expression.toHtmlEscaped().replace(QLatin1Char('\''), QStringLiteral("&#39;"));
     return QStringLiteral("<img src='%1' alt='%2' width='%3' height='%4' align='middle' "
                           "style='vertical-align: middle;'>")
-        .arg(source, expression.toHtmlEscaped())
+        .arg(source, alt)
         .arg(pixels.width())
         .arg(pixels.height());
 }
