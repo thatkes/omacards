@@ -15,4 +15,5 @@ awk '
 
 root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 "$root/bin/check-commit-subject" "$1" || status=1
+"$root/bin/check-commit-scope" "$1" || status=1
 exit "$status"
