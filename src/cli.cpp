@@ -493,7 +493,8 @@ QString usage() {
                           "  omacards stats [--json]\n"
                           "  omacards config [--new-card-allowance N] [--day-start-hour H]\n"
                           "                       [--retention 0.70-0.99] [--json]\n"
-                          "  omacards skill install [--json]\n");
+                          "  omacards skill install [--json]\n"
+                          "  omacards skill status [--json]\n");
 }
 
 struct CommandHelpText {
@@ -576,6 +577,10 @@ QString commandHelp(const QString &command) {
         {QStringLiteral("skill install"),
          {QStringLiteral("Install the agent skill."), QStringLiteral("[--json], --help, -h"),
           QStringLiteral("omacards skill install --json")}},
+        {QStringLiteral("skill status"),
+         {QStringLiteral("Report whether the agent skill is installed, where, and whether it matches the bundled "
+                         "source."),
+          QStringLiteral("[--json], --help, -h"), QStringLiteral("omacards skill status --json")}},
         {QStringLiteral("stats"),
          {QStringLiteral("Show study statistics."), QStringLiteral("[--json], --help, -h"),
           QStringLiteral("omacards stats --json")}},
@@ -592,7 +597,8 @@ QString commandHelp(const QString &command) {
     const QString example = text.example.isEmpty() ? QStringLiteral("omacards %1 --help").arg(command) : text.example;
     QString help = QStringLiteral("omacards %1 --help\n\nPurpose: %2\nFlags: %3\nExample: %4\n")
                        .arg(command, purpose, flags, example);
-    if (command == QLatin1String("skill") || command == QLatin1String("skill install"))
+    if (command == QLatin1String("skill") || command == QLatin1String("skill install") ||
+        command == QLatin1String("skill status"))
         help += skillHelpNotes();
     return help;
 }
@@ -659,16 +665,18 @@ int run(const QStringList &arguments) {
     if (!options.unknownFlag.isEmpty())
         return fail(QObject::tr("Unknown flag: %1").arg(options.unknownFlag), options.json);
 
-    // Bare `skill` is a read-only probe: report status and help, and skip
-    // backend initialization so neither the state database nor the skill is
-    // written. `skill status` will reuse this same snapshot.
-    if (options.command == "skill" && options.path.isEmpty()) {
+    // Bare `skill` and `skill status` are read-only probes: report the shared
+    // status snapshot and skip backend initialization so neither the state
+    // database nor the skill is written.
+    if (options.command == "skill" && (options.path.isEmpty() || options.path == QLatin1String("status"))) {
         const SkillStatus status = readSkillStatus();
         if (options.json) {
             write(skillStatusJson(status), true, {});
-        } else {
+        } else if (options.path.isEmpty()) {
             fprintf(stdout, "%s\n\n%s", qPrintable(skillStatusText(status)),
                     qPrintable(commandHelp(QStringLiteral("skill"))));
+        } else {
+            fprintf(stdout, "%s\n", qPrintable(skillStatusText(status)));
         }
         return 0;
     }

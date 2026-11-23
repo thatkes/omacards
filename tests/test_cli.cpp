@@ -192,6 +192,72 @@ void TestCli::helpIsHeadless() {
     QCOMPARE(topLevelWithFlag, topLevel);
 }
 
+void TestCli::skillStatusReportsInstallState() {
+    if (!QFileInfo::exists(appBinary()))
+        QSKIP("Build the app before running CLI integration tests.");
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QTemporaryDir homeDir;
+    QVERIFY(homeDir.isValid());
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    EnvGuard env(decks, database);
+    HomeGuard home(homeDir.path());
+    const QString skillPath = homeDir.filePath(QStringLiteral(".agents/skills/omacards/SKILL.md"));
+    QVERIFY2(!QFileInfo::exists(skillPath), "The isolated HOME must start without an installed skill");
+
+    int code = -1;
+    QByteArray errors;
+
+    // Before install: absent, no match, the isolated target, four keys, no writes.
+    const QJsonObject absent = runCli({"skill", "status", "--json"}, decks, database, &code, &errors);
+    QCOMPARE(code, 0);
+    QVERIFY2(errors.isEmpty(), qPrintable(errors));
+    QCOMPARE(sortedKeys(absent), QStringList({"installed", "matches", "ok", "path"}));
+    QVERIFY(absent.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(absent.value(QStringLiteral("path")).toString(), skillPath);
+    QVERIFY(!absent.value(QStringLiteral("installed")).toBool());
+    QVERIFY(!absent.value(QStringLiteral("matches")).toBool());
+    QVERIFY2(!QFileInfo::exists(skillPath), "Status must not install the skill");
+    QVERIFY2(!QFileInfo::exists(database), "Status must not initialize the state database");
+
+    // Text mode names the install state and the target path without installing.
+    const QString absentText = QString::fromUtf8(runCliRaw({"skill", "status"}, decks, database, &code, &errors));
+    QCOMPARE(code, 0);
+    QVERIFY2(errors.isEmpty(), qPrintable(errors));
+    QVERIFY2(absentText.contains(QStringLiteral("Skill installed: no")), qPrintable(absentText));
+    QVERIFY2(absentText.contains(skillPath), qPrintable(absentText));
+    QVERIFY2(!QFileInfo::exists(skillPath), "Status must not install the skill");
+
+    // After install: installed and matching, with the same four keys.
+    runCli({"skill", "install", "--json"}, decks, database, &code, &errors);
+    QCOMPARE(code, 0);
+    QVERIFY(QFileInfo::exists(skillPath));
+    const QJsonObject present = runCli({"skill", "status", "--json"}, decks, database, &code, &errors);
+    QCOMPARE(code, 0);
+    QVERIFY2(errors.isEmpty(), qPrintable(errors));
+    QCOMPARE(sortedKeys(present), QStringList({"installed", "matches", "ok", "path"}));
+    QVERIFY(present.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(present.value(QStringLiteral("path")).toString(), skillPath);
+    QVERIFY(present.value(QStringLiteral("installed")).toBool());
+    QVERIFY(present.value(QStringLiteral("matches")).toBool());
+
+    // A changed installed copy is reported as installed but not matching.
+    QVERIFY(writeFile(skillPath, "not the bundled skill"));
+    const QJsonObject changed = runCli({"skill", "status", "--json"}, decks, database, &code, &errors);
+    QCOMPARE(code, 0);
+    QVERIFY2(errors.isEmpty(), qPrintable(errors));
+    QVERIFY(changed.value(QStringLiteral("installed")).toBool());
+    QVERIFY(!changed.value(QStringLiteral("matches")).toBool());
+
+    // JSON failures around the new path keep the two-key error/ok shape.
+    const QJsonObject failed = runCli({"skill", "status", "--unknown-flag", "--json"}, decks, database, &code, &errors);
+    QCOMPARE(code, 1);
+    QCOMPARE(sortedKeys(failed), QStringList({"error", "ok"}));
+    QVERIFY(!failed.value(QStringLiteral("ok")).toBool());
+}
+
 void TestCli::addCardsCreatesDeckBulk() {
     QTemporaryDir dir;
     EnvGuard env(dir.filePath("decks"), dir.filePath("state.db"));
