@@ -68,10 +68,10 @@ void TestCli::helpIsHeadless() {
             continue;
         QVERIFY2(help.contains(QStringLiteral("omacards %1").arg(path).toUtf8()), qPrintable(path));
     }
-    // Runtime still accepts the legacy aliases; only the registry omits them.
-    QVERIFY(help.contains("(alias: active)"));
+    // Help documents the canonical spellings and no alias notes.
+    QVERIFY(!help.contains("alias"));
+    QVERIFY(help.contains("omacards decks current [--json]  Show the Current deck\n"));
     QVERIFY(help.contains("--new-card-allowance"));
-    QVERIFY(help.contains("--new-per-day"));
     QVERIFY(help.contains("--day-start-hour"));
 }
 
@@ -575,9 +575,7 @@ void TestCli::headlessCommandDetectionIsComplete() {
         const QString first = path.section(' ', 0, 0);
         QVERIFY2(commands.contains(first) || first == QLatin1String("open"), qPrintable(path));
     }
-    // The legacy aliases stay accepted at runtime but are not registry paths.
-    QVERIFY(!Cli::commandPaths().contains(QStringLiteral("decks active")));
-    QVERIFY(!Cli::commandPaths().contains(QStringLiteral("--new-per-day")));
+    QVERIFY(Cli::commandPaths().contains(QStringLiteral("decks current")));
 
     QVERIFY(!Cli::needsOffscreen({}));
     QVERIFY(!Cli::needsOffscreen({""}));
@@ -879,14 +877,15 @@ void TestCli::decksCurrentCommandContract() {
     QCOMPARE(code, 1);
     QVERIFY(standardError.contains("No current deck"));
 
-    // `active` stays an accepted alias with the same output in both modes.
-    const QJsonObject emptyAlias =
-        runCli({"decks", "active", "--json"}, emptyDecks, emptyDatabase, &code, &standardError);
+    // An unknown positional subcommand is an error, not the bare deck list.
+    const QJsonObject unknown = runCli({"decks", "active", "--json"}, emptyDecks, emptyDatabase, &code, &standardError);
     QCOMPARE(code, 1);
-    QCOMPARE(QJsonDocument(emptyAlias).toJson(), QJsonDocument(none).toJson());
+    QCOMPARE(sortedKeys(unknown), QStringList({"error", "ok"}));
+    QVERIFY(!unknown.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(unknown.value(QStringLiteral("error")).toString(), QString("Unknown command: decks active"));
     runCli({"decks", "active"}, emptyDecks, emptyDatabase, &code, &standardError);
     QCOMPARE(code, 1);
-    QVERIFY(standardError.contains("No current deck"));
+    QVERIFY(standardError.contains("Unknown command: decks active"));
 
     QTemporaryDir dir;
     const QString decks = dir.filePath("decks");
@@ -905,9 +904,10 @@ void TestCli::decksCurrentCommandContract() {
     QCOMPARE(code, 0);
     QCOMPARE(sortedKeys(current), QStringList({"deck", "ok"}));
     QCOMPARE(current.value(QStringLiteral("deck")).toString(), QString("Only"));
-    const QJsonObject alias = runCli({"decks", "active", "--json"}, decks, database, &code);
-    QCOMPARE(code, 0);
-    QCOMPARE(QJsonDocument(alias).toJson(), QJsonDocument(current).toJson());
+    const QJsonObject unknownSubcommand = runCli({"decks", "active", "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QCOMPARE(sortedKeys(unknownSubcommand), QStringList({"error", "ok"}));
+    QVERIFY(!unknownSubcommand.contains(QStringLiteral("decks")));
 }
 
 void TestCli::reviewCommandContract() {
@@ -1598,13 +1598,25 @@ void TestCli::configValidationAndPersistence() {
     QCOMPARE(budget.value(QStringLiteral("newCardsOnStudyDay")).toInt(), 1);
     QCOMPARE(budget.value(QStringLiteral("newRemaining")).toInt(), 4);
 
-    // The legacy flag stays accepted and writes the canonical setting.
-    const QJsonObject alias = runCli({"config", "--new-per-day", "7", "--json"}, decks, database, &code);
+    // An unknown flag is an error and leaves the stored allowance untouched.
+    const QJsonObject beforeUnknown = runCli({"config", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
-    QCOMPARE(alias.value(QStringLiteral("newCardAllowance")).toInt(), 7);
+    const QJsonObject rejected = runCli({"config", "--new-per-day", "7", "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QCOMPARE(sortedKeys(rejected), QStringList({"error", "ok"}));
+    QVERIFY(!rejected.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(rejected.value(QStringLiteral("error")).toString(), QString("Unknown flag: --new-per-day"));
+    const QJsonObject afterUnknown = runCli({"config", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(QJsonDocument(afterUnknown).toJson(), QJsonDocument(beforeUnknown).toJson());
+    QByteArray rejectedStderr;
+    QCOMPARE(runCliText({"config", "--new-per-day", "7"}, decks, database, &code, &rejectedStderr), QString());
+    QCOMPARE(code, 1);
+    QVERIFY(rejectedStderr.contains("Unknown flag: --new-per-day"));
+
     const QString configText = runCliText({"config"}, decks, database, &code);
     QCOMPARE(code, 0);
-    QVERIFY(configText.contains(QStringLiteral("New-card allowance: 7")));
+    QVERIFY(configText.contains(QStringLiteral("New-card allowance: 5")));
     QVERIFY(configText.contains(QStringLiteral("new cards on Study day: ")));
     QVERIFY(configText.contains(QStringLiteral("day-start hour: ")));
 }

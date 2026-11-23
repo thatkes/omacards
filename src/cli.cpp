@@ -38,6 +38,7 @@ struct Options {
     QString input;
     QString description;
     QString format = "text";
+    QString unknownFlag;
     int rating = 0;
     int steps = 10;
     int newCardAllowance = -1;
@@ -121,7 +122,7 @@ Options parse(const QStringList &arguments) {
             options.rating = value().toInt();
         else if (arg == "--steps")
             options.steps = value().toInt();
-        else if (arg == "--new-card-allowance" || arg == "--new-per-day")
+        else if (arg == "--new-card-allowance")
             options.newCardAllowance = value().toInt();
         else if (arg == "--day-start-hour")
             options.dayStartHour = value().toInt();
@@ -141,9 +142,12 @@ Options parse(const QStringList &arguments) {
             options.description = arg.section('=', 1);
         else if (arg.startsWith("--format="))
             options.format = arg.section('=', 1);
-        else if (arg.startsWith("--new-card-allowance=") || arg.startsWith("--new-per-day="))
+        else if (arg.startsWith("--new-card-allowance="))
             options.newCardAllowance = arg.section('=', 1).toInt();
-        else if (options.path.isEmpty())
+        else if (arg.startsWith("--")) {
+            if (options.unknownFlag.isEmpty())
+                options.unknownFlag = arg;
+        } else if (options.path.isEmpty())
             options.path = arg;
     }
     options.json = arguments.contains(QString("--json"));
@@ -399,7 +403,7 @@ QString usage() {
                           "  omacards check [--deck NAME] [--math] [--strict] [--json]\n"
                           "                                   Show decks, cards, due count, math and issues\n"
                           "  omacards decks [--json]          List decks\n"
-                          "  omacards decks current [--json]  Show the Current deck (alias: active)\n"
+                          "  omacards decks current [--json]  Show the Current deck\n"
                           "  omacards use-deck NAME [--json] Choose the Current deck\n"
                           "  omacards cards [--deck D] [--json]\n"
                           "  omacards search TERM [--deck D] [--json]\n"
@@ -418,7 +422,6 @@ QString usage() {
                           "  omacards stats [--json]\n"
                           "  omacards config [--new-card-allowance N] [--day-start-hour H]\n"
                           "                       [--retention 0.70-0.99] [--json]\n"
-                          "                       (--new-per-day is an accepted alias)\n"
                           "  omacards skill install [--json]\n");
 }
 } // namespace
@@ -471,6 +474,8 @@ int run(const QStringList &arguments) {
     }
     if (!isHeadlessCommand(options.command))
         return fail(QObject::tr("Unknown command: %1").arg(options.command), options.json);
+    if (!options.unknownFlag.isEmpty())
+        return fail(QObject::tr("Unknown flag: %1").arg(options.unknownFlag), options.json);
 
     auto ownedBackend = Backend::fromEnvironment();
     Backend &backend = *ownedBackend;
@@ -766,7 +771,7 @@ int run(const QStringList &arguments) {
         return 0;
     }
 
-    if (options.command == "decks" && (options.path == "current" || options.path == "active")) {
+    if (options.command == "decks" && options.path == "current") {
         const QString selected = backend.currentDeck();
         if (selected.isEmpty())
             return fail(QObject::tr("No current deck"), json);
@@ -778,6 +783,8 @@ int run(const QStringList &arguments) {
     }
 
     if (options.command == "decks") {
+        if (!options.path.isEmpty())
+            return fail(QObject::tr("Unknown command: decks %1").arg(options.path), json);
         QJsonArray array;
         for (const Deck &deck : decks) {
             QJsonObject object;
