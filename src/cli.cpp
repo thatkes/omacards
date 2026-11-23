@@ -242,6 +242,8 @@ QString skillStatusText(const SkillStatus &status) {
 
 QString skillHelpNotes() {
     return QStringLiteral("Target: %1\n"
+                          "Install JSON: `skill install --json` returns `ok`, `installed`, `path` and `changed`.\n"
+                          "`changed` is false when the installed copy already matches the bundled source.\n"
                           "Installs are idempotent: an unchanged generated copy is left alone; a changed copy is "
                           "overwritten.\n"
                           "Restart the agent to load a new skill.\n")
@@ -1324,6 +1326,7 @@ int run(const QStringList &arguments) {
         const QString action = options.path.isEmpty() ? QString("install") : options.path;
         if (action != "install")
             return fail(QObject::tr("Usage: omacards skill install"), json);
+        const SkillStatus before = readSkillStatus();
         QFile bundled(QStringLiteral(":/skill/SKILL.md"));
         if (!bundled.open(QIODevice::ReadOnly))
             return fail(QObject::tr("The bundled agent skill is missing"), json);
@@ -1334,7 +1337,9 @@ int run(const QStringList &arguments) {
             return fail(QObject::tr("Cannot write %1").arg(path), json);
         QJsonObject object;
         object.insert("ok", true);
+        object.insert("installed", true);
         object.insert("path", path);
+        object.insert("changed", !before.matches);
         write(object, json, QObject::tr("Installed agent skill to %1").arg(path));
         return 0;
     }

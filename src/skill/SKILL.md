@@ -294,6 +294,11 @@ until the deck is clean.
   then run `./bin/check-skill-install` to confirm the installed copy matches.
   The generated `~/.agents/skills/omacards/SKILL.md` is not the source of truth;
   never edit it by hand.
+- `omacards skill install --json` returns `ok`, `installed`, `path` and
+  `changed`. `installed` is true after a successful install and `path` is the
+  generated file. `changed` is true when that file was missing or differed from
+  the bundled source, and false when it already matched. An install failure
+  keeps the two-key `error`/`ok` shape.
 
 ## Ratings
 

@@ -149,6 +149,9 @@ void TestCli::helpIsHeadless() {
             QVERIFY2(text.contains(QStringLiteral("idempotent"), Qt::CaseInsensitive), qPrintable(text));
             QVERIFY2(text.contains(QStringLiteral("overwritten"), Qt::CaseInsensitive), qPrintable(text));
             QVERIFY2(text.contains(QStringLiteral("Restart the agent"), Qt::CaseInsensitive), qPrintable(text));
+            QVERIFY2(text.contains(QStringLiteral("`ok`, `installed`, `path` and `changed`")), qPrintable(text));
+            QVERIFY2(text.contains(QStringLiteral("`changed` is false when the installed copy already matches")),
+                     qPrintable(text));
         }
     }
     QVERIFY2(!QFileInfo::exists(skillPath), "Help probes must not install the skill");
@@ -169,14 +172,26 @@ void TestCli::helpIsHeadless() {
     QVERIFY(QFile::remove(agentsDir));
     const QJsonObject installed = runCli({"skill", "install", "--json"}, decks, database, &skillCode, &skillErrors);
     QCOMPARE(skillCode, 0);
+    QCOMPARE(sortedKeys(installed), QStringList({"changed", "installed", "ok", "path"}));
     QVERIFY(installed.value(QStringLiteral("ok")).toBool());
+    QVERIFY(installed.value(QStringLiteral("installed")).toBool());
     QCOMPARE(installed.value(QStringLiteral("path")).toString(), skillPath);
+    QVERIFY(installed.value(QStringLiteral("changed")).toBool());
     QVERIFY(QFileInfo::exists(skillPath));
     QFile installedSkill(skillPath);
     QFile bundledSkill(QStringLiteral(":/skill/SKILL.md"));
     QVERIFY(installedSkill.open(QIODevice::ReadOnly));
     QVERIFY(bundledSkill.open(QIODevice::ReadOnly));
     QCOMPARE(installedSkill.readAll(), bundledSkill.readAll());
+
+    // Reinstalling a matching copy reports it as installed but not changed.
+    const QJsonObject unchanged = runCli({"skill", "install", "--json"}, decks, database, &skillCode, &skillErrors);
+    QCOMPARE(skillCode, 0);
+    QCOMPARE(sortedKeys(unchanged), QStringList({"changed", "installed", "ok", "path"}));
+    QVERIFY(unchanged.value(QStringLiteral("ok")).toBool());
+    QVERIFY(unchanged.value(QStringLiteral("installed")).toBool());
+    QCOMPARE(unchanged.value(QStringLiteral("path")).toString(), skillPath);
+    QVERIFY(!unchanged.value(QStringLiteral("changed")).toBool());
 
     // A help flag is never a positional name and never runs the command.
     int code = -1;
