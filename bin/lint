@@ -23,3 +23,5 @@ cd "$ROOT"
 ./tests/test_merge_backstop.sh
 ./tests/test_check_format.sh
 ./bin/check-format
+./bin/check-doc-paths
+./tests/test_check_doc_paths.sh

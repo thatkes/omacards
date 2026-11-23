@@ -1,0 +1,220 @@
+#!/bin/sh
+set -eu
+
+# Guard the two documented command lists against src/command-paths.txt in
+# both directions, and check the README Layout block's path tokens against
+# the filesystem. Parsing stays shallow: first fenced block after a heading,
+# command paths followed by bracketed/angled arguments, and one layout-token
+# matcher. An optional root argument exists for the self-test.
+
+if [ "$#" -gt 1 ]; then
+    printf 'Usage: %s [root]\n' "$0" >&2
+    exit 2
+fi
+
+root=${1:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}
+root=$(CDPATH= cd -- "$root" && pwd)
+cd "$root"
+
+registry="$root/src/command-paths.txt"
+readme="$root/README.md"
+skill="$root/src/skill/SKILL.md"
+
+for file in "$registry" "$readme" "$skill"; do
+    if [ ! -f "$file" ]; then
+        printf 'Missing required file: %s\n' "$file" >&2
+        exit 1
+    fi
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+status=0
+
+# Expand brace alternatives and simple globs, then require a filesystem
+# match. Every brace alternative must match; a lone glob needs one match.
+layout_token_matches() {
+    token=$1
+    case "$token" in
+        *'{'*','*'}'*)
+            prefix=${token%%\{*}
+            remainder=${token#*\{}
+            alternatives=${remainder%%\}*}
+            suffix=${remainder#*\}}
+            old_ifs=$IFS
+            IFS=','
+            set -- $alternatives
+            IFS=$old_ifs
+            for alternative in "$@"; do
+                pattern="$prefix$alternative$suffix"
+                found=0
+                for match in $pattern; do
+                    if [ -e "$match" ]; then
+                        found=1
+                        break
+                    fi
+                done
+                if [ "$found" -eq 0 ]; then
+                    return 1
+                fi
+            done
+            ;;
+        *)
+            for match in $token; do
+                if [ -e "$match" ]; then
+                    return 0
+                fi
+            done
+            return 1
+            ;;
+    esac
+    return 0
+}
+
+# Print "<line>:<text>" for the first fenced block after an exact heading.
+extract_block() {
+    awk -v heading="$2" '
+        { line = $0; sub(/[[:space:]]+$/, "", line) }
+        !seen && line == heading { seen = 1; next }
+        seen && /^[[:space:]]*```/ {
+            if (!inside) { inside = 1; next }
+            exit
+        }
+        seen && inside { print NR ":" $0 }
+    ' "$1"
+}
+
+# Print "<source>:<line> + <path>" for known paths and
+# "<source>:<line> ! <path>" for paths missing from the registry. Registry
+# aliases in a trailing comment count as documented paths.
+parse_commands() {
+    awk -v source="$1" '
+        FNR == NR { known[$0] = 1; next }
+        {
+            raw = $0
+            lineno = raw
+            sub(/:.*/, "", lineno)
+            text = raw
+            sub(/^[^:]*:/, "", text)
+            sub(/^[[:space:]]+/, "", text)
+            if (text == "" || text ~ /^#/ || text !~ /^omacards([[:space:]]|$)/)
+                next
+
+            comment = ""
+            marker = match(text, /[[:space:]]#/)
+            if (marker) {
+                comment = substr(text, marker + 1)
+                text = substr(text, 1, marker - 1)
+            }
+            sub(/[[:space:]]+$/, "", text)
+
+            n = split(text, fields, /[[:space:]]+/)
+            if (n < 2) next
+            path = fields[2]
+            unknown = 0
+            for (i = 3; i <= n; i++) {
+                word = fields[i]
+                first = substr(word, 1, 1)
+                if (first == "-" || first == "[" || first == "<" ||
+                    first == "\"" || first == "\047" || first == "~") break
+                candidate = path " " word
+                path = candidate
+                if (!known[candidate]) {
+                    unknown = 1
+                    break
+                }
+            }
+            if (unknown || !known[path])
+                print source ":" lineno " ! " path
+            else
+                print source ":" lineno " + " path
+
+            if (comment != "") {
+                gsub(/[,;]/, " ", comment)
+                m = split(comment, words, /[[:space:]]+/)
+                for (j = 1; j <= m; j++) {
+                    alias = words[j]
+                    if (alias ~ /^-/ && known[alias])
+                        print source ":" lineno " + " alias
+                }
+            }
+        }
+    ' "$tmp/registry" "$2"
+}
+
+awk '{
+    sub(/\r$/, "")
+    gsub(/^[[:space:]]+|[[:space:]]+$/, "")
+    if ($0 != "" && $0 !~ /^#/) print
+}' "$registry" > "$tmp/registry"
+if [ ! -s "$tmp/registry" ]; then
+    printf 'Empty command-path registry: %s\n' "$registry" >&2
+    exit 1
+fi
+sort -u "$tmp/registry" > "$tmp/registry.sorted"
+
+extract_block "$readme" '## Agent CLI' > "$tmp/readme-cli.raw"
+extract_block "$skill" '## Command list' > "$tmp/skill-cli.raw"
+if [ ! -s "$tmp/readme-cli.raw" ]; then
+    printf 'Missing fenced block after ## Agent CLI in %s\n' "$readme" >&2
+    exit 1
+fi
+if [ ! -s "$tmp/skill-cli.raw" ]; then
+    printf 'Missing fenced block after ## Command list in %s\n' "$skill" >&2
+    exit 1
+fi
+
+parse_commands README.md "$tmp/readme-cli.raw" > "$tmp/readme-paths"
+parse_commands SKILL.md "$tmp/skill-cli.raw" > "$tmp/skill-paths"
+cat "$tmp/readme-paths" "$tmp/skill-paths" > "$tmp/all-paths"
+
+awk '$2 == "!"' "$tmp/all-paths" > "$tmp/unknown-paths"
+while IFS= read -r entry; do
+    where=${entry%% *}
+    rest=${entry#* }
+    path=${rest#\! }
+    printf '%s: command path not in src/command-paths.txt: %s\n' \
+        "$where" "$path" >&2
+    status=1
+done < "$tmp/unknown-paths"
+
+awk '$2 != "!" {
+    path = $0
+    sub(/^[^ ]+ [^ ]+ /, "", path)
+    print path
+}' "$tmp/all-paths" | sort -u > "$tmp/documented"
+comm -23 "$tmp/registry.sorted" "$tmp/documented" > "$tmp/missing-paths"
+while IFS= read -r path; do
+    printf 'Registry command path not documented in README Agent CLI or skill Command list: %s\n' \
+        "$path" >&2
+    status=1
+done < "$tmp/missing-paths"
+
+extract_block "$readme" '## Layout' > "$tmp/layout.raw"
+if [ ! -s "$tmp/layout.raw" ]; then
+    printf 'Missing fenced block after ## Layout in %s\n' "$readme" >&2
+    exit 1
+fi
+
+layout_tokens=0
+while IFS= read -r raw; do
+    lineno=${raw%%:*}
+    text=${raw#*:}
+    for token in $text; do
+        case "$token" in
+            src/*|tests/*|pkgbuild/*) ;;
+            *) break ;;
+        esac
+        layout_tokens=$((layout_tokens + 1))
+        if ! layout_token_matches "$token"; then
+            printf 'README.md:%s: missing Layout path: %s\n' "$lineno" "$token" >&2
+            status=1
+        fi
+    done
+done < "$tmp/layout.raw"
+
+if [ "$status" -eq 0 ]; then
+    printf 'Doc references OK (%s command paths, %s Layout path tokens)\n' \
+        "$(wc -l < "$tmp/registry" | tr -d '[:space:]')" "$layout_tokens"
+fi
+exit "$status"
