@@ -16,6 +16,15 @@ case $target in
 esac
 
 source_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+source_parser="$source_root/bin/local-only-sync-paths.sh"
+if [ ! -f "$source_parser" ]; then
+    printf 'Missing required file: %s\n' "$source_parser" >&2
+    exit 1
+fi
+. "$source_parser"
+paths=$(local_only_sync_paths "$source_root")
+
 source_git_dir=$(git -C "$source_root" rev-parse --path-format=absolute --git-common-dir)
 
 if [ ! -d "$target" ]; then
@@ -40,8 +49,7 @@ if [ "$target_root" = "$source_root" ]; then
     exit 1
 fi
 
-for path in AGENTS.md docs/agents docs/adr MISSION.md NOTES.md \
-    RESOURCES.md assets learning-records lessons reference; do
+printf '%s\n' "$paths" | while IFS= read -r path; do
     if [ -e "$source_root/$path" ]; then
         parent=$(dirname -- "$path")
         mkdir -p "$target_root/$parent"
