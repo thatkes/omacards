@@ -1,0 +1,26 @@
+--help
+-h
+add-card
+add-cards
+add-deck
+cards
+check
+config
+cram
+decks
+decks current
+delete-card
+delete-deck
+due
+edit-card
+help
+import
+open
+preview
+review
+search
+skill
+skill install
+stats
+use-deck
+warm

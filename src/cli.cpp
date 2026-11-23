@@ -52,13 +52,36 @@ struct Options {
     bool tagsSet = false;
 };
 
+// The one GUI command path. Every other first token is an attempted CLI
+// command, including unknown ones, so typos fail fast instead of opening a GUI
+// event loop that never returns.
+const QString &guiCommand() {
+    static const QString command = QStringLiteral("open");
+    return command;
+}
+
+// The registry is a plain text file embedded as a Qt resource. Reading it (not
+// a compiled constant) lets tooling inspect the same command paths before the
+// app is built.
+QStringList readCommandPaths() {
+    QStringList paths;
+    QFile registry(QStringLiteral(":/command-paths.txt"));
+    if (!registry.open(QIODevice::ReadOnly | QIODevice::Text))
+        return paths;
+    while (!registry.atEnd()) {
+        const QString line = QString::fromUtf8(registry.readLine()).trimmed();
+        if (!line.isEmpty() && !line.startsWith(QLatin1Char('#')))
+            paths << line;
+    }
+    return paths;
+}
+
+QString commandToken(const QString &path) {
+    return path.section(QLatin1Char(' '), 0, 0);
+}
+
 bool isHeadlessCommand(const QString &command) {
-    static const QStringList commands{
-        "check",       "decks",       "cards",    "search", "add-deck", "add-cards", "add-card", "edit-card",
-        "delete-card", "delete-deck", "import",   "due",    "review",   "cram",      "preview",  "skill",
-        "stats",       "config",      "use-deck", "help",   "--help",   "-h",        "warm",
-    };
-    return commands.contains(command);
+    return Cli::headlessCommands().contains(command);
 }
 
 Options parse(const QStringList &arguments) {
@@ -402,21 +425,47 @@ QString usage() {
 
 namespace Cli {
 
+QStringList commandPaths() {
+    static const QStringList paths = readCommandPaths();
+    return paths;
+}
+
+QStringList headlessCommands() {
+    static const QStringList commands = [] {
+        QStringList result;
+        for (const QString &path : commandPaths()) {
+            const QString token = commandToken(path);
+            if (token != guiCommand() && !result.contains(token))
+                result << token;
+        }
+        return result;
+    }();
+    return commands;
+}
+
+bool isHelpCommand(const QString &command) {
+    static const QStringList helpCommands = [] {
+        QStringList result;
+        for (const QString &path : commandPaths()) {
+            const QString token = commandToken(path);
+            const bool isHelp = token == QLatin1String("help") || token.startsWith(QLatin1Char('-'));
+            if (isHelp && !result.contains(token))
+                result << token;
+        }
+        return result;
+    }();
+    return helpCommands.contains(command);
+}
+
 bool needsOffscreen(const QStringList &arguments) {
     if (arguments.isEmpty() || arguments.first().isEmpty())
         return false; // no command: start the GUI
-
-    // `open` is a documented GUI alias. Every other first argument is an
-    // attempted CLI command, including unknown ones. Running those headlessly
-    // makes typos fail fast with an error instead of starting a GUI event loop
-    // that never returns (and hangs agent invocations).
-    return arguments.first() != "open";
+    return arguments.first() != guiCommand();
 }
 
 int run(const QStringList &arguments) {
     const Options options = parse(arguments);
-    if (options.command.isEmpty() || options.command == "help" || options.command == "--help" ||
-        options.command == "-h") {
+    if (options.command.isEmpty() || isHelpCommand(options.command)) {
         fprintf(stdout, "%s", qPrintable(usage()));
         return 0;
     }
