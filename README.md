@@ -28,7 +28,9 @@ Optional: `unzip` for Anki `.apkg` imports; `tectonic` or `pdflatex` with `pdfto
 
 ## LaTeX math
 
-Math inside `\(...\)` or `$$...$$` becomes a cached SVG when a TeX toolchain is available.
+Math inside `\(...\)` or `$$...$$` becomes a cached SVG when a TeX toolchain is available. Single-dollar `$...$` is not a rendered delimiter: it stays literal in both text and HTML output.
+
+Backslashes are consumed by each layer. In single-quoted shell arguments and deck files write `\(...\)`. In a shell double-quoted argument write `\\(` (for example `-a "Expand \\(x\\)"`), which reaches the card as `\(x\)`. In a JSON file write `\\(`; when that JSON sits inside a shell double-quoted argument, write `\\\\(` so the shell halves the backslashes before JSON parses them.
 
 ### On Omarchy:
 
