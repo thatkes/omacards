@@ -1354,12 +1354,13 @@ void TestCli::previewJsonContracts() {
         QString error;
         QVERIFY(owned->initialize(&error));
         QVERIFY(owned->createCard("P", "\\(z^2\\)", "plain", "basic", {}, &error));
+        QVERIFY(owned->createCard("P", "plain question", "\\(f'''(x)\\)", "basic", {}, &error));
     }
 
     const QJsonObject html = runCli({"preview", "--deck", "P", "--format", "html", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
     const QJsonArray htmlItems = html.value(QStringLiteral("items")).toArray();
-    QCOMPARE(htmlItems.size(), 3);
+    QCOMPARE(htmlItems.size(), 4);
     const QJsonObject item = htmlItems.at(0).toObject();
     QStringList itemKeys{"id", "questionHtml", "answerHtml"};
     itemKeys.sort();
@@ -1373,6 +1374,18 @@ void TestCli::previewJsonContracts() {
     }
     QVERIFY(!mathHtml.isEmpty());
     QVERIFY(svgFromMathHtml(mathHtml).contains("fill=\"#000000\""));
+
+    QString answerHtml;
+    for (const QJsonValue &value : htmlItems) {
+        const QString answer = value.toObject().value(QStringLiteral("answerHtml")).toString();
+        if (answer.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")))
+            answerHtml = answer;
+    }
+    QVERIFY(!answerHtml.isEmpty());
+    // kCliTinySvg normalizes to 26 x 14 px; its logical size is half that and
+    // preview scale 1.6 gives 21 x 11. Apostrophes must not change what Qt
+    // parses back from the Answer's image markup.
+    QCOMPARE(parsedMathImageSize(answerHtml), QSize(21, 11));
 }
 
 void TestCli::previewZeroCardDeckIssues() {
