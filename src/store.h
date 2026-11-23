@@ -41,6 +41,7 @@ public:
     bool setCurrentDeck(const QString &name);
     QHash<QString, qint64> deckLastStudied() const;
     bool setDeckLastStudied(const QString &name, qint64 at);
+    bool moveDeckSettings(const QString &from, const QString &to);
 
     QString path() const { return m_path; }
 
@@ -52,6 +53,7 @@ public:
 
 private:
     int countNewCardsOnStudyDay(int dayStartHour = 0) const;
+    bool removeSetting(const QString &key);
 
     QString m_path;
     QString m_connection;

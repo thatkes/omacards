@@ -23,4 +23,5 @@ private slots:
     void summaryCountsOnlyGood();
     void summaryUsesStudyDayForReviewDates();
     void settingFallbackAndUpsert();
+    void renameMovesCurrentAndLastStudiedSettings();
 };

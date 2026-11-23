@@ -401,6 +401,11 @@ void TestDeckRepository::modifyCardHandlesExplicitAndGeneratedIds() {
     f.store.save(renamedDeckId, DeckIO::contentHash(generated), state);
     QVERIFY(f.store.states().contains(renamedDeckId));
 
+    // Settings are keyed by Deck name, so they must follow the rename too.
+    QVERIFY(f.store.setCurrentDeck(QStringLiteral("Old")));
+    QVERIFY(f.store.setDeckLastStudied(QStringLiteral("Welcome"), 100));
+    QVERIFY(f.store.setDeckLastStudied(QStringLiteral("Old"), 200));
+
     DeckRename::Result renamed;
     QVERIFY(f.repo.renameDeck("Old", "New", &f.current, &renamed, &error));
     QVERIFY(error.isEmpty());
@@ -411,6 +416,11 @@ void TestDeckRepository::modifyCardHandlesExplicitAndGeneratedIds() {
     QVERIFY(!QFileInfo::exists(f.dir.filePath("decks/Old.txt")));
     QVERIFY(QFileInfo::exists(renamed.path));
     QCOMPARE(f.current, QString("New"));
+    QCOMPARE(f.store.currentDeck(), QString("New"));
+    const QHash<QString, qint64> studied = f.store.deckLastStudied();
+    QVERIFY(!studied.contains(QStringLiteral("Old")));
+    QCOMPARE(studied.value(QStringLiteral("New")), qint64(200));
+    QCOMPARE(studied.value(QStringLiteral("Welcome")), qint64(100));
 
     const Deck *moved = f.repo.deckByName("New");
     QVERIFY(moved);

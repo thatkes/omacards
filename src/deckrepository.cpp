@@ -381,6 +381,9 @@ bool DeckRepository::renameDeck(const QString &oldName, const QString &newName, 
         m_deckNames[nameIndex] = to;
     if (currentDeck && *currentDeck == from)
         *currentDeck = to;
+    m_store.clearError();
+    if (!m_store.moveDeckSettings(from, to) || !m_store.lastError().isEmpty())
+        emit errorOccurred(trBackend("Cannot move deck settings for %1: %2").arg(to, m_store.lastError()));
     if (samePath)
         recordHistory(newPath, before, true, action);
     else

@@ -340,6 +340,11 @@ bool Backend::removeDeck(const QString &name, QString *error) {
 bool Backend::renameDeck(const QString &oldName, const QString &newName, DeckRename::Result *result, QString *error) {
     if (!m_deckRepo.renameDeck(oldName, newName, &m_currentDeck, result, error))
         return false;
+    // The repository moved the stored settings; adopt them before refresh so
+    // it does not misread the old name as a vanished Current deck and assign
+    // the renamed Deck a fresh last-studied stamp.
+    m_persistedDeck = m_store.currentDeck();
+    m_lastStudied = m_store.deckLastStudied();
     refresh();
     return true;
 }
