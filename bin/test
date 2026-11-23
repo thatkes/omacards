@@ -8,14 +8,120 @@ mkdir -p "$ROOT/build/tests"
 cd "$ROOT/build/tests"
 qmake6 "$ROOT/tests/omacards_tests.pro"
 make -j"$(nproc)"
-LOG="$(mktemp "$ROOT/build/tests/run.XXXXXX")"
+
+# Keep these names in step with tests/test_main.cpp. TestCli is the long pole,
+# so it runs alone while every other suite shares the second group; a plain run
+# still executes all 17 suites exactly once.
+CLI_SUITES='TestCli'
+OTHER_SUITES='TestBackend TestInSessionProgression TestStore TestFsrs TestTheme TestDeck TestMathRender
+TestFileHistory TestConfig TestDomain TestStudyPlanner TestStudySession TestRatingRecording
+TestImporter TestDeckRepository TestTranslator'
+
+focused=0
+for arg in "$@"; do
+    if [ "$arg" = "--suite" ]; then
+        focused=1
+        break
+    fi
+done
+
+group_logs=
+pids=
+
+# The XDG cache stays on the warmed parent value: an offscreen CLI with a fresh
+# cache tries to download a tectonic bundle and stalls for a minute. Every suite
+# that writes SVGs points its renderer at a QTemporaryDir, and the one fixed path
+# under QDir::tempPath() is isolated by the group-private TMPDIR below. State,
+# decks, the installed skill and temp files each get their own group root.
+shared_cache="${XDG_CACHE_HOME:-$HOME/.cache}"
+
+run_group() {
+    log=$1
+    shift
+    envdir="${log}.env"
+    mkdir "$envdir" "$envdir/home" "$envdir/data" "$envdir/decks" "$envdir/tmp"
+    HOME="$envdir/home" \
+    XDG_CACHE_HOME="$shared_cache" \
+    XDG_DATA_HOME="$envdir/data" \
+    XDG_CONFIG_HOME="$envdir/config" \
+    TMPDIR="$envdir/tmp" \
+    OMACARDS_DECKS_DIR="$envdir/decks" \
+    OMACARDS_STATE_DB="$envdir/state.db" \
+    QT_QPA_PLATFORM=offscreen \
+        ./omacards_tests "$@" > "$log" 2>&1
+}
+
+launch_group() {
+    log="$(mktemp "$ROOT/build/tests/group.XXXXXX")"
+    group_logs="$group_logs $log"
+    run_group "$log" "$@" &
+    pids="$pids $!"
+}
+
+cleanup_group_envs() {
+    for log in $group_logs; do
+        rm -rf "${log}.env"
+    done
+}
+
+if [ "$focused" -eq 1 ]; then
+    launch_group "$@"
+else
+    launch_group $CLI_SUITES "$@"
+    launch_group $OTHER_SUITES "$@"
+fi
+
 status=0
-QT_QPA_PLATFORM=offscreen ./omacards_tests "$@" > "$LOG" 2>&1 || status=$?
+for pid in $pids; do
+    set +e
+    wait "$pid"
+    group_status=$?
+    set -e
+    if [ "$status" -eq 0 ] && [ "$group_status" -ne 0 ]; then
+        status=$group_status
+    fi
+done
+
+# Each group announces its own suite count. Aggregate the announcements into
+# one combined log so bin/check-test-summary still sees a single run and the
+# partial-run guard compares against the total number of suites.
+announced_total=0
+info_mode=0
+for log in $group_logs; do
+    if grep -q '^OMACARDS_TEST_MODE: info$' "$log"; then
+        info_mode=1
+    fi
+    announcements="$(awk '/^OMACARDS_TEST_SUITES: [0-9]+$/ { n++ } END { print n+0 }' "$log")"
+    if [ "$announcements" -ne 1 ] && [ "$info_mode" -eq 0 ]; then
+        printf 'ERROR: group log did not announce exactly one suite count: %s\n' "$log" >&2
+        cat "$log" >&2
+        cleanup_group_envs
+        exit 1
+    fi
+    count="$(awk '/^OMACARDS_TEST_SUITES: [0-9]+$/ { print $2 }' "$log")"
+    announced_total=$((announced_total + count))
+done
+
+LOG="$(mktemp "$ROOT/build/tests/run.XXXXXX")"
+if [ "$info_mode" -eq 1 ]; then
+    for log in $group_logs; do
+        cat "$log"
+    done > "$LOG"
+else
+    {
+        printf 'OMACARDS_TEST_SUITES: %d\n' "$announced_total"
+        for log in $group_logs; do
+            grep -v '^OMACARDS_TEST_SUITES: ' "$log" || true
+        done
+    } > "$LOG"
+fi
 cat "$LOG"
 set +e
 "$ROOT/bin/check-test-summary" "$LOG"
 summary_status=$?
 set -e
+cleanup_group_envs
+
 if [ "$status" -ne 0 ]; then
     exit "$status"
 fi
