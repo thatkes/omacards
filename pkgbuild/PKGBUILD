@@ -1,3 +1,6 @@
+# Canonical install: ./bin/install from the repository root. It builds and
+# installs this package, covering the omacards binary and the agent skill.
+# `omacards skill install` is an alternative that refreshes only the skill.
 pkgname=omacards
 pkgver=0.1.0
 pkgrel=1
