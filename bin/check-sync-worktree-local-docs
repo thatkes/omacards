@@ -1,0 +1,60 @@
+#!/bin/sh
+set -eu
+
+# Compare the hardcoded copy list in bin/sync-worktree-local-docs with the
+# two Local-only blocks in .gitignore. The optional root argument lets the
+# self-test exercise synthetic repositories.
+if [ "$#" -gt 1 ]; then
+    printf 'Usage: %s [root]\n' "$0" >&2
+    exit 2
+fi
+
+root=${1:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}
+root=$(CDPATH= cd -- "$root" && pwd)
+sync="$root/bin/sync-worktree-local-docs"
+ignore="$root/.gitignore"
+
+for file in "$sync" "$ignore"; do
+    if [ ! -f "$file" ]; then
+        printf 'Missing required file: %s\n' "$file" >&2
+        exit 1
+    fi
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+
+sed -n '/^[[:space:]]*for path in /,/;[[:space:]]*do/p' "$sync" |
+    tr '\\' ' ' |
+    sed 's/^[[:space:]]*for path in //; s/;[[:space:]]*do.*$//' |
+    awk '{ for (i = 1; i <= NF; i++) print $i }' |
+    sort > "$tmp/script"
+
+awk '
+    /^[[:space:]]*#/ {
+        in_local = ($0 ~ /Local-only/)
+        next
+    }
+    /^[[:space:]]*$/ {
+        in_local = 0
+        next
+    }
+    !in_local { next }
+    {
+        line = $0
+        if (line == "/build/" || line == "/pkgbuild/pkg/" || \
+            line == "/pkgbuild/src/" || line == "*.pkg.tar.*") next
+        sub(/^\//, "", line)
+        sub(/\/$/, "", line)
+        print line
+    }
+' "$ignore" | sort > "$tmp/ignore"
+
+if ! cmp -s "$tmp/script" "$tmp/ignore"; then
+    printf 'Local-only path lists diverge: bin/sync-worktree-local-docs and .gitignore\n' >&2
+    diff -u "$tmp/ignore" "$tmp/script" >&2 || true
+    exit 1
+fi
+
+count=$(wc -l < "$tmp/ignore" | tr -d '[:space:]')
+printf 'Local-only path lists match (%s paths)\n' "$count"
