@@ -193,6 +193,12 @@ void DeckRepository::recordHistory(const QString &path, const QByteArray &before
         emit historyChanged();
 }
 
+void DeckRepository::recordRename(const QString &from, const QByteArray &before, const QString &to,
+                                  const QByteArray &after, const QString &description) {
+    if (m_history.recordRename(from, before, to, after, description))
+        emit historyChanged();
+}
+
 bool DeckRepository::commitDeckEdit(Deck *deck, const Deck &original, const QByteArray &before,
                                     const QString &description, QString *error) {
     const QSet<QString> baseline = baselineErrors(deck->path);
@@ -290,6 +296,102 @@ bool DeckRepository::createDeck(const QString &name, QString *currentDeck, QStri
     load(&selected);
     if (currentDeck)
         *currentDeck = selected;
+    return true;
+}
+
+bool DeckRepository::renameDeck(const QString &oldName, const QString &newName, QString *currentDeck,
+                                DeckRename::Result *result, QString *error) {
+    const QString from = oldName.trimmed();
+    const QString to = newName.trimmed();
+    if (from.isEmpty() || to.isEmpty()) {
+        setError(error, trBackend("Give both the old and new deck names"));
+        return false;
+    }
+    Deck *deck = deckByName(from);
+    if (!deck) {
+        setError(error, trBackend("No such deck: %1").arg(from));
+        return false;
+    }
+    if (m_deckNames.contains(to)) {
+        setError(error, trBackend("Deck already exists: %1").arg(to));
+        return false;
+    }
+
+    const QString oldPath = deck->path;
+    const QString newPath = QDir(m_decksDir).filePath(DeckIO::safeFileName(to) + ".txt");
+    const bool samePath = QFileInfo(oldPath).absoluteFilePath() == QFileInfo(newPath).absoluteFilePath();
+    if (!samePath) {
+        for (int i = 0; i < m_decks.size(); ++i) {
+            if (&m_decks[i] == deck)
+                continue;
+            if (QFileInfo(m_decks.at(i).path).absoluteFilePath() == QFileInfo(newPath).absoluteFilePath()) {
+                setError(error, trBackend("Deck file already used by %1").arg(m_decks.at(i).name));
+                return false;
+            }
+        }
+        // An unreadable file is not in m_decks; never silently overwrite it.
+        if (QFileInfo::exists(newPath)) {
+            setError(error, trBackend("A deck file already exists at %1").arg(newPath));
+            return false;
+        }
+    }
+
+    const Deck original = *deck;
+    const QByteArray before = FileHistory::readBytes(oldPath);
+    const QSet<QString> baseline = baselineErrors(oldPath);
+    Deck updated = original;
+    updated.name = to;
+    updated.path = newPath;
+    int pinned = 0;
+    for (Card &card : updated.cards) {
+        card.deck = to;
+        // cardId() hashes the Deck name, so a generated id would change. Pin
+        // the existing id before writing the new file. A Card whose id was
+        // already explicit is preserved without a second pin.
+        if (!card.explicitId && card.id != DeckIO::cardId(card)) {
+            card.explicitId = true;
+            ++pinned;
+        }
+    }
+
+    const QString action = trBackend("renaming deck %1 to %2").arg(from, to);
+    const auto rollback = [&](const QString &message) {
+        QString restoreError;
+        if (!FileHistory::restore(samePath ? oldPath : newPath, samePath ? before : QByteArray(), samePath,
+                                  &restoreError))
+            setError(error, trBackend("Deck rename failed and could not be restored: %1").arg(restoreError));
+        else
+            setError(error, message);
+        return false;
+    };
+
+    if (!DeckIO::save(updated, error))
+        return false;
+    const QVector<DeckIssue> issues = DeckIO::lintFile(newPath);
+    if (const DeckIssue *invalid = firstNewError(issues, baseline))
+        return rollback(validationError(*invalid));
+
+    const QByteArray after = FileHistory::readBytes(newPath);
+    if (!samePath && !QFile::remove(oldPath))
+        return rollback(trBackend("Cannot remove deck file: %1").arg(oldPath));
+
+    *deck = updated;
+    const int nameIndex = m_deckNames.indexOf(from);
+    if (nameIndex >= 0)
+        m_deckNames[nameIndex] = to;
+    if (currentDeck && *currentDeck == from)
+        *currentDeck = to;
+    if (samePath)
+        recordHistory(newPath, before, true, action);
+    else
+        recordRename(oldPath, before, newPath, after, action);
+
+    if (result) {
+        result->name = to;
+        result->path = newPath;
+        result->cards = static_cast<int>(updated.cards.size());
+        result->preservedIds = pinned;
+    }
     return true;
 }
 

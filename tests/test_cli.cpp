@@ -460,11 +460,45 @@ void TestCli::cliEditsAndDeletesCardsAcrossDecks() {
     QCOMPARE(code, 0);
     QCOMPARE(edited.value(QStringLiteral("id")).toString(), cardId);
 
+    // Rating then renaming the Deck keeps the same id, and the next Rating
+    // continues the same Scheduling state instead of starting a new card.
+    const QJsonObject rated = runCli({"review", "-c", cardId, "-r", "3", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+
+    const QJsonObject renamed = runCli({"rename-deck", "Second", "Renamed", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY(renamed.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(renamed.value(QStringLiteral("deck")).toString(), QString("Renamed"));
+    QCOMPARE(renamed.value(QStringLiteral("path")).toString(), QDir(decks).filePath("Renamed.txt"));
+    QCOMPARE(renamed.value(QStringLiteral("renamedCards")).toInt(), 1);
+    // edit-card above already pinned this id in the deck file, so the rename
+    // preserves it without adding another id line.
+    QCOMPARE(renamed.value(QStringLiteral("preservedIds")).toInt(), 0);
+    QVERIFY(!QFileInfo::exists(QDir(decks).filePath("Second.txt")));
+    QVERIFY(QFileInfo::exists(QDir(decks).filePath("Renamed.txt")));
+
+    const QString confirmation = runCliText({"rename-deck", "Renamed", "Renamed Again"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY(confirmation.contains(QStringLiteral("Renamed Again")));
+    QCOMPARE(confirmation.trimmed().count('\n'), 0);
+
+    const QJsonObject continued = runCli({"review", "-c", cardId, "-r", "3", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(continued.value(QStringLiteral("id")).toString(), cardId);
+    QVERIFY(continued.value(QStringLiteral("stability")).toDouble() >
+            rated.value(QStringLiteral("stability")).toDouble());
+
+    const QJsonObject conflict = runCli({"rename-deck", "Renamed Again", "First", "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QCOMPARE(sortedKeys(conflict), QStringList({"error", "ok"}));
+    QCOMPARE(conflict.value(QStringLiteral("error")).toString(), QString("Deck already exists: First"));
+    QVERIFY(!conflict.value(QStringLiteral("ok")).toBool());
+
     // The same id keeps resolving for a later command.
     const QJsonObject deleted = runCli({"delete-card", "-c", cardId, "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
     QCOMPARE(deleted.value(QStringLiteral("id")).toString(), cardId);
-    const QJsonObject remaining = runCli({"cards", "-d", "Second", "--json"}, decks, database, &code);
+    const QJsonObject remaining = runCli({"cards", "-d", "Renamed Again", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
     QCOMPARE(remaining.value(QStringLiteral("cards")).toArray().size(), 0);
 }

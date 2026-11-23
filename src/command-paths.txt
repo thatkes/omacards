@@ -17,6 +17,7 @@ help
 import
 open
 preview
+rename-deck
 review
 search
 skill
