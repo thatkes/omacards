@@ -1,4 +1,4 @@
-// Palette watching follows keymemo and Omacut (MIT, David Heinemeier Hansson).
+// Theme watching follows Omacut (MIT, David Heinemeier Hansson).
 #include "theme.h"
 
 #include <QColor>
