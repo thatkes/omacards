@@ -7,8 +7,13 @@
 #include <QJsonObject>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QSize>
 #include <QString>
 #include <QStringList>
+#include <QTextBlock>
+#include <QTextCursor>
+#include <QTextDocument>
+#include <QTextImageFormat>
 
 #include "deck.h"
 #include "studyplanner.h"
@@ -206,6 +211,25 @@ inline QString svgFromMathHtml(const QString &html) {
         return {};
     const QByteArray encoded = html.mid(start + prefix.size(), end - start - prefix.size()).toLocal8Bit();
     return QString::fromUtf8(QByteArray::fromBase64(encoded));
+}
+
+// QML's Text.RichText reads <img> size through QTextDocument. Parsing the
+// markup back catches malformed attributes: a broken alt leaves width and
+// height at zero even though the emitted tag still contains them.
+inline QSize parsedMathImageSize(const QString &html) {
+    QTextDocument document;
+    document.setHtml(html);
+    for (QTextBlock block = document.begin(); block.isValid(); block = block.next()) {
+        for (QTextBlock::iterator it = block.begin(); !it.atEnd(); ++it) {
+            const QTextFragment fragment = it.fragment();
+            if (!fragment.isValid())
+                continue;
+            const QTextImageFormat image = fragment.charFormat().toImageFormat();
+            if (image.isValid())
+                return QSize(qRound(image.width()), qRound(image.height()));
+        }
+    }
+    return {};
 }
 
 } // namespace TestSupport

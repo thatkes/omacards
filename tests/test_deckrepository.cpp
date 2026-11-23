@@ -389,6 +389,67 @@ void TestDeckRepository::modifyCardHandlesExplicitAndGeneratedIds() {
     QCOMPARE(pinnedAfter.id, QString("pinned-123"));
     QVERIFY(pinnedAfter.explicitId);
     QCOMPARE(finalId, QString("pinned-123"));
+
+    // Renaming a Deck changes the name that generated ids hash. The rename
+    // pins generated ids, so Scheduling state under the old ids still resolves.
+    QVERIFY(f.repo.createDeck("Old", &f.current, &error));
+    QVERIFY(f.repo.createCard("Old", &f.current, "Keep Q", "Keep A", "basic", {}, &error));
+    const Card generated = f.repo.deckByName("Old")->cards.first();
+    const QString renamedDeckId = generated.id;
+    FsrsState state;
+    state.reps = 3;
+    f.store.save(renamedDeckId, DeckIO::contentHash(generated), state);
+    QVERIFY(f.store.states().contains(renamedDeckId));
+
+    DeckRename::Result renamed;
+    QVERIFY(f.repo.renameDeck("Old", "New", &f.current, &renamed, &error));
+    QVERIFY(error.isEmpty());
+    QCOMPARE(renamed.name, QString("New"));
+    QCOMPARE(renamed.path, QDir(f.dir.filePath("decks")).filePath("New.txt"));
+    QCOMPARE(renamed.cards, 1);
+    QCOMPARE(renamed.preservedIds, 1);
+    QVERIFY(!QFileInfo::exists(f.dir.filePath("decks/Old.txt")));
+    QVERIFY(QFileInfo::exists(renamed.path));
+    QCOMPARE(f.current, QString("New"));
+
+    const Deck *moved = f.repo.deckByName("New");
+    QVERIFY(moved);
+    QCOMPARE(moved->name, QString("New"));
+    QCOMPARE(moved->cards.first().deck, QString("New"));
+    QCOMPARE(moved->cards.first().id, renamedDeckId);
+    QVERIFY(moved->cards.first().explicitId);
+
+    f.repo.load(&f.current);
+    moved = f.repo.deckByName("New");
+    QVERIFY(moved);
+    QCOMPARE(moved->cards.first().id, renamedDeckId);
+    QVERIFY(moved->cards.first().explicitId);
+    QVERIFY(f.store.states().contains(renamedDeckId));
+    QCOMPARE(f.store.states().value(renamedDeckId).reps, 3);
+
+    // An id already pinned in the file is preserved without a second pin.
+    DeckRename::Result pinnedRename;
+    QVERIFY(f.repo.renameDeck("Pinned", "Pinned New", &f.current, &pinnedRename, &error));
+    QCOMPARE(pinnedRename.cards, 1);
+    QCOMPARE(pinnedRename.preservedIds, 0);
+    QCOMPARE(f.repo.deckByName("Pinned New")->cards.first().id, QString("pinned-123"));
+
+    error.clear();
+    QVERIFY(!f.repo.renameDeck("New", "Pinned New", &f.current, &renamed, &error));
+    QCOMPARE(error, QString("Deck already exists: Pinned New"));
+    QVERIFY(f.repo.deckByName("New"));
+
+    // Undo and redo cover both files as one rename step.
+    QString description;
+    QVERIFY(f.repo.undo(&error, &description));
+    f.repo.load(&f.current);
+    QVERIFY(f.repo.deckByName("New"));
+    QVERIFY(!f.repo.deckByName("Pinned New"));
+    QVERIFY(QFileInfo::exists(f.dir.filePath("decks/Pinned.txt")));
+    QVERIFY(f.repo.redo(&error, &description));
+    f.repo.load(&f.current);
+    QVERIFY(f.repo.deckByName("Pinned New"));
+    QVERIFY(!f.repo.deckByName("Pinned"));
 }
 
 void TestDeckRepository::modifyCardTrimsAndDeduplicatesTags() {

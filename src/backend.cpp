@@ -337,6 +337,13 @@ bool Backend::removeDeck(const QString &name, QString *error) {
     return true;
 }
 
+bool Backend::renameDeck(const QString &oldName, const QString &newName, DeckRename::Result *result, QString *error) {
+    if (!m_deckRepo.renameDeck(oldName, newName, &m_currentDeck, result, error))
+        return false;
+    refresh();
+    return true;
+}
+
 void Backend::addCard(const QString &question, const QString &answer) {
     QString error;
     if (!createCard(m_currentDeck, question, answer, Domain::toString(CardType::Basic), {}, &error))
