@@ -195,6 +195,59 @@ int fail(const QString &message, bool json) {
     return 1;
 }
 
+// HOME is the only input to the install target. The bare `skill` command and
+// the `skill status` subcommand share this read-only snapshot.
+QString skillTargetPath() {
+    return QDir::homePath() + QStringLiteral("/.agents/skills/omacards/SKILL.md");
+}
+
+struct SkillStatus {
+    QString path;
+    bool installed = false;
+    bool matches = false;
+};
+
+SkillStatus readSkillStatus() {
+    SkillStatus status;
+    status.path = skillTargetPath();
+    status.installed = QFileInfo::exists(status.path);
+    if (!status.installed)
+        return status;
+    QFile bundled(QStringLiteral(":/skill/SKILL.md"));
+    const QByteArray source = bundled.open(QIODevice::ReadOnly) ? bundled.readAll() : QByteArray();
+    QFile installed(status.path);
+    status.matches = installed.open(QIODevice::ReadOnly) && installed.readAll() == source;
+    return status;
+}
+
+QJsonObject skillStatusJson(const SkillStatus &status) {
+    QJsonObject object;
+    object.insert("ok", true);
+    object.insert("installed", status.installed);
+    object.insert("path", status.path);
+    object.insert("matches", status.matches);
+    return object;
+}
+
+QString skillStatusText(const SkillStatus &status) {
+    QStringList lines;
+    lines << QStringLiteral("Skill installed: %1").arg(status.installed ? QStringLiteral("yes") : QStringLiteral("no"));
+    if (status.installed) {
+        lines << QStringLiteral("Installed copy matches bundled source: %1")
+                     .arg(status.matches ? QStringLiteral("yes") : QStringLiteral("no"));
+    }
+    lines << QStringLiteral("Skill target: %1").arg(status.path);
+    return lines.join(QLatin1Char('\n'));
+}
+
+QString skillHelpNotes() {
+    return QStringLiteral("Target: %1\n"
+                          "Installs are idempotent: an unchanged generated copy is left alone; a changed copy is "
+                          "overwritten.\n"
+                          "Restart the agent to load a new skill.\n")
+        .arg(skillTargetPath());
+}
+
 struct DeckIssueReport {
     QJsonArray entries;
     QStringList lines;
@@ -518,8 +571,8 @@ QString commandHelp(const QString &command) {
          {QStringLiteral("Search Cards."), QStringLiteral("TERM, [--deck D], [--json], --help, -h"),
           QStringLiteral("omacards search Taylor --json")}},
         {QStringLiteral("skill"),
-         {QStringLiteral("Manage the agent skill."), QStringLiteral("[install], [--json], --help, -h"),
-          QStringLiteral("omacards skill --help")}},
+         {QStringLiteral("Manage the agent skill. Bare `omacards skill` shows status and help without installing."),
+          QStringLiteral("[install], [--json], --help, -h"), QStringLiteral("omacards skill --help")}},
         {QStringLiteral("skill install"),
          {QStringLiteral("Install the agent skill."), QStringLiteral("[--json], --help, -h"),
           QStringLiteral("omacards skill install --json")}},
@@ -537,8 +590,11 @@ QString commandHelp(const QString &command) {
     const QString purpose = text.purpose.isEmpty() ? QObject::tr("Run the %1 command.").arg(command) : text.purpose;
     const QString flags = text.flags.isEmpty() ? QStringLiteral("--help, -h") : text.flags;
     const QString example = text.example.isEmpty() ? QStringLiteral("omacards %1 --help").arg(command) : text.example;
-    return QStringLiteral("omacards %1 --help\n\nPurpose: %2\nFlags: %3\nExample: %4\n")
-        .arg(command, purpose, flags, example);
+    QString help = QStringLiteral("omacards %1 --help\n\nPurpose: %2\nFlags: %3\nExample: %4\n")
+                       .arg(command, purpose, flags, example);
+    if (command == QLatin1String("skill") || command == QLatin1String("skill install"))
+        help += skillHelpNotes();
+    return help;
 }
 } // namespace
 
@@ -602,6 +658,20 @@ int run(const QStringList &arguments) {
         return fail(QObject::tr("Unknown command: %1").arg(options.command), options.json);
     if (!options.unknownFlag.isEmpty())
         return fail(QObject::tr("Unknown flag: %1").arg(options.unknownFlag), options.json);
+
+    // Bare `skill` is a read-only probe: report status and help, and skip
+    // backend initialization so neither the state database nor the skill is
+    // written. `skill status` will reuse this same snapshot.
+    if (options.command == "skill" && options.path.isEmpty()) {
+        const SkillStatus status = readSkillStatus();
+        if (options.json) {
+            write(skillStatusJson(status), true, {});
+        } else {
+            fprintf(stdout, "%s\n\n%s", qPrintable(skillStatusText(status)),
+                    qPrintable(commandHelp(QStringLiteral("skill"))));
+        }
+        return 0;
+    }
 
     auto ownedBackend = Backend::fromEnvironment();
     Backend &backend = *ownedBackend;
@@ -1257,9 +1327,8 @@ int run(const QStringList &arguments) {
         QFile bundled(QStringLiteral(":/skill/SKILL.md"));
         if (!bundled.open(QIODevice::ReadOnly))
             return fail(QObject::tr("The bundled agent skill is missing"), json);
-        const QString directory = QDir::homePath() + "/.agents/skills/omacards";
-        QDir().mkpath(directory);
-        const QString path = directory + "/SKILL.md";
+        const QString path = skillTargetPath();
+        QDir().mkpath(QFileInfo(path).absolutePath());
         QFile output(path);
         if (!output.open(QIODevice::WriteOnly | QIODevice::Truncate) || output.write(bundled.readAll()) < 0)
             return fail(QObject::tr("Cannot write %1").arg(path), json);
