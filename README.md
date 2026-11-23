@@ -91,7 +91,7 @@ Press `,` (or the gear button) to open the Settings screen. Settings are stored 
 ![omacards settings](docs/settings.png)
 
 - **New-card allowance** (default 20) caps how many New cards enter a Review Study session. This keeps a large Anki import manageable. Set it to 0 to study only cards that are already in review.
-- **Day-start hour** (default 00:00) sets when a Study day rolls over. A card due at 22:00 is available from 22:00 on its due date with the default, but waits until 03:00 if you set the Day-start hour to 3 AM. The library, the due counts and the New-card allowance all use this boundary, so an Available card is always in the study queue. A 3 AM rollover helps if you often study just before midnight. The day does not reset until you have had a chance to finish.
+- **Day-start hour** (default 00:00) sets when a Study day rolls over. A card due at 22:00 is available from 00:00 on its due date with the default, but waits until 03:00 if you set the Day-start hour to 3 AM. The library, the due counts and the New-card allowance all use this boundary, so an Available card is always in the study queue. A 3 AM rollover helps if you often study just before midnight. The day does not reset until you have had a chance to finish.
 - **Desired retention** (default 90%) is the probability of recall Review scheduling aims to maintain. Higher values shorten intervals and mean more reviews; lower values stretch intervals. The change affects future Ratings, not existing due dates.
 
 Again repeats come back after a 60-second break in the same session. Set `OMACARDS_AGAIN_DELAY_MS` (milliseconds) to adjust that break; `0` shows the card immediately.
