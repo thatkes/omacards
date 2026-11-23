@@ -679,8 +679,9 @@ void TestCli::checkJsonKeyContract() {
     QVERIFY(withMath.contains(QStringLiteral("mathWarnings")));
     QVERIFY(withMath.value(QStringLiteral("mathWarnings")).isArray());
 
-    runCli({"check", "--strict", "--json"}, decks, database, &code);
+    const QJsonObject strictClean = runCli({"check", "--strict", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
+    QCOMPARE(strictClean.value(QStringLiteral("strictPassed")), QJsonValue(true));
 
     // A duplicate question is a warning, not a hard error: ok stays true but
     // --strict still exits 1.
@@ -698,8 +699,10 @@ A: two
     const QJsonObject counts = warned.value(QStringLiteral("issueCounts")).toObject();
     QCOMPARE(counts.value(QStringLiteral("error")).toInt(), 0);
     QVERIFY(counts.value(QStringLiteral("warning")).toInt() >= 1);
-    runCli({"check", "--strict", "--json"}, decks, database, &code);
+    const QJsonObject strictWarned = runCli({"check", "--strict", "--json"}, decks, database, &code);
     QCOMPARE(code, 1);
+    QCOMPARE(strictWarned.value(QStringLiteral("strictPassed")), QJsonValue(false));
+    QVERIFY(strictWarned.value(QStringLiteral("ok")).toBool());
 }
 
 void TestCli::checkDeckScoping() {
