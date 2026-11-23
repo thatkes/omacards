@@ -2,11 +2,11 @@
 set -eu
 
 # Guard the two documented command lists against src/command-paths.txt in
-# both directions, check help metadata blocks against the same registry, and
-# check the README Layout block's path tokens against the filesystem. Parsing
-# stays shallow: first fenced block after a heading, command paths followed by
-# bracketed/angled arguments, and one layout-token matcher. An optional root
-# argument exists for the self-test.
+# both directions, require help metadata for every registry path that reaches
+# commandHelp(), and check the README Layout block's path tokens against the
+# filesystem. Parsing stays shallow: first fenced block after a heading,
+# command paths followed by bracketed/angled arguments, and one layout-token
+# matcher. An optional root argument exists for the self-test.
 
 if [ "$#" -gt 1 ]; then
     printf 'Usage: %s [root]\n' "$0" >&2
@@ -194,15 +194,19 @@ done < "$tmp/missing-paths"
 
 # Help wording is a tracked resource read as text, so drift is caught without
 # building the app. Fixtures that do not embed the resource keep the older
-# doc-only contract; when the file exists, every block is checked in isolation.
-# Completeness across registry paths belongs to a separate check.
+# doc-only contract; when the file exists, every block is checked in isolation
+# and every registry path reaching commandHelp() must have a block. Registry
+# tokens `help` or starting with `-` route to usage() via Cli::isHelpCommand()
+# and are exempt.
 if [ -f "$help_metadata" ]; then
-    awk '
+    : > "$tmp/help-paths"
+    awk -v paths_file="$tmp/help-paths" '
         function finish(    p) {
             if (!has_path && !has_purpose && !has_flags && !has_example)
                 return
             if (has_path) {
                 p = path
+                print p > paths_file
                 if (seen[p]++)
                     printf "%d: duplicate help metadata path: %s\n", path_line, p
                 if (!(p in known))
@@ -277,6 +281,21 @@ if [ -f "$help_metadata" ]; then
         printf 'src/command-help.txt:%s: %s\n' "$line" "$text" >&2
         status=1
     done < "$tmp/help-errors"
+
+    sort -u "$tmp/help-paths" > "$tmp/help-paths.sorted"
+    awk '
+        {
+            token = $1
+            if (token == "help" || substr(token, 1, 1) == "-")
+                next
+            print
+        }
+    ' "$tmp/registry" | sort -u > "$tmp/help-required-paths"
+    comm -23 "$tmp/help-required-paths" "$tmp/help-paths.sorted" > "$tmp/help-missing-paths"
+    while IFS= read -r path; do
+        printf 'src/command-help.txt: missing help metadata for command path: %s\n' "$path" >&2
+        status=1
+    done < "$tmp/help-missing-paths"
 fi
 
 extract_block "$readme" '## Layout' > "$tmp/layout.raw"
