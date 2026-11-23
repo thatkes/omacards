@@ -393,7 +393,8 @@ QString usage() {
                           "  omacards review -c ID -r 1|3 [--json]\n"
                           "  omacards cram [-d D] [--steps N] [--json]\n"
                           "  omacards stats [--json]\n"
-                          "  omacards config [--new-card-allowance N] [--retention 0.70-0.99] [--json]\n"
+                          "  omacards config [--new-card-allowance N] [--day-start-hour H]\n"
+                          "                       [--retention 0.70-0.99] [--json]\n"
                           "                       (--new-per-day is an accepted alias)\n"
                           "  omacards skill install [--json]\n");
 }
