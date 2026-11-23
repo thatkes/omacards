@@ -1749,6 +1749,18 @@ void TestCli::previewJsonContracts() {
     QCOMPARE(code, 0);
     QCOMPARE(one.value(QStringLiteral("items")).toArray().size(), 1);
 
+    // A stale id names itself in the error; the failure keeps only error/ok.
+    const QString staleId = QStringLiteral("deadbeef");
+    int staleCode = -1;
+    QByteArray staleErrors;
+    const QJsonObject stale =
+        runCli({"preview", "--deck", "P", "--card", staleId, "--json"}, decks, database, &staleCode, &staleErrors);
+    QCOMPARE(staleCode, 1);
+    QVERIFY(staleErrors.isEmpty());
+    QCOMPARE(sortedKeys(stale), QStringList({"error", "ok"}));
+    QVERIFY(!stale.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(stale.value(QStringLiteral("error")).toString(), QStringLiteral("No such card: %1").arg(staleId));
+
     // HTML preview has no theme, so math must be emitted in black regardless
     // of the colors the app happens to use.
     const QString bin = dir.filePath("bin");
@@ -1955,18 +1967,19 @@ oops: not a key
     QVERIFY(missingText.isEmpty());
     QCOMPARE(QString::fromUtf8(stderrOutput), QStringLiteral("No cards to preview\n"));
 
-    // A --card miss also keeps the old message even though the Deck file exists.
+    // A --card miss on a Deck with Cards names the stale id in both modes.
     const QJsonObject filtered =
         runCli({"preview", "--deck", "Good", "--card", "nope", "--json"}, decks, database, &code, &stderrOutput);
     QCOMPARE(code, 1);
     QVERIFY(stderrOutput.isEmpty());
     QCOMPARE(sortedKeys(filtered), QStringList({"error", "ok"}));
-    QCOMPARE(filtered.value(QStringLiteral("error")).toString(), QStringLiteral("No cards to preview"));
+    QVERIFY(!filtered.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(filtered.value(QStringLiteral("error")).toString(), QStringLiteral("No such card: nope"));
     const QString filteredText =
         runCliText({"preview", "--deck", "Good", "--card", "nope"}, decks, database, &code, &stderrOutput);
     QCOMPARE(code, 1);
     QVERIFY(filteredText.isEmpty());
-    QCOMPARE(QString::fromUtf8(stderrOutput), QStringLiteral("No cards to preview\n"));
+    QCOMPARE(QString::fromUtf8(stderrOutput), QStringLiteral("No such card: nope\n"));
 
     // A preview with Cards is unchanged in both output modes.
     const QJsonObject good = runCli({"preview", "--deck", "Good", "--json"}, decks, database, &code, &stderrOutput);

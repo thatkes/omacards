@@ -879,13 +879,15 @@ int run(const QStringList &arguments) {
             cards = filtered;
         }
         if (cards.isEmpty()) {
-            // A --card miss keeps the old message; only an existing Deck file
-            // that yields no Cards gets the empty-Deck diagnostic.
+            // An existing Deck file that yields no Cards gets the empty-Deck
+            // diagnostic; other misses name a stale --card id when supplied.
             if (deckHasNoCards) {
                 const QString targetPath = resolveDeckPath(decks, backend.decksDirectory(), options.deck);
                 if (!targetPath.isEmpty() && QFileInfo::exists(targetPath))
                     return failEmptyDeck(options.deck, deckIssueReport(backend.decksDirectory(), targetPath), json);
             }
+            if (!options.card.isEmpty())
+                return fail(QObject::tr("No such card: %1").arg(options.card), json);
             return fail(QObject::tr("No cards to preview"), json);
         }
 
