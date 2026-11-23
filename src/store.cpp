@@ -314,3 +314,33 @@ QHash<QString, qint64> Store::deckLastStudied() const {
 bool Store::setDeckLastStudied(const QString &name, qint64 at) {
     return setSetting(QStringLiteral("deck_last_studied/") + name, QString::number(at));
 }
+
+bool Store::moveDeckSettings(const QString &from, const QString &to) {
+    if (from == to)
+        return true;
+    if (currentDeck() == from && !setCurrentDeck(to))
+        return false;
+
+    const QHash<QString, qint64> studied = deckLastStudied();
+    if (!studied.contains(from))
+        return true;
+    // Carrying the stamp across keeps the renamed Deck in its old position in
+    // the last-studied order; only its name changes.
+    return setDeckLastStudied(to, studied.value(from)) && removeSetting(QStringLiteral("deck_last_studied/") + from);
+}
+
+bool Store::removeSetting(const QString &key) {
+    if (!m_db.isOpen())
+        return false;
+    QSqlQuery query(m_db);
+    if (!query.prepare(QStringLiteral("DELETE FROM settings WHERE key = :key"))) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    query.bindValue(":key", key);
+    if (!query.exec()) {
+        m_lastError = query.lastError().text();
+        return false;
+    }
+    return true;
+}

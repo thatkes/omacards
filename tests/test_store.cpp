@@ -427,6 +427,29 @@ void TestStore::settingFallbackAndUpsert() {
     QCOMPARE(store.setting(QStringLiteral("theme"), QStringLiteral("fallback")), QStringLiteral("two"));
 }
 
+void TestStore::renameMovesCurrentAndLastStudiedSettings() {
+    QTemporaryDir dir;
+    Store store(dir.filePath("state.db"));
+    QString error;
+    QVERIFY(store.open(&error));
+
+    QVERIFY(store.setCurrentDeck(QStringLiteral("Old")));
+    QVERIFY(store.setDeckLastStudied(QStringLiteral("Earlier"), 100));
+    QVERIFY(store.setDeckLastStudied(QStringLiteral("Old"), 200));
+    QVERIFY(store.setDeckLastStudied(QStringLiteral("Later"), 300));
+
+    QVERIFY(store.moveDeckSettings(QStringLiteral("Old"), QStringLiteral("New")));
+
+    QCOMPARE(store.currentDeck(), QStringLiteral("New"));
+    const QHash<QString, qint64> studied = store.deckLastStudied();
+    QCOMPARE(studied.size(), 3);
+    QVERIFY(!studied.contains(QStringLiteral("Old")));
+    // The unchanged stamp keeps New in Old's position in the last-studied order.
+    QCOMPARE(studied.value(QStringLiteral("New")), qint64(200));
+    QCOMPARE(studied.value(QStringLiteral("Earlier")), qint64(100));
+    QCOMPARE(studied.value(QStringLiteral("Later")), qint64(300));
+}
+
 void TestStore::migratesLegacyNewCardAllowanceKey() {
     QTemporaryDir dir;
     const QString path = dir.filePath("legacy.db");
