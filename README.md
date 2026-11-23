@@ -23,8 +23,8 @@ Deck content lives in plain text files under `~/.local/share/omacards/decks/`, s
 
 Enable the local pre-commit format check with `git config core.hooksPath .githooks`. It checks staged C++ files; CI checks the whole tree.
 
-Requirements: Qt 6 (base, declarative, wayland, SQL), qmake6, gcc/make.
-Optional: `unzip` for Anki `.apkg` imports, `tectonic`/`pdftocairo` or `latex`/`dvisvgm` for LaTeX math. (Without a TeX toolchain, math is rendered as Unicode.)
+Requirements: Qt 6 (base, declarative, svg, wayland, SQL), qmake6, gcc/make, `xdg-desktop-portal` and `desktop-file-utils`.
+Optional: `unzip` for Anki `.apkg` imports; `tectonic` or `pdflatex` with `pdftocairo` (from `poppler`), or `latex` with `dvisvgm` for LaTeX math. (Without a TeX toolchain, math is rendered as Unicode.)
 
 ## LaTeX math
 
@@ -180,7 +180,7 @@ tests/                   Qt Test suite
 pkgbuild/                Arch package, desktop entry, icon
 ```
 
-Theme watching follows Omacut and Monologue (MIT, David Heinemeier Hansson).
+Theme watching follows Omacut (MIT, David Heinemeier Hansson).
 
 ## Roadmap
 - Omarchy plugin support
