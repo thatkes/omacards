@@ -5,7 +5,7 @@ import QtQuick.Layouts
 
 // Main.qml map. Names, not line numbers, so this stays true after edits.
 // keyHandler - one Keys.onPressed for every screen
-// deck picker - Home trigger and Candidate deck popup, shared with Study later
+// deck picker - shared trigger and Candidate deck popup on Home and Study
 // study - study Panel with the Flashcard viewport, edge fades, end hint and reveal MouseArea
 // library - deckList and cardView ListViews
 // settings - ScrollView
@@ -58,6 +58,8 @@ ApplicationWindow {
     function closeDeckPicker() {
         if (homePicker && homePicker.open)
             homePicker.cancel()
+        if (studyPicker && studyPicker.open)
+            studyPicker.cancel()
     }
 
     function startStudy(mode) {
@@ -238,7 +240,7 @@ ApplicationWindow {
         return qsTr("Nothing is due in %1. Cram a deck or import new material.").arg(backend.currentDeck)
     }
 
-    // Both selectors read the same ordered summaries. Index lookup lives here
+    // Both pickers read the same ordered summaries. Index lookup lives here
     // so the Current deck, the delegate and the bracket keys cannot disagree.
     function deckIndex(name) {
         const entries = backend.deckSelector
@@ -254,28 +256,6 @@ ApplicationWindow {
             return qsTr("No deck")
         return qsTr("%1 · %2 cards · %3 due")
             .arg(entry.name).arg(entry.cards).arg(entry.due)
-    }
-
-    function selectDeckAt(control, index) {
-        const entry = backend.deckSelector[index]
-        if (!entry)
-            return
-        if (entry.name !== backend.currentDeck)
-            backend.selectDeck(entry.name)
-        // Picking an item breaks the currentIndex binding, so restore it after
-        // the selection has reordered the model with Current deck first.
-        control.currentIndex = Qt.binding(function() { return win.deckIndex(backend.currentDeck) })
-    }
-
-    function cycleDeck(delta) {
-        const entries = backend.deckSelector
-        if (!entries.length)
-            return
-        const current = win.deckIndex(backend.currentDeck)
-        const next = (current + delta + entries.length) % entries.length
-        const entry = entries[next]
-        if (entry && entry.name !== backend.currentDeck)
-            backend.selectDeck(entry.name)
     }
 
     component ActionButton: Rectangle {
@@ -336,37 +316,6 @@ ApplicationWindow {
         }
     }
 
-    component DeckSelector: ComboBox {
-        id: selector
-        property string selectorObjectName: ""
-        property string labelObjectName: ""
-        property int selectorWidth: 320
-        property int selectorFontSize: 13
-
-        objectName: selectorObjectName
-        Layout.preferredWidth: selectorWidth
-        model: backend.deckSelector
-        textRole: "name"
-        currentIndex: win.deckIndex(backend.currentDeck)
-        onActivated: function(index) { win.selectDeckAt(selector, index) }
-
-        contentItem: Label {
-            objectName: selector.labelObjectName
-            text: win.deckSummary(backend.deckSelector[selector.currentIndex])
-            color: win.text
-            font.pixelSize: selector.selectorFontSize
-            font.weight: selector.selectorFontSize >= 20 ? Font.DemiBold : Font.Normal
-            elide: Text.ElideRight
-            verticalAlignment: Text.AlignVCenter
-        }
-
-        delegate: ItemDelegate {
-            width: selector.width
-            text: win.deckSummary(modelData)
-            highlighted: selector.highlightedIndex === index
-        }
-    }
-
     // Candidate deck picker. The trigger and rows are app-styled Rectangles;
     // opening never switches decks, and keys outside the state machine are
     // swallowed so no screen shortcut fires behind the popup.
@@ -378,6 +327,16 @@ ApplicationWindow {
         property int pickerWidth: 320
         property bool open: false
         property string candidateName: backend.currentDeck
+        property int naturalWidth: pickerWidth
+        // The popup starts at the trigger width, grows for long names and
+        // stops at 65% of the window so it still fits at minimum size.
+        property int popupWidth: Math.min(naturalWidth, Math.floor(win.width * 0.65))
+
+        FontMetrics {
+            id: nameMetrics
+            font.pixelSize: 14
+            font.weight: Font.DemiBold
+        }
 
         objectName: picker.triggerObjectName
         width: pickerWidth
@@ -390,8 +349,18 @@ ApplicationWindow {
         border.width: 1
         border.color: listPopup.opened ? win.withAlpha(theme.accent, 0.6) : win.border
 
+        function measurePopupWidth() {
+            let widest = 0
+            const entries = backend.deckSelector
+            for (let i = 0; i < entries.length; ++i)
+                widest = Math.max(widest, nameMetrics.advanceWidth(entries[i].name))
+            // Row margins and spacing, the Current tag and the popup padding.
+            naturalWidth = Math.ceil(Math.max(pickerWidth, widest + 112))
+        }
+
         function openAtCurrent() {
             picker.candidateName = backend.currentDeck
+            picker.measurePopupWidth()
             picker.open = true
             listPopup.open()
             const at = win.deckIndex(picker.candidateName)
@@ -502,7 +471,7 @@ ApplicationWindow {
             z: 2
             x: 0
             y: picker.height + 4
-            width: pickerWidth
+            width: popupWidth
             height: 8 + deckList.height + 6 + footer.implicitHeight + 8
             padding: 0
             topPadding: 0
@@ -530,7 +499,7 @@ ApplicationWindow {
                 objectName: picker.popupObjectName + "List"
                 x: 8
                 y: 8
-                width: pickerWidth - 16
+                width: popupWidth - 16
                 height: 264 // five 48px rows plus four 6px gaps
                 clip: true
                 model: backend.deckSelector
@@ -629,7 +598,7 @@ ApplicationWindow {
                 objectName: picker.popupObjectName + "Footer"
                 x: 8
                 y: 8 + deckList.height + 6
-                width: pickerWidth - 16
+                width: popupWidth - 16
                 horizontalAlignment: Text.AlignHCenter
                 text: qsTr("[ / ] move · Enter switch · Esc cancel")
                 color: win.muted
@@ -715,9 +684,14 @@ ApplicationWindow {
 
     MouseArea {
         anchors.fill: parent
-        enabled: homePicker && homePicker.open
+        enabled: (homePicker && homePicker.open) || (studyPicker && studyPicker.open)
         z: 1
-        onClicked: homePicker.cancel()
+        onClicked: {
+            if (homePicker && homePicker.open)
+                homePicker.cancel()
+            if (studyPicker && studyPicker.open)
+                studyPicker.cancel()
+        }
     }
 
     Item {
@@ -740,6 +714,13 @@ ApplicationWindow {
             LayoutMirroring.childrenInherit: true
 
             Keys.onPressed: function(event) {
+                // An open Candidate picker owns every key, before any Study
+                // scroll, rating, shortcut or dialog branch can see it.
+                if (studyPicker && studyPicker.open) {
+                    studyPicker.handleKey(event)
+                    return
+                }
+
                 if (event.modifiers & Qt.ControlModifier) {
                     if (event.key === Qt.Key_Z) {
                         if (event.modifiers & Qt.ShiftModifier)
@@ -902,11 +883,8 @@ ApplicationWindow {
                         event.accepted = true
                         break
                     case Qt.Key_BracketLeft:
-                        win.cycleDeck(-1)
-                        event.accepted = true
-                        break
                     case Qt.Key_BracketRight:
-                        win.cycleDeck(1)
+                        studyPicker.openAtCurrent()
                         event.accepted = true
                         break
                     }
@@ -1118,11 +1096,12 @@ ApplicationWindow {
 
                                 ColumnLayout {
                                     spacing: 2
-                                    DeckSelector {
-                                        selectorObjectName: "studyDeckSelector"
-                                        labelObjectName: "studyDeckLabel"
-                                        selectorWidth: 260
-                                        selectorFontSize: 20
+                                    DeckPicker {
+                                        id: studyPicker
+                                        triggerObjectName: "studyDeckSelector"
+                                        summaryObjectName: "studyDeckLabel"
+                                        popupObjectName: "studyDeckPopup"
+                                        pickerWidth: 260
                                     }
                                     Label {
                                         objectName: "studyModeLabel"

@@ -717,12 +717,14 @@ void TestBackend::qmlDeckSelectorShowsCurrentDeckAndCounts() {
     QVERIFY(otherTag);
     QVERIFY(!otherTag->isVisible());
 
-    // The Study selector stays as it was in #33; #120 moves it to this picker.
+    // Study now shares this picker, with its own trigger and popup names.
     QVERIFY(QMetaObject::invokeMethod(view.window, "startStudy", Q_ARG(QVariant, QString("review"))));
     view.settle();
     QQuickItem *studySelector = view.item(QStringLiteral("studyDeckSelector"));
     QVERIFY(studySelector);
-    QCOMPARE(studySelector->property("currentText").toString(), QString("Alpha"));
+    QCOMPARE(QString::fromLatin1(studySelector->metaObject()->className()), selectorClass);
+    QVERIFY(!studySelector->property("open").toBool());
+    QCOMPARE(studySelector->property("candidateName").toString(), QString("Alpha"));
     QQuickItem *studySummary = view.item(QStringLiteral("studyDeckLabel"));
     QVERIFY(studySummary);
     const QString studyText = studySummary->property("text").toString();
@@ -840,6 +842,8 @@ void TestBackend::qmlDeckPickerClickCommitsAndLongNamesElide() {
     auto *window = qobject_cast<QQuickWindow *>(view.window);
     QVERIFY(window);
     QVERIFY(QTest::qWaitForWindowExposed(window));
+    // At the minimum window size the 65% cap forces long names to elide.
+    window->resize(window->minimumWidth(), window->minimumHeight());
     QQuickItem *picker = view.item(QStringLiteral("homeDeckSelector"));
     QVERIFY(picker);
     QVERIFY(QMetaObject::invokeMethod(picker, "openAtCurrent"));
@@ -911,10 +915,13 @@ void TestBackend::qmlStudySelectorSwitchesDeckFresh() {
     StudyViewFixture fixture;
     QVERIFY(fixture.initialize());
     QVERIFY(fixture.backend.createDeck("Alpha", &fixture.error));
-    QVERIFY(fixture.backend.createCard("Alpha", "Alpha question", "A", "basic", {}, &fixture.error));
+    QVERIFY(fixture.backend.createCard("Alpha", "Alpha question", manyCardLines(40), "basic", {}, &fixture.error));
+    QVERIFY(fixture.backend.createCard("Alpha", "Alpha second", "A2", "basic", {}, &fixture.error));
     QVERIFY(fixture.backend.createDeck("Beta", &fixture.error));
     QVERIFY(fixture.backend.createCard("Beta", "Beta question", "B", "basic", {}, &fixture.error));
+    QVERIFY(fixture.backend.createCard("Beta", "Beta second", "B2", "basic", {}, &fixture.error));
     fixture.selectDeck("Alpha");
+    fixture.view->settleFileWatcher();
 
     QVERIFY(fixture.loadWindow());
     auto *window = fixture.window();
@@ -922,23 +929,168 @@ void TestBackend::qmlStudySelectorSwitchesDeckFresh() {
     QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
     auto *selector = fixture.item(QStringLiteral("studyDeckSelector"));
     QVERIFY(selector);
-    QCOMPARE(selector->property("currentText").toString(), QString("Alpha"));
+    const QString selectorClass = QString::fromLatin1(selector->metaObject()->className());
+    QVERIFY2(!selectorClass.contains("ComboBox"), qPrintable(selectorClass));
+    QVERIFY(!selector->property("open").toBool());
+    QCOMPARE(selector->property("candidateName").toString(), QString("Alpha"));
+    auto *summary = fixture.item(QStringLiteral("studyDeckLabel"));
+    QVERIFY(summary);
+    QVERIFY2(summary->property("text").toString().contains("Alpha"), qPrintable(summary->property("text").toString()));
 
     QTest::keyClick(window, Qt::Key_Space);
     fixture.settle();
     QTest::keyClick(window, Qt::Key_2);
     fixture.settle();
     QCOMPARE(fixture.backend.reviewed(), 1);
-    QCOMPARE(fixture.backend.currentLeitnerBox(), 2);
+    QCOMPARE(fixture.backend.property("boxDistribution").toList(), QVariantList({1, 1, 0, 0, 0}));
 
+    // Reveal the long answer so a stray scroll key would move the viewport.
+    QTest::keyClick(window, Qt::Key_Space);
+    fixture.settle();
+    QVERIFY(fixture.backend.showingAnswer());
+    auto *scroll = fixture.item(QStringLiteral("flashcardViewport"));
+    QVERIFY(scroll);
+    auto *flickable = scroll->property("contentItem").value<QQuickItem *>();
+    QVERIFY(flickable);
+    flickable->setProperty("contentY", 48.0);
+    fixture.settle();
+
+    // Brackets open the shared picker; opening never switches decks.
     QTest::keyClick(window, Qt::Key_BracketRight);
     fixture.settle();
+    QVERIFY(selector->property("open").toBool());
+    QCOMPARE(selector->property("candidateName").toString(), QString("Alpha"));
+    QCOMPARE(fixture.backend.currentDeck(), QString("Alpha"));
+
+    // Every other Study key is inert while the picker owns the keyboard.
+    for (Qt::Key key : {Qt::Key_J, Qt::Key_K, Qt::Key_Down, Qt::Key_Up, Qt::Key_Space, Qt::Key_1, Qt::Key_2, Qt::Key_A,
+                        Qt::Key_G, Qt::Key_S, Qt::Key_B, Qt::Key_R, Qt::Key_C, Qt::Key_Question}) {
+        QTest::keyClick(window, key);
+        fixture.settle();
+    }
+    QVERIFY(selector->property("open").toBool());
+    QCOMPARE(selector->property("candidateName").toString(), QString("Alpha"));
+    QCOMPARE(fixture.backend.currentDeck(), QString("Alpha"));
+    QCOMPARE(fixture.backend.reviewed(), 1);
+    QCOMPARE(fixture.backend.property("boxDistribution").toList(), QVariantList({1, 1, 0, 0, 0}));
+    QVERIFY(fixture.backend.showingAnswer());
+    QCOMPARE(flickable->property("contentY").toReal(), qreal(48));
+    QCOMPARE(fixture.screenName(), QStringLiteral("study"));
+    QVERIFY(!fixture.view->window->property("statsVisible").toBool());
+    QVERIFY(!fixture.view->window->property("helpVisible").toBool());
+
+    // Moving the Candidate highlights a row without changing the sitting.
+    QTest::keyClick(window, Qt::Key_BracketRight);
+    fixture.settle();
+    QCOMPARE(selector->property("candidateName").toString(), QString("Beta"));
+    QVERIFY(pickerItem(*fixture.view, QStringLiteral("studyDeckPopupRow1"))->property("candidate").toBool());
+    QCOMPARE(fixture.backend.currentDeck(), QString("Alpha"));
+    QCOMPARE(fixture.backend.reviewed(), 1);
+
+    // Escape discards the Candidate and leaves the sitting untouched.
+    QTest::keyClick(window, Qt::Key_Escape);
+    fixture.settle();
+    QVERIFY(!selector->property("open").toBool());
+    QCOMPARE(selector->property("candidateName").toString(), QString("Alpha"));
+    QCOMPARE(fixture.backend.currentDeck(), QString("Alpha"));
+    QCOMPARE(fixture.backend.reviewed(), 1);
+
+    // Rate Again so the sitting is dirty, then commit a different deck.
+    QTest::keyClick(window, Qt::Key_1);
+    fixture.settle();
+    QCOMPARE(fixture.backend.reviewed(), 2);
+    QTest::keyClick(window, Qt::Key_BracketRight);
+    fixture.settle();
+    QTest::keyClick(window, Qt::Key_BracketRight);
+    fixture.settle();
+    QCOMPARE(selector->property("candidateName").toString(), QString("Beta"));
+    QTest::keyClick(window, Qt::Key_Return);
+    fixture.settle();
+    QVERIFY(!selector->property("open").toBool());
     QCOMPARE(fixture.backend.currentDeck(), QString("Beta"));
-    QCOMPARE(selector->property("currentText").toString(), QString("Beta"));
     QCOMPARE(fixture.backend.mode(), QString("cram"));
-    QVERIFY(fixture.backend.question().contains("Beta question"));
+    QVERIFY2(fixture.backend.question().contains("Beta"), qPrintable(fixture.backend.question()));
     QCOMPARE(fixture.backend.reviewed(), 0);
     QCOMPARE(fixture.backend.currentLeitnerBox(), 1);
+    QCOMPARE(fixture.backend.property("boxDistribution").toList(), QVariantList({2, 0, 0, 0, 0}));
+
+    const auto names = [](const QVariantList &entries) {
+        QStringList result;
+        for (const QVariant &entry : entries)
+            result << entry.toMap().value(QStringLiteral("name")).toString();
+        return result;
+    };
+    QCOMPARE(names(fixture.backend.deckSelector()).first(), QString("Beta"));
+
+    // Enter on the Current deck closes without a recency write or a rebuild.
+    QTest::keyClick(window, Qt::Key_Space);
+    fixture.settle();
+    QTest::keyClick(window, Qt::Key_2);
+    fixture.settle();
+    QCOMPARE(fixture.backend.reviewed(), 1);
+    const QStringList order = names(fixture.backend.deckSelector());
+    QTest::keyClick(window, Qt::Key_BracketRight);
+    fixture.settle();
+    QCOMPARE(selector->property("candidateName").toString(), QString("Beta"));
+    QTest::keyClick(window, Qt::Key_Return);
+    fixture.settle();
+    QVERIFY(!selector->property("open").toBool());
+    QCOMPARE(names(fixture.backend.deckSelector()), order);
+    QCOMPARE(fixture.backend.reviewed(), 1);
+    QCOMPARE(fixture.backend.mode(), QString("cram"));
+
+    // A long deck name grows the popup up to 65% of the window, then elides.
+    const int reviewedBeforeLong = fixture.backend.reviewed();
+    const QString longName =
+        QStringLiteral("Molecular Biology — Lecture 12 (Cell Signalling and membrane transport, with extended notes)");
+    QVERIFY(fixture.backend.createDeck(longName, &fixture.error));
+    QVERIFY(fixture.backend.createCard(longName, "Long question", "L", "basic", {}, &fixture.error));
+    fixture.view->settleFileWatcher();
+    QTest::keyClick(window, Qt::Key_BracketRight);
+    fixture.settle();
+    QObject *popup = window->findChild<QObject *>(QStringLiteral("studyDeckPopup"));
+    QVERIFY(popup);
+    QVERIFY(popup->property("visible").toBool());
+    const qreal popupWidth = popup->property("width").toReal();
+    const qreal cap = window->width() * 0.65;
+    QVERIFY2(popupWidth > 260.0, qPrintable(QString::number(popupWidth)));
+    QVERIFY2(popupWidth <= cap + 1.0, qPrintable(QString::number(popupWidth)));
+    auto *list = pickerItem(*fixture.view, QStringLiteral("studyDeckPopupList"));
+    QVERIFY(list);
+    QCOMPARE(list->property("width").toReal(), popupWidth - 16.0);
+    scrollPopupListTo(list, longName);
+    QQuickItem *longRow = nullptr;
+    for (int i = 0; i < 12; ++i) {
+        auto *row = pickerItem(*fixture.view, QStringLiteral("studyDeckPopupRow%1").arg(i));
+        if (row && row->property("deckName").toString() == longName) {
+            longRow = row;
+            break;
+        }
+    }
+    QVERIFY(longRow);
+    auto *name = pickerItem(*fixture.view, longRow->property("nameObjectName").toString());
+    QVERIFY(name);
+    QVERIFY(name->property("truncated").toBool());
+    QCOMPARE(longRow->property("fullName").toString(), longName);
+
+    // The capped popup stays inside the window and overlaps the flashcard,
+    // as in the approved Study prototype.
+    const QRectF popupRect(popup->property("x").toReal(), popup->property("y").toReal(), popupWidth,
+                           popup->property("height").toReal());
+    const QRectF scrollRect = scroll->mapRectToScene(scroll->boundingRect());
+    QVERIFY(popupRect.intersects(scrollRect));
+    QVERIFY(QRectF(0, 0, window->width(), window->height()).contains(popupRect));
+
+    // Click-outside discards a moved Candidate as it does on Home.
+    QTest::keyClick(window, Qt::Key_BracketRight);
+    fixture.settle();
+    QVERIFY(selector->property("candidateName").toString() != fixture.backend.currentDeck());
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, QPoint(5, 5));
+    fixture.settle();
+    QVERIFY(!selector->property("open").toBool());
+    QCOMPARE(selector->property("candidateName").toString(), longName);
+    QCOMPARE(fixture.backend.currentDeck(), longName);
+    QCOMPARE(fixture.backend.reviewed(), reviewedBeforeLong);
 }
 
 void TestBackend::qmlStudyFlashcardViewportClipsAndSizes() {
