@@ -315,6 +315,30 @@ void TestStudySession::setModeCramSwitchesAndResets() {
     QCOMPARE(fixture.session.cramNextInCards(), 2);
 }
 
+void TestStudySession::statsChangedSeesPresentedLeitnerBox() {
+    SessionFixture fixture;
+    QString error;
+    QVERIFY(prepareSession(fixture, "SignalOrder", {"Q1", "Q2"}, &error));
+    QVERIFY(error.isEmpty());
+    fixture.session.setMode("cram");
+    fixture.session.rebuild("SignalOrder");
+    QVERIFY(fixture.session.hasCard());
+    QCOMPARE(fixture.session.currentLeitnerBox(), 1);
+
+    QVector<int> boxesAtSignal;
+    QObject::connect(&fixture.session, &StudySession::statsChanged, &fixture.session,
+                     [&fixture, &boxesAtSignal] { boxesAtSignal << fixture.session.currentLeitnerBox(); });
+
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
+
+    // A subscriber must never see the just-rated Flashcard's box. Every
+    // statsChanged from rate() carries the next Flashcard's Leitner box.
+    QVERIFY(!boxesAtSignal.isEmpty());
+    QCOMPARE(fixture.session.currentLeitnerBox(), 1);
+    for (int box : boxesAtSignal)
+        QCOMPARE(box, fixture.session.currentLeitnerBox());
+}
+
 void TestStudySession::invalidRatingsAreNoOps() {
     SessionFixture fixture;
     QString error;

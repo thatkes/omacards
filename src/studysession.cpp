@@ -138,8 +138,9 @@ bool StudySession::rate(Rating rating, double desiredRetention) {
         answerCram(rating);
     else
         answerReview(rating, desiredRetention);
-    emit statsChanged();
     presentCard();
+    // Subscribers see the presented Flashcard's Leitner box, not the rated one.
+    emit statsChanged();
     return true;
 }
 
