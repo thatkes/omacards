@@ -92,8 +92,11 @@ check_file unknown_type_rejected 1 'unknown commit subject type' "$tmp/unknown-t
 write_message "$tmp/uppercase.txt" 'docs: Update README'
 check_file uppercase_description_rejected 1 'lowercase' "$tmp/uppercase.txt"
 
-write_message "$tmp/merge.txt" 'Merge ticket-42 into integration'
-check_file merge_subject_exempt 0 '' "$tmp/merge.txt"
+write_message "$tmp/merge.txt" 'chore: merge ticket-42 into integration'
+check_file merge_subject_typed_accepted 0 '' "$tmp/merge.txt"
+
+write_message "$tmp/untyped-merge.txt" 'Merge ticket-42 into integration'
+check_file untyped_merge_rejected 1 'type prefix' "$tmp/untyped-merge.txt"
 
 write_message "$tmp/long-subject.txt" \
     'fix: this commit subject is deliberately longer than fifty characters'
@@ -106,11 +109,13 @@ check_hook line_over_72_rejected 1 'line over 72 characters' "$tmp/long-line.txt
 
 check_stdin stdin_valid_and_merge_accepted 0 '' \
     'docs: update README
-Merge ticket-42 into integration'
+chore: merge ticket-42 into integration'
 check_stdin stdin_no_type_rejected 1 'stdin line 3' \
     'docs: update README
-Merge ticket-42 into integration
+chore: merge ticket-42 into integration
 Refresh the plan'
+check_stdin stdin_untyped_merge_rejected 1 'type prefix' \
+    'Merge ticket-42 into integration'
 check_stdin stdin_unknown_type_rejected 1 'unknown commit subject type' \
     'doctype: update README'
 check_stdin stdin_over_50_rejected 1 'over 50 characters' \
