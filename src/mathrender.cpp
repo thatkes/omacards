@@ -420,13 +420,14 @@ void MathRenderer::enqueueExpression(const RenderRequest &request) {
     constexpr int kMaxQueued = 12;
     if (QFileInfo::exists(mathSvgPath(request.expression)))
         return;
-    if (m_activeKeys.contains(request.key)) {
+    auto active = m_activeRenders.find(request.key);
+    if (active != m_activeRenders.end()) {
         // The slot is taken. Remember the first request for this generation so
         // an invalidated result can be rebuilt with the ink now on screen. A
         // second caller in the same generation must not steal the style.
-        if (m_activeRequestGenerations.value(request.key) != m_generation) {
-            m_activeRequests.insert(request.key, request);
-            m_activeRequestGenerations.insert(request.key, m_generation);
+        if (active->generation != m_generation) {
+            active->request = request;
+            active->generation = m_generation;
         }
         return;
     }
@@ -440,29 +441,26 @@ void MathRenderer::enqueueExpression(const RenderRequest &request) {
 }
 
 void MathRenderer::refreshActiveRequestInk(const QString &key, const QString &ink, double scale) {
-    if (!m_activeKeys.contains(key) || !m_activeRequests.contains(key))
+    auto active = m_activeRenders.find(key);
+    if (active == m_activeRenders.end())
         return;
-    if (m_activeRequestGenerations.value(key) == m_generation)
+    if (active->generation == m_generation)
         return;
-    RenderRequest request = m_activeRequests.value(key);
-    request.ink = ink;
-    request.scale = scale;
-    m_activeRequests.insert(key, request);
-    m_activeRequestGenerations.insert(key, m_generation);
+    active->request.ink = ink;
+    active->request.scale = scale;
+    active->generation = m_generation;
 }
 
 void MathRenderer::startNextRender() {
     constexpr int kMaxActive = 2;
-    while (m_activeKeys.size() < kMaxActive && !m_queue.isEmpty()) {
+    while (m_activeRenders.size() < kMaxActive && !m_queue.isEmpty()) {
         const RenderRequest request = m_queue.dequeue();
         m_queuedKeys.remove(request.key);
         if (QFileInfo::exists(mathSvgPath(request.expression)))
             continue;
-        if (m_activeKeys.contains(request.key))
+        if (m_activeRenders.contains(request.key))
             continue;
-        m_activeKeys.insert(request.key);
-        m_activeRequests.insert(request.key, request);
-        m_activeRequestGenerations.insert(request.key, m_generation);
+        m_activeRenders.insert(request.key, ActiveRender{request, m_generation});
         m_pool.start(new MathRenderRunnable(this, request, m_generation));
     }
 }
@@ -472,10 +470,13 @@ QString MathRenderer::renderRequest(const RenderRequest &request) {
 }
 
 void MathRenderer::finishRender(const QString &key, const QString &html, quint64 generation) {
-    if (!m_activeKeys.remove(key))
+    auto active = m_activeRenders.find(key);
+    if (active == m_activeRenders.end())
         return;
-    const RenderRequest request = m_activeRequests.take(key);
-    const quint64 requestGeneration = m_activeRequestGenerations.take(key);
+    const ActiveRender current = active.value();
+    m_activeRenders.erase(active);
+    const RenderRequest request = current.request;
+    const quint64 requestGeneration = current.generation;
     QString result;
     if (requestGeneration == m_generation) {
         result = html;
