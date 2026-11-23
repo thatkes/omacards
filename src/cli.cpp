@@ -582,9 +582,12 @@ int run(const QStringList &arguments) {
         }
 
         const DeckIssueReport report = deckIssueReport(backend.decksDirectory(), targetPath);
+        const bool strictPassed = !options.strict || report.entries.isEmpty();
 
         QJsonObject object;
         object.insert("ok", report.errors == 0);
+        if (options.strict)
+            object.insert("strictPassed", strictPassed);
         object.insert("version", QString("0.1.0"));
         if (!options.deck.isEmpty())
             object.insert("deck", options.deck);
@@ -619,9 +622,7 @@ int run(const QStringList &arguments) {
             human += warningLines.isEmpty() ? QObject::tr("No math warnings") : warningLines.join('\n');
         }
         write(object, json, human);
-        if (options.strict && !report.entries.isEmpty())
-            return 1;
-        return 0;
+        return strictPassed ? 0 : 1;
     }
 
     if (options.command == "preview") {
