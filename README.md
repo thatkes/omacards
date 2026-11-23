@@ -178,7 +178,6 @@ Theme watching follows Omacut and Monologue (MIT, David Heinemeier Hansson).
 
 ## Roadmap
 - Omarchy plugin support
-- Install script
 - Tectonic warming script
 - Fix tray entry
 - Update README.md pictures
