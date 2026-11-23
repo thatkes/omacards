@@ -82,7 +82,7 @@ This is a one-time, global download of Tectonic's TeX bundle (stored in `~/.cach
 
 Closing the window quits the app. While omacards is open, the tray tooltip shows the number of Due cards; clicking it opens a Review Study session.
 
-`B` opens the card browser. It searches questions, answers and tags, and each card can be edited or deleted there. The selected row is highlighted; `J`/`K` (or the arrow keys) move it, `Enter` edits it and `Delete` removes it. Clicking a row selects it, and `/` jumps to the search field. Card and deck edits are undoable with `Ctrl+Z`; `Ctrl+Shift+Z` (or `Ctrl+Y`) redoes them. The same history covers cards added from the GUI, CLI imports and deck deletions. Ratings are intentionally not undoable, so a lapse cannot be erased by accident.
+`B` opens the card browser. It searches questions, answers and tags, and each card can be edited or deleted there. The selected row is highlighted; `J`/`K` (or the arrow keys) move it, `Enter` edits it and `Delete` removes it. Clicking a row selects it, and `/` jumps to the search field. Card and deck edits are undoable with `Ctrl+Z`; `Ctrl+Shift+Z` (or `Ctrl+Y`) redoes them. The same history covers GUI edits, GUI imports and deck deletions. CLI writes run in separate processes and are not part of the GUI undo history. Ratings are intentionally not undoable, so a lapse cannot be erased by accident.
 
 ## Settings
 
