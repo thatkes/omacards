@@ -82,11 +82,16 @@ private:
         QString expression;
         QString ink;
         double scale = 1.0;
+        // Size of the placeholder box already shown for this expression. The
+        // finished <img> uses it so swapping in the SVG cannot resize the card.
+        QSize reservedSize;
     };
 
     void enqueueExpression(const RenderRequest &request);
     void startNextRender();
     QString renderRequest(const RenderRequest &request);
+    QString renderExpression(const QString &expression, const QString &ink, double scale,
+                             const QSize &reservedSize) const;
 
     QString m_cache;
     mutable QMutex m_detectMutex;

@@ -127,11 +127,14 @@ QStringList expressionsIn(const QString &text) {
 
 QSize svgPixelSize(const QString &path);
 
-// A cached SVG already knows its logical size, so use it for the display box.
-// No TeX run is available while the file is still missing; there we measure the
-// Unicode glyphs the fallback uses in the math font at the requested scale.
-// Rounding to whole even pixels keeps the box symmetric and gives the fake
-// toolchain an exact logical size to publish in its SVG.
+// The reserved box is the one size a formula occupies from placeholder through
+// finished image. A cached SVG already knows its logical size, so scaling that
+// by `scale` keeps its aspect ratio. While the file is missing, TeX has not run
+// yet: the box comes from the bounds of the Unicode fallback text in Noto Sans
+// Math at 10px * scale, plus a small margin, rounded to even pixels. If the
+// finished SVG reports a different logical size, the reserved box still wins;
+// the SVG is drawn into that box instead of resizing the <img> and moving the
+// surrounding text.
 QSize reservedMathSize(const QString &expression, double scale, const QString &svgPath = {}) {
     if (!svgPath.isEmpty()) {
         const QSize logical = svgPixelSize(svgPath);
@@ -172,11 +175,17 @@ QString colorizedSvgUri(const QString &path, const QString &ink) {
     return QStringLiteral("data:image/svg+xml;base64,") + QString::fromLatin1(svg.toUtf8().toBase64());
 }
 
-QString mathImageHtml(const QString &path, const QString &expression, const QString &ink, double scale) {
+QString mathImageHtml(const QString &path, const QString &expression, const QString &ink, double scale,
+                      const QSize &reservedSize = {}) {
     const QString source = colorizedSvgUri(path, ink);
     if (source.isEmpty())
         return {};
-    const QSize pixels = reservedMathSize(expression, scale, path);
+    // A queued request carries the box its placeholder reserved. Keep that box
+    // even when the new SVG's logical size disagrees: Qt draws the SVG into the
+    // element using its viewBox, while the surrounding layout keeps the box.
+    // Renders with no placeholder (cached display, preview, warming) size from
+    // the SVG, which preserves its aspect ratio.
+    const QSize pixels = reservedSize.isEmpty() ? reservedMathSize(expression, scale, path) : reservedSize;
     return QStringLiteral("<img src='%1' alt='%2' width='%3' height='%4' align='middle' "
                           "style='vertical-align: middle;'>")
         .arg(source, expression.toHtmlEscaped())
@@ -234,8 +243,9 @@ public:
         if (!owner)
             return;
         const QString path = owner->renderRequest(m_request);
-        const QString html =
-            path.isEmpty() ? QString() : mathImageHtml(path, m_request.expression, m_request.ink, m_request.scale);
+        const QString html = path.isEmpty() ? QString()
+                                            : mathImageHtml(path, m_request.expression, m_request.ink, m_request.scale,
+                                                            m_request.reservedSize);
         QMetaObject::invokeMethod(
             owner,
             [owner, key = m_request.key, html, generation = m_generation] {
@@ -371,7 +381,7 @@ QString MathRenderer::renderWithPlaceholders(const QString &text, const QString 
                 return renderExpression(expression, ink, scale);
             const QString key = QFileInfo(path).completeBaseName();
             const QSize size = reservedMathSize(expression, scale, path);
-            enqueueExpression({key, expression, ink, scale});
+            enqueueExpression({key, expression, ink, scale, size});
             return mathPlaceholderTag(key, size);
         },
         true);
@@ -386,7 +396,8 @@ void MathRenderer::prefetch(const QString &text, const QString &ink, double scal
         const QString path = mathSvgPath(expression);
         if (QFileInfo::exists(path))
             continue;
-        enqueueExpression({QFileInfo(path).completeBaseName(), expression, ink, scale});
+        enqueueExpression(
+            {QFileInfo(path).completeBaseName(), expression, ink, scale, reservedMathSize(expression, scale)});
     }
 }
 
@@ -453,7 +464,7 @@ void MathRenderer::finishRender(const QString &key, const QString &html, quint64
         // cached, so renderExpression only rebuilds the data URI; no toolchain
         // runs on a theme switch.
         result = QFileInfo::exists(mathSvgPath(request.expression))
-                     ? renderExpression(request.expression, request.ink, request.scale)
+                     ? renderExpression(request.expression, request.ink, request.scale, request.reservedSize)
                      : QString();
     }
     if (!result.isEmpty())
@@ -462,9 +473,14 @@ void MathRenderer::finishRender(const QString &key, const QString &html, quint64
 }
 
 QString MathRenderer::renderExpression(const QString &expression, const QString &ink, double scale) const {
+    return renderExpression(expression, ink, scale, {});
+}
+
+QString MathRenderer::renderExpression(const QString &expression, const QString &ink, double scale,
+                                       const QSize &reservedSize) const {
     const QString image = renderLatex(expression);
     if (!image.isEmpty()) {
-        const QString html = mathImageHtml(image, expression, ink, scale);
+        const QString html = mathImageHtml(image, expression, ink, scale, reservedSize);
         if (!html.isEmpty())
             return html;
     }
