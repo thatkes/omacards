@@ -35,9 +35,30 @@ command -v omacards
   invoke `<checkout>/build/omacards` directly.
 - `OMACARDS_BIN` is only a convention for your own scripts; no repo script
   reads it. For scripts: `BIN="${OMACARDS_BIN:-omacards}"; "$BIN" check --json`.
-- Use `./bin/with-temp-env omacards <command>` for isolated probes: it points
-  decks, state and cache at a temporary directory removed on exit.
+- Use `./bin/with-temp-env omacards <command>` for isolated probes in a
+  checkout. It points decks, state and cache at a temporary directory removed
+  on exit. Without a checkout, use the recipe in **Isolated probes** below.
 - `bin/link` also registers the desktop launcher entry; see **Development**.
+
+### Isolated probes (no checkout needed)
+
+Set all three paths before probing; no checkout, build or helper script is
+involved:
+
+```sh
+probe="$(mktemp -d)"
+trap 'rm -rf "$probe"' EXIT
+export OMACARDS_DECKS_DIR="$probe/decks"
+export OMACARDS_STATE_DB="$probe/state.db"
+export XDG_CACHE_HOME="$probe/cache"
+omacards decks --json
+```
+
+This recipe leaves `$OMACARDS_DECKS_DIR` absent. Because the directory does
+not exist yet, the first run creates it and seeds a `Welcome` Deck with two
+Cards, so probes start from a known non-empty state. If the directory already
+exists, seeding is skipped and the Deck list is empty; the checkout helper
+`./bin/with-temp-env` takes that case because it pre-creates the directory.
 
 ## Command list
 
@@ -147,9 +168,10 @@ After editing a file by hand, run the **validation loop** below.
 
 No renderer is bundled, so math falls back to Unicode unless a toolchain is
 detected on `PATH`: `tectonic` + `pdftocairo`, `latex` + `dvisvgm`, or
-`pdflatex` + `pdftocairo`. This checkout has `tectonic` and `pdftocairo`, so
-`omacards check --json` reports `"math":"LaTeX (SVG)"`. Use notation that
-survives the fallback:
+`pdflatex` + `pdftocairo`. Run `omacards check --json` on the machine you are
+probing to see whether it reports `"math":"LaTeX (SVG)"` or the Unicode
+fallback; do not assume any particular toolchain is installed. Use notation
+that survives the fallback:
 
 - Fractions as `(a)/(b)` and powers as `x^(2n+1)` — these render legibly.
 - Write one backslash in shell arguments and deck files: `\(...\)`, not
