@@ -10,6 +10,7 @@ private slots:
     void setModeUppercaseCramNormalizesToReview();
     void setModeCanonicalInputIsNoOp();
     void setModeCramSwitchesAndResets();
+    void statsChangedSeesPresentedLeitnerBox();
     void invalidRatingsAreNoOps();
     void reviewPassesTypedRatingToRecording();
     void reviewFailuresKeepTranslatedText();
