@@ -114,6 +114,42 @@ type: cloze
 
 Questions and answers may span multiple lines: indent every continuation line with exactly two spaces. `omacards check` reports lines with more indentation as Deck issues.
 
+### Worked multi-line answers
+
+For a one-off card, use ANSI-C single quotes so `\n` becomes a real newline. Plain single quotes leave `\n` as a literal backslash and n. Double LaTeX backslashes inside `$'...'` (`\\(` for `\(`, `\\frac` for `\frac`), or bash reads `\f` and `\t` as its own escapes:
+
+```sh
+omacards add-card --deck Calculus \
+  -q 'Write the geometric series.' \
+  -a $'For |x| < 1:\n\\(\\sum_{n=0}^{\\infty} x^n = \\frac{1}{1-x}\\)' \
+  --json
+```
+
+For `add-cards`, write the line break as the JSON escape `\n` inside the Answer string and keep LaTeX backslashes doubled for JSON. In `cards.json`:
+
+```json
+{
+  "cards": [
+    {
+      "question": "Write the geometric series.",
+      "answer": "For |x| < 1:\n\\(\\sum_{n=0}^{\\infty} x^n = \\frac{1}{1-x}\\)"
+    }
+  ]
+}
+```
+
+```sh
+omacards add-cards --deck Calculus --input cards.json --json
+```
+
+The same JSON works on stdin. A quoted heredoc leaves the backslashes for the JSON parser:
+
+```sh
+omacards add-cards --deck Calculus --input - --json <<'JSON'
+{"cards":[{"question":"Write the geometric series.","answer":"For |x| < 1:\n\\(\\sum_{n=0}^{\\infty} x^n = \\frac{1}{1-x}\\)"}]}
+JSON
+```
+
 A card's id is a hash of its deck, question and answer, so editing a card resets its Scheduling state but keeps the file readable. An explicit `id:` line pins the identity across edits.
 
 Anki `.apkg` imports preserve HTML entities, tags, and cloze note types (`{{c1::answer}}`; `::hint` is dropped). Referenced media is extracted next to the deck files under `media/<sanitized-deck>/` and image sources are rewritten to local `file://` URLs, so images still render in the study view. CSV files use commas between columns and TSV files use tabs. Columns hold the question, answer and an optional comma-separated tags list. An optional header row is skipped when its first cell contains `question` or the Anki alias `front`. Both import as basic cards.
