@@ -11,4 +11,7 @@ cd "$ROOT"
 ./tests/test_check_test_summary.sh
 ./tests/test_bin_test_log.sh
 ./tests/test_check_sync_worktree_local_docs.sh
+./tests/test_check_ledger_open_ids.sh
+./tests/test_wave_timing.sh
+./tests/test_merge_backstop.sh
 clang-format --dry-run --Werror src/*.h src/*.cpp tests/*.h tests/*.cpp

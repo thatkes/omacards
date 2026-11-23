@@ -1,0 +1,81 @@
+#!/bin/sh
+set -eu
+
+# Merge one ticket branch into the integration checkout, run the three
+# backstop checks, and remove the ticket worktree. Failures leave the worktree
+# in place for the chief; pushes and tracker edits stay out of this routine.
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+
+usage() {
+    printf 'Usage: merge-backstop ticket-N\n' >&2
+}
+
+if [ "$#" -ne 1 ]; then
+    usage
+    exit 2
+fi
+ticket=$1
+if ! printf '%s\n' "$ticket" | grep -Eq '^ticket-[0-9]+$'; then
+    usage
+    exit 2
+fi
+n=${ticket#ticket-}
+
+toplevel=$(git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null) || {
+    printf 'ERROR %s is not in a git checkout\n' "$ROOT" >&2
+    exit 1
+}
+if [ "$toplevel" != "$ROOT" ]; then
+    printf 'ERROR %s is not the integration checkout root (%s)\n' \
+        "$ROOT" "$toplevel" >&2
+    exit 1
+fi
+if [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ]; then
+    printf 'ERROR integration checkout has tracked changes\n' >&2
+    exit 1
+fi
+
+wt_dir=$(git -C "$ROOT" worktree list --porcelain |
+    awk -v want="refs/heads/$ticket" '
+        /^worktree / { dir = substr($0, 10) }
+        $0 == "branch " want { print dir; found = 1; exit }
+        END { if (!found) exit 1 }
+    ') || {
+    printf 'ERROR no worktree on %s\n' "$ticket" >&2
+    exit 1
+}
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+
+set +e
+git -C "$ROOT" merge --no-ff -m "chore: merge $ticket into integration" \
+    "$ticket" > "$tmp/merge.log" 2>&1
+merge_status=$?
+set -e
+if [ "$merge_status" -ne 0 ]; then
+    printf 'CONFLICT %s\n' "$ticket"
+    cat "$tmp/merge.log" >&2
+    exit 1
+fi
+
+mkdir -p "$ROOT/build"
+for check in lint build test; do
+    log="build/merge-$n-$check.log"
+    set +e
+    (cd "$ROOT" && "./bin/$check") > "$ROOT/$log" 2>&1
+    check_status=$?
+    set -e
+    if [ "$check_status" -ne 0 ]; then
+        printf 'RED %s %s\n' "$check" "$log"
+        exit 1
+    fi
+    printf 'OK %s %s\n' "$check" "$log"
+done
+
+sha=$(git -C "$ROOT" rev-parse HEAD)
+if ! git -C "$ROOT" worktree remove "$wt_dir"; then
+    printf 'ERROR could not remove worktree %s\n' "$wt_dir" >&2
+    exit 1
+fi
+printf 'MERGED %s %s WORKTREE_REMOVED\n' "$ticket" "$sha"
