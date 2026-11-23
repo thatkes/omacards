@@ -495,7 +495,10 @@ QString usage() {
                           "  omacards stats [--json]\n"
                           "  omacards config [--new-card-allowance N] [--day-start-hour H]\n"
                           "                       [--retention 0.70-0.99] [--json]\n"
-                          "  omacards skill install [--json]\n");
+                          "  omacards skill install [--json]\n"
+                          "\n"
+                          "Agent integration: run 'omacards skill install' to install the skill to %1.\n")
+        .arg(skillTargetPath());
 }
 
 struct CommandHelpText {
@@ -654,6 +657,15 @@ int run(const QStringList &arguments) {
     }
     if (options.command.isEmpty() || isHelpCommand(options.command)) {
         fprintf(stdout, "%s", qPrintable(usage()));
+        // `help` is the one text-mode entry point that nudges an agent towards
+        // the skill. Help flags and JSON probes stay silent so they keep their
+        // existing clean contracts.
+        if (options.command == QLatin1String("help") && !options.json && !readSkillStatus().installed) {
+            const QString nudge =
+                QObject::tr("Agent skill not installed; run 'omacards skill install' to install it to %1")
+                    .arg(skillTargetPath());
+            fprintf(stderr, "%s\n", qPrintable(nudge));
+        }
         return 0;
     }
     if (!isHeadlessCommand(options.command))

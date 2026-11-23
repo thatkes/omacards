@@ -207,6 +207,66 @@ void TestCli::helpIsHeadless() {
     QCOMPARE(topLevelWithFlag, topLevel);
 }
 
+void TestCli::missingSkillNudge() {
+    if (!QFileInfo::exists(appBinary()))
+        QSKIP("Build the app before running CLI integration tests.");
+
+    QTemporaryDir homeDir;
+    QVERIFY(homeDir.isValid());
+    HomeGuard home(homeDir.path());
+    const QString skillPath = homeDir.filePath(QStringLiteral(".agents/skills/omacards/SKILL.md"));
+    QVERIFY2(!QFileInfo::exists(skillPath), "The isolated HOME must start without an installed skill");
+
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+
+    // `omacards help` advertises the skill and nudges on stderr while missing.
+    int code = -1;
+    QByteArray errors;
+    const QByteArray help = runCliRaw({"help"}, decks, database, &code, &errors);
+    QCOMPARE(code, 0);
+    const QString helpText = QString::fromUtf8(help);
+    QVERIFY2(helpText.contains(QStringLiteral("Agent integration")), qPrintable(helpText));
+    QVERIFY2(helpText.contains(QStringLiteral("omacards skill install")), qPrintable(helpText));
+    QVERIFY2(helpText.contains(skillPath), qPrintable(helpText));
+
+    const QString nudge = QString::fromUtf8(errors).trimmed();
+    QVERIFY2(!nudge.isEmpty(), "A missing skill must produce a stderr nudge");
+    QVERIFY2(!nudge.contains(QLatin1Char('\n')), qPrintable(nudge));
+    QVERIFY2(nudge.contains(QStringLiteral("omacards skill install")), qPrintable(nudge));
+    QVERIFY2(nudge.contains(skillPath), qPrintable(nudge));
+
+    // Help flags and JSON invocations stay clean: neither ever nudges.
+    for (const QString &flag : {QStringLiteral("--help"), QStringLiteral("-h")}) {
+        int flagCode = -1;
+        QByteArray flagErrors;
+        runCliRaw({flag}, decks, database, &flagCode, &flagErrors);
+        QCOMPARE(flagCode, 0);
+        QVERIFY2(flagErrors.isEmpty(), qPrintable(flagErrors));
+    }
+    int jsonCode = -1;
+    QByteArray jsonErrors;
+    runCliRaw({"help", "--json"}, decks, database, &jsonCode, &jsonErrors);
+    QCOMPARE(jsonCode, 0);
+    QVERIFY2(jsonErrors.isEmpty(), qPrintable(jsonErrors));
+
+    // Once installed, the same help invocation stays quiet but keeps the pointer.
+    int installCode = -1;
+    QByteArray installErrors;
+    const QJsonObject installed = runCli({"skill", "install", "--json"}, decks, database, &installCode, &installErrors);
+    QCOMPARE(installCode, 0);
+    QVERIFY(installed.value(QStringLiteral("ok")).toBool());
+    QVERIFY(QFileInfo::exists(skillPath));
+
+    int afterCode = -1;
+    QByteArray afterErrors;
+    const QByteArray helpAfter = runCliRaw({"help"}, decks, database, &afterCode, &afterErrors);
+    QCOMPARE(afterCode, 0);
+    QCOMPARE(QString::fromUtf8(helpAfter), helpText);
+    QVERIFY2(afterErrors.isEmpty(), qPrintable(afterErrors));
+}
+
 void TestCli::addCardsCreatesDeckBulk() {
     QTemporaryDir dir;
     EnvGuard env(dir.filePath("decks"), dir.filePath("state.db"));
