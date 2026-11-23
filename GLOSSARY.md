@@ -210,6 +210,10 @@ _Avoid_: advisory, soft issue
 A command that runs without the GUI and reports its outcome through exit status, with an optional JSON result.
 _Avoid_: CLI command, agent command
 
+**Command path**:
+The command and any subcommand that identify what a Headless command does, without flags or arguments.
+_Avoid_: command line, invocation
+
 ### Workflow
 
 **GitHub Issue**:
