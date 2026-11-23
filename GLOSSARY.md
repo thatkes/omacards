@@ -11,16 +11,40 @@ A named collection of cards studied together.
 _Avoid_: collection, folder, set
 
 **Current deck**:
-The Deck chosen for study in the current and next Study session. It is moved to the top of the last-studied order when chosen.
+The Deck chosen for study in the current and next Study session. It is moved ahead of the Previous deck when chosen.
 _Avoid_: active deck, selected deck, last studied deck
+
+**Previous deck**:
+The Deck studied most recently before the Current deck; it appears next in the Deck selector.
+_Avoid_: prior deck, earlier deck
 
 **Candidate deck**:
 A Deck under consideration in the open Deck selector before it is committed as the Current deck.
 _Avoid_: selected deck, highlighted deck, pending deck
 
+**Deck selector**:
+The control that orders Decks and commits a Candidate deck as the Current deck.
+_Avoid_: deck picker, picker
+
+**Deck file**:
+The plain-text file in the decks directory that holds a Deck's description and Cards.
+_Avoid_: deck source, deck text file
+
+**Deck description**:
+The optional prose stored in a Deck file's `# Description:` line and shown with the Deck.
+_Avoid_: deck metadata, description text
+
 **Card**:
 A single study item with a question and an answer.
 _Avoid_: note, item
+
+**Card type**:
+The classification of a Card as Basic or Cloze, stored with the card and deciding how its Question and Answer are shown.
+_Avoid_: card kind, kind
+
+**Card id**:
+The identifier of a Card, generated from its Deck, Question and Answer unless an `id:` line in the Deck file pins it.
+_Avoid_: card key, card hash
 
 **Question**:
 The text shown when a card is presented.
@@ -41,6 +65,10 @@ _Avoid_: standard card, Q&A card
 **Cloze card**:
 A card whose answer is a passage hidden inside the question.
 _Avoid_: fill-in-the-blank card
+
+**Import**:
+The act of bringing Cards from an Anki package, CSV/TSV file or JSON file into a Deck.
+_Avoid_: ingest, load cards
 
 **Math expression**:
 A LaTeX fragment inside a Question or Answer that the app displays as an image rather than as text.
@@ -64,9 +92,17 @@ _Avoid_: scheduled study, FSRS mode
 The study mode that reorders cards within one session and keeps no scheduling state.
 _Avoid_: drill, sprint
 
+**Study screen**:
+The screen that presents the current Flashcard and its Study footer.
+_Avoid_: study view, study pane
+
 **Study session**:
 One continuous stretch of study with a queue of cards, a currently shown card, and ratings.
 _Avoid_: sitting, run
+
+**Study queue**:
+The Cards still to be presented in a Study session, in the order the session will show them.
+_Avoid_: card queue, pending cards
 
 **Flashcard**:
 A Card presented in the Study screen.
@@ -104,13 +140,21 @@ _Avoid_: fail, retry
 A card rated Again that returns later in the same study session.
 _Avoid_: retry, requeued card
 
+**Pending-repeat delay**:
+The time a Card rated Again waits before it can be shown again in the same Study session.
+_Avoid_: again delay, retry delay, wait time
+
 **Good**:
 A rating that means recall succeeded.
 _Avoid_: pass, correct, easy
 
 **Leitner box**:
-A stage in Cram that decides how many other cards appear before a card returns.
+A stage in Cram that orders when a Card returns relative to the other cards in the session.
 _Avoid_: box, level, bucket
+
+**Cram return interval**:
+The number of other cards shown before a Card returns in a Cram session.
+_Avoid_: cards until repeat, next-in count
 
 **Box distribution**:
 The count of Cards in each Leitner box during a Cram session.
@@ -120,9 +164,25 @@ _Avoid_: box histogram, box breakdown, level counts
 The view in the Study footer that shows the Box distribution for the current Cram session.
 _Avoid_: box histogram view, Leitner chart
 
+**Predicted recall**:
+The estimated probability of recall shown for the Flashcard during Review.
+_Avoid_: retrievability, recall chance
+
 **Study footer**:
 The fixed bottom area of the Study screen that holds the Rating controls and session status.
 _Avoid_: status bar, bottom bar
+
+**Study statistics**:
+The counts and rates describing Ratings in a Study session or Study day, shown in the Study footer and in Headless command output.
+_Avoid_: stats summary, review summary, stats
+
+**Accuracy**:
+The percentage of Ratings in a stats scope that were Good, rounded to an integer and zero when there are no Ratings.
+_Avoid_: percent correct, Good rate
+
+**Stats panel**:
+The overlay opened with `S` that shows Study statistics for the current Study day and Study session.
+_Avoid_: stats view, stats overlay, stats screen
 
 **Review history**:
 The record of ratings given to cards over time.
@@ -161,15 +221,15 @@ The local day used for daily limits and due dates, beginning at the configured h
 _Avoid_: calendar day, today
 
 **New card**:
-A card that has never been rated.
+A card whose current content has never been rated.
 _Avoid_: fresh card, unseen card
 
 **Due card**:
-A card whose scheduled return falls on the current study day.
-_Avoid_: ready card, available card, due now
+A Card that will be shown in the current Study session: one whose scheduled return falls on or before the current Study day, a New card within the New-card allowance, or a Pending repeat.
+_Avoid_: due now, ready card
 
 **Available card**:
-A card that can be shown next: a due card, a new card within the daily allowance, or a pending repeat whose delay has elapsed.
+A Due card that can be shown right now.
 _Avoid_: due now, ready card
 
 **New-card allowance**:
@@ -208,6 +268,10 @@ _Avoid_: failure, hard issue
 A Deck issue that does not block a write.
 _Avoid_: advisory, soft issue
 
+**Math warning**:
+A Warning about a Math expression in a Card, reported by `check`.
+_Avoid_: math issue, math error
+
 ### Interface
 
 **Headless command**:
@@ -223,3 +287,7 @@ _Avoid_: command line, invocation
 **GitHub Issue**:
 A ticket in the project's GitHub issue tracker; a bare "issue" in project conversation means this, not a Deck issue.
 _Avoid_: ticket, tracker item
+
+**Deck edit history**:
+The record of whole-file Deck edits that lets a learner undo or redo a change.
+_Avoid_: file history, undo stack
