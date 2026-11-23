@@ -5,6 +5,7 @@ import QtQuick.Layouts
 
 // Main.qml map. Names, not line numbers, so this stays true after edits.
 // keyHandler - one Keys.onPressed for every screen
+// deck picker - Home trigger and Candidate deck popup, shared with Study later
 // study - study Panel with the Flashcard viewport, edge fades, end hint and reveal MouseArea
 // library - deckList and cardView ListViews
 // settings - ScrollView
@@ -54,7 +55,13 @@ ApplicationWindow {
         return false
     }
 
+    function closeDeckPicker() {
+        if (homePicker && homePicker.open)
+            homePicker.cancel()
+    }
+
     function startStudy(mode) {
+        closeDeckPicker()
         backend.setMode(mode)
         backend.refresh()
         screen = "study"
@@ -62,6 +69,7 @@ ApplicationWindow {
     }
 
     function goHome() {
+        closeDeckPicker()
         screen = "home"
         helpVisible = false
         statsVisible = false
@@ -69,6 +77,7 @@ ApplicationWindow {
     }
 
     function openLibrary() {
+        closeDeckPicker()
         backend.refresh()
         screen = "library"
         cardIndex = Math.min(Math.max(cardIndex, 0), Math.max(0, backend.cardList.length - 1))
@@ -104,6 +113,7 @@ ApplicationWindow {
     }
 
     function openSettings() {
+        closeDeckPicker()
         screen = "settings"
         keyHandler.forceActiveFocus()
     }
@@ -357,6 +367,277 @@ ApplicationWindow {
         }
     }
 
+    // Candidate deck picker. The trigger and rows are app-styled Rectangles;
+    // opening never switches decks, and keys outside the state machine are
+    // swallowed so no screen shortcut fires behind the popup.
+    component DeckPicker: Rectangle {
+        id: picker
+        property string triggerObjectName: ""
+        property string summaryObjectName: ""
+        property string popupObjectName: ""
+        property int pickerWidth: 320
+        property bool open: false
+        property string candidateName: backend.currentDeck
+
+        objectName: picker.triggerObjectName
+        width: pickerWidth
+        implicitWidth: pickerWidth
+        height: 42
+        implicitHeight: 42
+        Layout.preferredWidth: pickerWidth
+        radius: Math.min(7, theme.radius)
+        color: listPopup.opened ? win.raised : win.panel
+        border.width: 1
+        border.color: listPopup.opened ? win.withAlpha(theme.accent, 0.6) : win.border
+
+        function openAtCurrent() {
+            picker.candidateName = backend.currentDeck
+            picker.open = true
+            listPopup.open()
+            const at = win.deckIndex(picker.candidateName)
+            if (at >= 0)
+                deckList.positionViewAtIndex(at, ListView.Contain)
+        }
+
+        function cancel() {
+            picker.open = false
+            picker.candidateName = backend.currentDeck
+            listPopup.close()
+        }
+
+        function moveCandidate(delta) {
+            const entries = backend.deckSelector
+            if (!entries.length)
+                return
+            const at = win.deckIndex(picker.candidateName)
+            const next = (at + delta + entries.length) % entries.length
+            picker.candidateName = entries[next].name
+            deckList.positionViewAtIndex(next, ListView.Contain)
+        }
+
+        function commit(name) {
+            if (!name)
+                return
+            if (name !== backend.currentDeck)
+                backend.selectDeck(name)
+            picker.candidateName = backend.currentDeck
+            picker.open = false
+            listPopup.close()
+            keyHandler.forceActiveFocus()
+        }
+
+        function handleKey(event) {
+            switch (event.key) {
+            case Qt.Key_BracketLeft:
+                picker.moveCandidate(-1)
+                break
+            case Qt.Key_BracketRight:
+                picker.moveCandidate(1)
+                break
+            case Qt.Key_Return:
+            case Qt.Key_Enter:
+                picker.commit(picker.candidateName)
+                break
+            case Qt.Key_Escape:
+                picker.cancel()
+                break
+            }
+            event.accepted = true
+        }
+
+        Connections {
+            target: backend
+            function onCurrentDeckChanged() {
+                if (!picker.open)
+                    picker.candidateName = backend.currentDeck
+            }
+        }
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 12
+            anchors.rightMargin: 12
+            spacing: 8
+
+            Label {
+                objectName: picker.summaryObjectName
+                Layout.fillWidth: true
+                text: win.deckSummary(backend.deckSelector[win.deckIndex(backend.currentDeck)])
+                color: win.text
+                font.pixelSize: 13
+                elide: Text.ElideRight
+                verticalAlignment: Text.AlignVCenter
+                ToolTip.text: text
+                ToolTip.visible: triggerMouse.containsMouse && truncated
+                ToolTip.delay: 0
+            }
+
+            Label {
+                objectName: picker.triggerObjectName + "Chevron"
+                text: listPopup.opened ? "▴" : "▾"
+                color: win.muted
+                font.pixelSize: 10
+            }
+
+            Label {
+                objectName: picker.triggerObjectName + "Hint"
+                text: "[ / ]"
+                color: win.muted
+                font.family: "monospace"
+                font.pixelSize: 11
+            }
+        }
+
+        MouseArea {
+            id: triggerMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: picker.openAtCurrent()
+        }
+
+        Popup {
+            id: listPopup
+            objectName: picker.popupObjectName
+            z: 2
+            x: 0
+            y: picker.height + 4
+            width: pickerWidth
+            height: 8 + deckList.height + 6 + footer.implicitHeight + 8
+            padding: 0
+            topPadding: 0
+            bottomPadding: 0
+            leftPadding: 0
+            rightPadding: 0
+            modal: false
+            focus: false
+            popupType: Popup.Item
+            closePolicy: Popup.NoAutoClose
+            background: Rectangle {
+                color: theme.background
+                radius: Math.min(10, theme.radius)
+                border.width: 1
+                border.color: win.border
+            }
+
+            onClosed: {
+                picker.open = false
+                picker.candidateName = backend.currentDeck
+            }
+
+            ListView {
+                id: deckList
+                objectName: picker.popupObjectName + "List"
+                x: 8
+                y: 8
+                width: pickerWidth - 16
+                height: 264 // five 48px rows plus four 6px gaps
+                clip: true
+                model: backend.deckSelector
+                spacing: 6
+                currentIndex: -1
+
+                function scrollToRow(name) {
+                    const at = win.deckIndex(name)
+                    if (at >= 0)
+                        positionViewAtIndex(at, ListView.Center)
+                }
+
+                delegate: Rectangle {
+                    id: deckRow
+                    objectName: picker.popupObjectName + "Row" + index
+                    property string deckName: modelData.name
+                    property string nameObjectName: picker.popupObjectName + "RowName" + index
+                    property string fullName: modelData.name
+                    property string tooltipText: nameLabel.ToolTip.text
+                    property bool tooltipVisible: nameLabel.ToolTip.visible
+                    property bool candidate: modelData.name === picker.candidateName
+                    property bool current: modelData.name === backend.currentDeck
+                    width: deckList.width
+                    height: 48
+                    radius: Math.min(7, theme.radius)
+                    color: deckRow.candidate ? theme.accent : rowMouse.containsMouse ? win.raised : win.panel
+                    border.width: deckRow.candidate ? 0 : 1
+                    border.color: win.border
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 12
+                        anchors.rightMargin: 12
+                        spacing: 10
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+
+                            Label {
+                                id: nameLabel
+                                objectName: deckRow.nameObjectName
+                                Layout.fillWidth: true
+                                text: modelData.name
+                                color: deckRow.candidate ? win.accentInk : win.text
+                                font.pixelSize: 14
+                                font.weight: Font.DemiBold
+                                elide: Text.ElideRight
+                                ToolTip.text: modelData.name
+                                ToolTip.visible: rowMouse.containsMouse && truncated
+                                ToolTip.delay: 0
+                            }
+
+                            Label {
+                                objectName: picker.popupObjectName + "RowCounts" + index
+                                Layout.fillWidth: true
+                                text: qsTr("%1 cards · %2 due · %3 new")
+                                      .arg(modelData.cards).arg(modelData.due).arg(modelData["new"])
+                                color: deckRow.candidate ? win.withAlpha(win.accentInk, 0.75) : win.muted
+                                font.pixelSize: 11
+                            }
+                        }
+
+                        Rectangle {
+                            objectName: picker.popupObjectName + "RowTag" + index
+                            property string tagText: tagLabel.text
+                            visible: deckRow.current
+                            implicitWidth: tagLabel.implicitWidth + 14
+                            implicitHeight: 20
+                            radius: 10
+                            border.width: 1
+                            border.color: deckRow.candidate ? win.withAlpha(win.accentInk, 0.6) : win.muted
+
+                            Label {
+                                id: tagLabel
+                                anchors.centerIn: parent
+                                text: qsTr("Current")
+                                color: deckRow.candidate ? win.withAlpha(win.accentInk, 0.8) : win.muted
+                                font.pixelSize: 10
+                            }
+                        }
+                    }
+
+                    MouseArea {
+                        id: rowMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: picker.commit(modelData.name)
+                    }
+                }
+            }
+
+            Label {
+                id: footer
+                objectName: picker.popupObjectName + "Footer"
+                x: 8
+                y: 8 + deckList.height + 6
+                width: pickerWidth - 16
+                horizontalAlignment: Text.AlignHCenter
+                text: qsTr("[ / ] move · Enter switch · Esc cancel")
+                color: win.muted
+                font.pixelSize: 11
+            }
+        }
+    }
+
     component LinkButton: Label {
         signal clicked()
         color: hover.hovered ? theme.accent : muted
@@ -432,6 +713,13 @@ ApplicationWindow {
         }
     }
 
+    MouseArea {
+        anchors.fill: parent
+        enabled: homePicker && homePicker.open
+        z: 1
+        onClicked: homePicker.cancel()
+    }
+
     Item {
         anchors.fill: parent
 
@@ -477,6 +765,11 @@ ApplicationWindow {
                         keyHandler.forceActiveFocus()
                         event.accepted = true
                     }
+                    return
+                }
+
+                if (homePicker.open) {
+                    homePicker.handleKey(event)
                     return
                 }
 
@@ -543,11 +836,8 @@ ApplicationWindow {
                 if (screen === "home") {
                     switch (event.key) {
                     case Qt.Key_BracketLeft:
-                        win.cycleDeck(-1)
-                        event.accepted = true
-                        break
                     case Qt.Key_BracketRight:
-                        win.cycleDeck(1)
+                        homePicker.openAtCurrent()
                         event.accepted = true
                         break
                     case Qt.Key_Space:
@@ -762,10 +1052,12 @@ ApplicationWindow {
                                     font.pixelSize: 13
                                 }
 
-                                DeckSelector {
-                                    selectorObjectName: "homeDeckSelector"
-                                    labelObjectName: "homeDeckLabel"
-                                    selectorWidth: 320
+                                DeckPicker {
+                                    id: homePicker
+                                    triggerObjectName: "homeDeckSelector"
+                                    summaryObjectName: "homeDeckLabel"
+                                    popupObjectName: "homeDeckPopup"
+                                    pickerWidth: 320
                                 }
                             }
 

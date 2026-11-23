@@ -8,6 +8,7 @@
 #include <QFont>
 #include <QImage>
 #include <QMouseEvent>
+#include <QPoint>
 #include <QWheelEvent>
 #include <QProcess>
 #include <QRegularExpression>
@@ -605,6 +606,46 @@ void prepareSelectorDecks(Backend &backend, QString *error) {
     backend.selectDeck("Beta");
     backend.selectDeck("Alpha");
 }
+// Popup delegates can be reachable through visual children rather than QObject
+// children, so selector tests accept either traversal.
+QQuickItem *pickerItem(const MainWindowHarness &view, const QString &objectName) {
+    if (QQuickItem *found = view.item(objectName))
+        return found;
+    return view.visualItem(objectName);
+}
+
+QQuickItem *popupRowInViewport(const MainWindowHarness &view, QQuickItem *list, const QString &name) {
+    if (!list)
+        return nullptr;
+    const qreal top = list->property("contentY").toReal();
+    const qreal bottom = top + list->height();
+    for (int i = 0; i < 12; ++i) {
+        QQuickItem *row = pickerItem(view, QStringLiteral("homeDeckPopupRow%1").arg(i));
+        if (!row)
+            return nullptr;
+        if (row->property("deckName").toString() != name)
+            continue;
+        const qreal y = row->mapToItem(list, QPointF(0, 0)).y();
+        if (y >= top && y + row->height() <= bottom)
+            return row;
+        return nullptr;
+    }
+    return nullptr;
+}
+
+void scrollPopupListTo(QQuickItem *list, const QString &name) {
+    QVERIFY(list);
+    QVERIFY(QMetaObject::invokeMethod(list, "scrollToRow", Q_ARG(QVariant, name)));
+}
+
+QObject *pickerObject(const MainWindowHarness &view, const QString &objectName) {
+    return view.window ? view.window->findChild<QObject *>(objectName) : nullptr;
+}
+
+QPoint centerInWindow(QQuickWindow *window, QQuickItem *item) {
+    return window->contentItem()->mapFromScene(item->mapToScene(item->boundingRect().center())).toPoint();
+}
+
 } // namespace
 
 void TestBackend::qmlDeckSelectorShowsCurrentDeckAndCounts() {
@@ -616,9 +657,16 @@ void TestBackend::qmlDeckSelectorShowsCurrentDeckAndCounts() {
 
     MainWindowHarness view(backend);
     QVERIFY(view.window);
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+
     QQuickItem *homeSelector = view.item(QStringLiteral("homeDeckSelector"));
     QVERIFY(homeSelector);
-    QCOMPARE(homeSelector->property("currentText").toString(), QString("Alpha"));
+    const QString selectorClass = QString::fromLatin1(homeSelector->metaObject()->className());
+    QVERIFY2(!selectorClass.contains("ComboBox"), qPrintable(selectorClass));
+    QVERIFY(!homeSelector->property("open").toBool());
+    QCOMPARE(homeSelector->property("candidateName").toString(), QString("Alpha"));
 
     QQuickItem *homeSummary = view.item(QStringLiteral("homeDeckLabel"));
     QVERIFY(homeSummary);
@@ -626,7 +674,50 @@ void TestBackend::qmlDeckSelectorShowsCurrentDeckAndCounts() {
     QVERIFY2(homeText.contains("Alpha"), qPrintable(homeText));
     QVERIFY2(homeText.contains("2 cards"), qPrintable(homeText));
     QVERIFY2(homeText.contains("0 due"), qPrintable(homeText));
+    QQuickItem *chevron = view.item(QStringLiteral("homeDeckSelectorChevron"));
+    QVERIFY(chevron);
+    QVERIFY(!chevron->property("text").toString().isEmpty());
+    QQuickItem *hint = view.item(QStringLiteral("homeDeckSelectorHint"));
+    QVERIFY(hint);
+    QVERIFY2(hint->property("text").toString().contains("[ / ]"), qPrintable(hint->property("text").toString()));
 
+    QVERIFY(QMetaObject::invokeMethod(homeSelector, "openAtCurrent"));
+    view.settle();
+    QObject *popup = pickerObject(view, QStringLiteral("homeDeckPopup"));
+    QVERIFY(popup);
+    QVERIFY(popup->property("visible").toBool());
+    QCOMPARE(popup->property("width").toInt(), 320);
+
+    QQuickItem *list = pickerItem(view, QStringLiteral("homeDeckPopupList"));
+    QVERIFY(list);
+    QCOMPARE(list->property("height").toInt(), 264); // five rows plus four gaps
+    QQuickItem *footer = pickerItem(view, QStringLiteral("homeDeckPopupFooter"));
+    QVERIFY(footer);
+    const QString footerText = footer->property("text").toString();
+    QVERIFY2(footerText.contains("Enter switch"), qPrintable(footerText));
+    QVERIFY2(footerText.contains("Esc cancel"), qPrintable(footerText));
+
+    QQuickItem *row = pickerItem(view, QStringLiteral("homeDeckPopupRow0"));
+    QVERIFY(row);
+    QCOMPARE(row->property("deckName").toString(), QString("Alpha"));
+    QVERIFY(row->property("candidate").toBool());
+    QVERIFY(row->property("current").toBool());
+    Theme expectedTheme;
+    QCOMPARE(qvariant_cast<QColor>(row->property("color")), QColor(expectedTheme.accent()));
+    QQuickItem *counts = pickerItem(view, QStringLiteral("homeDeckPopupRowCounts0"));
+    QVERIFY(counts);
+    const QString countsText = counts->property("text").toString();
+    QVERIFY2(countsText.contains("2 cards"), qPrintable(countsText));
+    QVERIFY2(countsText.contains("0 due"), qPrintable(countsText));
+    QQuickItem *tag = pickerItem(view, QStringLiteral("homeDeckPopupRowTag0"));
+    QVERIFY(tag);
+    QVERIFY(tag->isVisible());
+    QVERIFY2(tag->property("tagText").toString().contains("Current"), qPrintable(tag->property("tagText").toString()));
+    QQuickItem *otherTag = pickerItem(view, QStringLiteral("homeDeckPopupRowTag1"));
+    QVERIFY(otherTag);
+    QVERIFY(!otherTag->isVisible());
+
+    // The Study selector stays as it was in #33; #120 moves it to this picker.
     QVERIFY(QMetaObject::invokeMethod(view.window, "startStudy", Q_ARG(QVariant, QString("review"))));
     view.settle();
     QQuickItem *studySelector = view.item(QStringLiteral("studyDeckSelector"));
@@ -652,38 +743,141 @@ void TestBackend::qmlDeckCycleKeysWrapAndAreScoped() {
     QVERIFY(window);
     QVERIFY(QTest::qWaitForWindowExposed(window));
     QCOMPARE(backend.currentDeck(), QString("Alpha"));
+    QQuickItem *picker = view.item(QStringLiteral("homeDeckSelector"));
+    QVERIFY(picker);
 
     const auto press = [&](Qt::Key key) {
         QTest::keyClick(window, key);
         view.settle();
     };
-    press(Qt::Key_BracketRight);
-    QCOMPARE(backend.currentDeck(), QString("Beta"));
-    // Beta is now Current and pinned first, with Alpha next in recency order.
+    const auto candidate = [&]() { return picker->property("candidateName").toString(); };
+    const auto isOpen = [&]() { return picker->property("open").toBool(); };
+
+    // Opening never switches. Candidates move through the same ordered list in
+    // both directions and wrap at each end.
     press(Qt::Key_BracketRight);
     QCOMPARE(backend.currentDeck(), QString("Alpha"));
+    QVERIFY(isOpen());
+    QCOMPARE(candidate(), QString("Alpha"));
+    press(Qt::Key_BracketRight);
+    QCOMPARE(candidate(), QString("Beta"));
+    QCOMPARE(backend.currentDeck(), QString("Alpha"));
+    QVERIFY(pickerItem(view, QStringLiteral("homeDeckPopupRow1"))->property("candidate").toBool());
+    press(Qt::Key_BracketRight);
+    QCOMPARE(candidate(), QString("Gamma"));
+    press(Qt::Key_BracketRight);
+    QCOMPARE(candidate(), QString("Alpha"));
     press(Qt::Key_BracketLeft);
-    QCOMPARE(backend.currentDeck(), QString("Gamma")); // wraps at the start
-    press(Qt::Key_BracketLeft);
-    QCOMPARE(backend.currentDeck(), QString("Beta")); // wraps again after Gamma
+    QCOMPARE(candidate(), QString("Gamma"));
 
+    // Unrelated keys are swallowed while the popup is open.
+    press(Qt::Key_B);
+    QCOMPARE(view.window->property("screen").toString(), QString("home"));
+    press(Qt::Key_S);
+    QVERIFY(!view.window->property("statsVisible").toBool());
+    press(Qt::Key_Question);
+    QVERIFY(!view.window->property("helpVisible").toBool());
+    QCOMPARE(candidate(), QString("Gamma"));
+    QVERIFY(isOpen());
+
+    // Escape discards the Candidate deck.
+    press(Qt::Key_Escape);
+    QVERIFY(!isOpen());
+    QCOMPARE(backend.currentDeck(), QString("Alpha"));
+    QCOMPARE(candidate(), QString("Alpha"));
+
+    // Enter commits the Candidate deck; committing Current only closes.
+    press(Qt::Key_BracketLeft);
+    QCOMPARE(candidate(), QString("Alpha"));
+    press(Qt::Key_BracketLeft);
+    QCOMPARE(candidate(), QString("Gamma"));
+    press(Qt::Key_Enter);
+    QVERIFY(!isOpen());
+    QCOMPARE(backend.currentDeck(), QString("Gamma"));
+    press(Qt::Key_BracketRight);
+    QCOMPARE(candidate(), QString("Gamma"));
+    press(Qt::Key_Return);
+    QVERIFY(!isOpen());
+    QCOMPARE(backend.currentDeck(), QString("Gamma"));
+
+    // Brackets stay scoped to Home and never open when a dialog owns keys.
     QVERIFY(QMetaObject::invokeMethod(view.window, "openLibrary"));
     press(Qt::Key_BracketRight);
-    QCOMPARE(backend.currentDeck(), QString("Beta"));
+    QVERIFY(!isOpen());
+    QCOMPARE(backend.currentDeck(), QString("Gamma"));
     QVERIFY(QMetaObject::invokeMethod(view.window, "openSettings"));
     press(Qt::Key_BracketLeft);
-    QCOMPARE(backend.currentDeck(), QString("Beta"));
+    QVERIFY(!isOpen());
+    QCOMPARE(backend.currentDeck(), QString("Gamma"));
 
     QVERIFY(QMetaObject::invokeMethod(view.window, "goHome"));
     window->setProperty("helpVisible", true);
     press(Qt::Key_BracketRight);
-    QCOMPARE(backend.currentDeck(), QString("Beta"));
+    QVERIFY(!isOpen());
     window->setProperty("helpVisible", false);
 
     // The Library shortcut is unchanged.
     QVERIFY(QMetaObject::invokeMethod(view.window, "goHome"));
     press(Qt::Key_B);
     QCOMPARE(view.window->property("screen").toString(), QString("library"));
+}
+
+void TestBackend::qmlDeckPickerClickCommitsAndLongNamesElide() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    prepareSelectorDecks(backend, &error);
+    const QString longName = QStringLiteral("Molecular Biology — Lecture 12 (Cell Signalling and membrane transport)");
+    QVERIFY(backend.createDeck(longName, &error));
+    QVERIFY(backend.createCard(longName, "long one", "L1", "basic", {}, &error));
+    for (const QString &name : {QStringLiteral("Delta"), QStringLiteral("Epsilon"), QStringLiteral("Zeta")})
+        QVERIFY(backend.createDeck(name, &error));
+    backend.selectDeck(QStringLiteral("Alpha"));
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    QQuickItem *picker = view.item(QStringLiteral("homeDeckSelector"));
+    QVERIFY(picker);
+    QVERIFY(QMetaObject::invokeMethod(picker, "openAtCurrent"));
+    view.settle();
+
+    QQuickItem *list = pickerItem(view, QStringLiteral("homeDeckPopupList"));
+    QVERIFY(list);
+    QVERIFY(list->property("contentHeight").toReal() > list->property("height").toReal());
+
+    scrollPopupListTo(list, QStringLiteral("Beta"));
+    QQuickItem *betaRow = popupRowInViewport(view, list, QStringLiteral("Beta"));
+    QVERIFY(betaRow);
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centerInWindow(window, betaRow));
+    view.settle();
+    QCOMPARE(backend.currentDeck(), QString("Beta"));
+    QVERIFY(!picker->property("open").toBool());
+
+    QVERIFY(QMetaObject::invokeMethod(picker, "openAtCurrent"));
+    view.settle();
+    scrollPopupListTo(list, longName);
+    QQuickItem *longRow = popupRowInViewport(view, list, longName);
+    QVERIFY(longRow);
+    QQuickItem *name = pickerItem(view, longRow->property("nameObjectName").toString());
+    QVERIFY(name);
+    QVERIFY2(name->property("truncated").toBool(), qPrintable(name->property("text").toString()));
+    QCOMPARE(longRow->property("fullName").toString(), longName);
+    QCOMPARE(longRow->property("tooltipText").toString(), longName);
+    QVERIFY(name->property("text").toString().contains("Molecular Biology"));
+
+    // A click outside discards a moved Candidate and never switches decks.
+    QVERIFY(QMetaObject::invokeMethod(picker, "moveCandidate", Q_ARG(QVariant, 1)));
+    QVERIFY(picker->property("candidateName").toString() != backend.currentDeck());
+    QCOMPARE(backend.currentDeck(), QString("Beta"));
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, QPoint(5, 5));
+    view.settle();
+    QVERIFY(!picker->property("open").toBool());
+    QCOMPARE(picker->property("candidateName").toString(), QString("Beta"));
+    QCOMPARE(backend.currentDeck(), QString("Beta"));
 }
 
 void TestBackend::qmlHelpOverlayNamesDeckSelector() {
