@@ -437,50 +437,36 @@ void TestCli::cliConfigReportsWriteFailure() {
 
 void TestCli::cliEditsAndDeletesCardsAcrossDecks() {
     QTemporaryDir dir;
-    EnvGuard env(dir.filePath("decks"), dir.filePath("state.db"));
-    QString cardId;
-    {
-        auto ownedBackend = Backend::fromEnvironment();
-        Backend &backend = *ownedBackend;
-        QString error;
-        QVERIFY(backend.initialize(&error));
-        QVERIFY(backend.createDeck("First", &error));
-        QVERIFY(backend.createCard("First", "Q1", "A1", "basic", {}, &error));
-        QVERIFY(backend.createDeck("Second", &error));
-        QVERIFY(backend.createCard("Second", "Q2", "A2", "basic", {}, &error));
-        for (const Deck &deck : backend.allDecks())
-            for (const Card &card : deck.cards)
-                if (card.question == QStringLiteral("Q2"))
-                    cardId = card.id;
-    }
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    EnvGuard env(decks, database);
+    int code = -1;
+
+    const QJsonObject first =
+        runCli({"add-card", "-d", "First", "-q", "Q1", "-a", "A1", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY(!first.value(QStringLiteral("id")).toString().isEmpty());
+    const QJsonObject added =
+        runCli({"add-card", "-d", "Second", "-q", "Q2", "-a", "A2", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    const QString cardId = added.value(QStringLiteral("id")).toString();
     QVERIFY(!cardId.isEmpty());
+    runCli({"use-deck", "First", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
 
-    // With no --deck, both commands must follow the card's own deck
-    // ("Second"), not whichever deck happens to be current ("First").
-    QCOMPARE(Cli::run({"edit-card", "-c", cardId, "-q", "Q2b", "--json"}), 0);
+    // With no --deck, edit-card must follow the card's own deck ("Second"),
+    // not whichever deck happens to be current ("First").
+    const QJsonObject edited = runCli({"edit-card", "-c", cardId, "-q", "Q2b", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(edited.value(QStringLiteral("id")).toString(), cardId);
 
-    // A generated id follows the content, so the edit gave the card a new
-    // id; look it up again before deleting.
-    auto ownedEdited = Backend::fromEnvironment();
-    Backend &edited = *ownedEdited;
-    QString error;
-    QVERIFY(edited.initialize(&error));
-    QString updatedId;
-    for (const Deck &deck : edited.allDecks())
-        for (const Card &card : deck.cards)
-            if (card.question == QStringLiteral("Q2b"))
-                updatedId = card.id;
-    QVERIFY(!updatedId.isEmpty());
-    QCOMPARE(Cli::run({"delete-card", "-c", updatedId, "--json"}), 0);
-
-    auto ownedCheck = Backend::fromEnvironment();
-    Backend &check = *ownedCheck;
-    QVERIFY(check.initialize(&error));
-    bool found = false;
-    for (const Deck &deck : check.allDecks())
-        for (const Card &card : deck.cards)
-            found |= card.id == updatedId;
-    QVERIFY(!found);
+    // The same id keeps resolving for a later command.
+    const QJsonObject deleted = runCli({"delete-card", "-c", cardId, "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(deleted.value(QStringLiteral("id")).toString(), cardId);
+    const QJsonObject remaining = runCli({"cards", "-d", "Second", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(remaining.value(QStringLiteral("cards")).toArray().size(), 0);
 }
 
 void TestCli::previewRendersMathAsText() {
@@ -980,32 +966,16 @@ void TestCli::reviewCommandContract() {
     QCOMPARE(sortedKeys(missing), QStringList({"error", "ok"}));
     QCOMPARE(missing.value(QStringLiteral("error")).toString(), QStringLiteral("No such card: missing"));
 
-    runCli({"edit-card", "-c", cardId, "-a", "changed", "--json"}, decks, database, &code);
+    const QJsonObject change = runCli({"edit-card", "-c", cardId, "-a", "changed", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
-    QString editedId;
-    {
-        auto owned = Backend::fromEnvironment();
-        QString loadError;
-        QVERIFY(owned->initialize(&loadError));
-        for (const Deck &deck : owned->allDecks())
-            for (const Card &card : deck.cards)
-                if (card.answer == QStringLiteral("changed"))
-                    editedId = card.id;
-    }
-    QVERIFY(!editedId.isEmpty());
-    QVERIFY(editedId != cardId);
+    QCOMPARE(change.value(QStringLiteral("id")).toString(), cardId);
 
-    // The edited Answer is a different Card: its id resolves for review and
-    // the old id no longer does. Scheduling is proved in TestRatingRecording.
-    const QJsonObject stale = runCli({"review", "-c", cardId, "-r", "3", "--json"}, decks, database, &code);
-    QCOMPARE(code, 1);
-    QCOMPARE(sortedKeys(stale), QStringList({"error", "ok"}));
-    QCOMPARE(stale.value(QStringLiteral("error")).toString(), QStringLiteral("No such card: ") + cardId);
-
-    const QJsonObject edited = runCli({"review", "-c", editedId, "-r", "3", "--json"}, decks, database, &code);
+    // The edited Answer keeps the same id, which still resolves for review.
+    // Scheduling is proved in TestRatingRecording.
+    const QJsonObject edited = runCli({"review", "-c", cardId, "-r", "3", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
     QCOMPARE(sortedKeys(edited), expected);
-    QCOMPARE(edited.value(QStringLiteral("id")).toString(), editedId);
+    QCOMPARE(edited.value(QStringLiteral("id")).toString(), cardId);
     QCOMPARE(edited.value(QStringLiteral("rating")).toInt(), 3);
 }
 

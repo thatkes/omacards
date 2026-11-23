@@ -374,7 +374,7 @@ void TestBackend::backendEditsCardsWithUndo() {
     QCOMPARE(edited.answer, QString("Better"));
     QCOMPARE(edited.type.kind, CardType::Cloze);
     QCOMPARE(edited.tags, QStringList({"a", "b"}));
-    QVERIFY(edited.id != changedId); // content hash follows edits
+    QCOMPARE(edited.id, changedId); // an edit keeps the id
     QVERIFY(backend.canUndo());
 
     backend.undo();
