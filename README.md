@@ -184,7 +184,7 @@ Theme watching follows Omacut (MIT, David Heinemeier Hansson).
 
 ## Roadmap
 - Omarchy plugin support
-- Install script
+
 - Fix tray entry
 - Update README.md pictures
 - Redo deck format in README.md
