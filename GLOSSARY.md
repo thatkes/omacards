@@ -38,6 +38,14 @@ _Avoid_: standard card, Q&A card
 A card whose answer is a passage hidden inside the question.
 _Avoid_: fill-in-the-blank card
 
+**Math expression**:
+A LaTeX fragment inside a Question or Answer that the app displays as an image rather than as text.
+_Avoid_: formula, equation, TeX snippet
+
+**Rendered math**:
+The image inserted into rich text in place of a Math expression.
+_Avoid_: math image, formula graphic, math picture
+
 ### Study
 
 **Study mode**:
@@ -120,6 +128,24 @@ _Avoid_: review log, activity
 The number of consecutive study days with at least one rated review.
 _Avoid_: day streak
 
+### Math rendering
+
+**Math scale**:
+The multiplier applied to Rendered math for the surface showing it, so Questions and Answers can use different sizes.
+_Avoid_: zoom, magnification, font size
+
+**Math logical size**:
+The width and height Rendered math reports as its own before Math scale is applied.
+_Avoid_: intrinsic size, natural size, SVG size
+
+**Math reserved box**:
+The space held for Rendered math before its image is ready, kept afterwards so surrounding text does not move.
+_Avoid_: placeholder size, estimated box, reservation
+
+**Unicode fallback**:
+The plain-text approximation of a Math expression shown while its Rendered math is unavailable or still being prepared.
+_Avoid_: approximation, plain math, text substitute
+
 ### Scheduling
 
 **Scheduling state**:
@@ -177,6 +203,12 @@ _Avoid_: failure, hard issue
 **Warning**:
 A Deck issue that does not block a write.
 _Avoid_: advisory, soft issue
+
+### Interface
+
+**Headless command**:
+A command that runs without the GUI and reports its outcome through exit status, with an optional JSON result.
+_Avoid_: CLI command, agent command
 
 ### Workflow
 
