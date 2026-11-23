@@ -15,11 +15,19 @@ Deck content lives in plain text files under `~/.local/share/omacards/decks/`, s
 
 ## Install
 
+From a checkout, `./bin/install` is the one command to install omacards. It
+builds the package and installs the `omacards` binary and the agent skill at
+`~/.agents/skills/omacards/SKILL.md`.
+
 ```sh
-./bin/build     # build to build/omacards
-./bin/test      # offscreen Qt Test suite
-./bin/install   # makepkg -fsi, adds the binary, launcher entry and icon
+./bin/install   # makepkg -fsi: binary, agent skill, launcher entry and icon
 ```
+
+`./bin/build` and `./bin/test` are for development without installing; they
+build to `build/omacards` and run the offscreen Qt Test suite. `omacards skill
+install` is the alternative for refreshing only the skill after you edit its
+source. The `omarchy pkg add` and `sudo pacman -S` commands in the LaTeX math
+section install optional math dependencies, not omacards.
 
 Enable the local pre-commit format check with `git config core.hooksPath .githooks`. It checks staged C++ files; CI checks the whole tree. That setting also turns on a `commit-msg` check of line length, subject and scope, a `post-commit` issue reminder, a `pre-push` local-only-path guard, and extra `pre-commit` checks for local-only paths and staged CLI snapshots.
 
@@ -31,6 +39,9 @@ Optional: `unzip` for Anki `.apkg` imports; `tectonic` or `pdflatex` with `pdfto
 Math inside `\(...\)` or `$$...$$` becomes a cached SVG when a TeX toolchain is available. Single-dollar `$...$` is not a rendered delimiter: it stays literal in both text and HTML output.
 
 Backslashes are consumed by each layer. In single-quoted shell arguments and deck files write `\(...\)`. In a shell double-quoted argument write `\\(` (for example `-a "Expand \\(x\\)"`), which reaches the card as `\(x\)`. In a JSON file write `\\(`; when that JSON sits inside a shell double-quoted argument, write `\\\\(` so the shell halves the backslashes before JSON parses them.
+
+The two commands below are alternatives for the optional LaTeX toolchain
+only. Install omacards itself with the canonical `./bin/install` above.
 
 ### On Omarchy:
 
@@ -191,7 +202,7 @@ omacards use-deck <deck> [--json]
 omacards warm [--deck <deck>] [--json]
 ```
 
-`omacards skill install` writes a short agent skill to `~/.agents/skills/omacards/SKILL.md`. Set `OMACARDS_DECKS_DIR` and `OMACARDS_STATE_DB` to isolate data for tests or scripts.
+To refresh only the skill, use the alternative `omacards skill install`; the canonical install already places it at `~/.agents/skills/omacards/SKILL.md`. Set `OMACARDS_DECKS_DIR` and `OMACARDS_STATE_DB` to isolate data for tests or scripts.
 
 Deck-writing commands (`add-deck`, `add-cards`, `add-card`, `import`, `edit-card` and `delete-card`) reload the file they just wrote and run the same deck checks as `check`. If a write would introduce an Error, the previous file is restored (or a newly created deck is removed), no history entry is recorded, and the command exits 1 with an Error that includes a fix hint. Warnings, such as duplicate questions or unsupported math macros, do not block a write, and decks that already contain Deck issues can still be edited.
 
