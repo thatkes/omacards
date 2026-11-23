@@ -44,15 +44,13 @@ sudo pacman -S tectonic poppler
 
 ### After install:
 
+Restart omacards after installing so it detects the toolchain. Warm a deck before studying:
+
 ```sh
-mkdir -p /tmp/omacards-tex
-printf '\\documentclass{article}\n\\begin{document}$x^2$\\end{document}\n' > /tmp/omacards-tex/warm.tex
-tectonic --untrusted --outdir=/tmp/omacards-tex /tmp/omacards-tex/warm.tex
+omacards warm --deck NAME
 ```
 
-```
-```
-This is a one-time, global download of Tectonic's TeX bundle (stored in `~/.cache/tectonic`) — not something you repeat per deck. Doing it ahead of time avoids a long pause on the first card that uses math. After that, normal renders use Tectonic's `--only-cached` mode, and each expression is cached once as a neutral SVG under `~/.cache/omacards/math`. The active theme colors the SVG at display time, so switching themes needs no re-render. Restart omacards after installing so it detects the toolchain, and confirm with `omacards check --json` (`"math": "LaTeX (SVG)"`). Delete `~/.cache/omacards/math` to force a re-render.
+Add `--json` for `rendered` and `cached` counts. The first render may download Tectonic's TeX bundle once (stored in `~/.cache/tectonic`); that download is global, not per deck, and later renders use `--only-cached`. Warming ahead of time avoids a long pause on the first card that uses math. Each expression is cached once as a neutral SVG under `~/.cache/omacards/math`; the active theme colors it at display time, so switching themes needs no re-render. Confirm with `omacards check --json` (`"math": "LaTeX (SVG)"`). Delete `~/.cache/omacards/math` to force a re-render.
 
 ## Keyboard shortcuts
 
@@ -187,7 +185,6 @@ Theme watching follows Omacut and Monologue (MIT, David Heinemeier Hansson).
 ## Roadmap
 - Omarchy plugin support
 - Install script
-- Tectonic warming script
 - Fix tray entry
 - Update README.md pictures
 - Redo deck format in README.md
