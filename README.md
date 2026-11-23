@@ -195,6 +195,16 @@ omacards warm [--deck <deck>] [--json]
 
 Deck-writing commands (`add-deck`, `add-cards`, `add-card`, `import`, `edit-card` and `delete-card`) reload the file they just wrote and run the same deck checks as `check`. If a write would introduce an Error, the previous file is restored (or a newly created deck is removed), no history entry is recorded, and the command exits 1 with an Error that includes a fix hint. Warnings, such as duplicate questions or unsupported math macros, do not block a write, and decks that already contain Deck issues can still be edited.
 
+## Deck creation and descriptions
+
+`add-card --deck NEW` creates the Deck if it does not exist, so a one-off Card needs no `add-deck` first:
+
+```sh
+omacards add-card --deck BrandNew -q 'Question?' -a 'Answer' --json
+```
+
+`add-cards --deck NAME --description TEXT` updates an existing Deck's description as well as adding the Cards. On a new Deck, the same flag sets the initial description.
+
 ## Isolated probes
 
 Agents without a source checkout can point the CLI at throwaway Decks, state
