@@ -33,8 +33,7 @@ Math inside `\(...\)` or `$$...$$` becomes a cached SVG when a TeX toolchain is 
 ### On Omarchy:
 
 ```sh
-omarchy install package tectonic
-omarchy install package poppler
+omarchy pkg add tectonic poppler
 ```
 
 ### On Arch:
