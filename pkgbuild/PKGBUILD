@@ -30,4 +30,7 @@ package() {
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 "$startdir/omacards.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/omacards.svg"
   install -Dm644 "$startdir/omacards.desktop" "$pkgdir/usr/share/applications/omacards.desktop"
+  # Match Cli::skillTargetPath(): a source install writes the same generated
+  # copy that `omacards skill install` would place in the installing user's HOME.
+  install -Dm644 src/skill/SKILL.md "$HOME/.agents/skills/omacards/SKILL.md"
 }
