@@ -34,6 +34,7 @@ public:
 
 private:
     static bool apply(const Snapshot &snapshot, bool restoreBefore, QString *error);
+    void pushSnapshot(const Snapshot &snapshot);
 
     QVector<Snapshot> m_undoStack;
     QVector<Snapshot> m_redoStack;

@@ -12,16 +12,20 @@ QByteArray FileHistory::readBytes(const QString &path) {
     return file.readAll();
 }
 
+void FileHistory::pushSnapshot(const Snapshot &snapshot) {
+    m_undoStack.append(snapshot);
+    if (m_undoStack.size() > 50)
+        m_undoStack.removeFirst();
+    m_redoStack.clear();
+}
+
 bool FileHistory::record(const QString &path, const QByteArray &before, bool existedBefore,
                          const QString &description) {
     const bool existsAfter = QFileInfo::exists(path);
     const QByteArray after = existsAfter ? readBytes(path) : QByteArray();
     if (existedBefore == existsAfter && before == after)
         return false;
-    m_undoStack.append(Snapshot{path, before, after, existedBefore, existsAfter, description, {}});
-    if (m_undoStack.size() > 50)
-        m_undoStack.removeFirst();
-    m_redoStack.clear();
+    pushSnapshot(Snapshot{path, before, after, existedBefore, existsAfter, description, {}});
     return true;
 }
 
@@ -29,10 +33,7 @@ bool FileHistory::recordRename(const QString &from, const QByteArray &before, co
                                const QByteArray &after, const QString &description) {
     if (from == to && before == after)
         return false;
-    m_undoStack.append(Snapshot{from, before, after, true, true, description, to});
-    if (m_undoStack.size() > 50)
-        m_undoStack.removeFirst();
-    m_redoStack.clear();
+    pushSnapshot(Snapshot{from, before, after, true, true, description, to});
     return true;
 }
 
