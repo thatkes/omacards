@@ -433,10 +433,10 @@ bool DeckRepository::modifyCard(const QString &deckName, const QString &cardId, 
         if (!clean.isEmpty() && !card->tags.contains(clean))
             card->tags << clean;
     }
-    // An explicit id pinned in the file survives edits; a generated id follows
-    // the content so the card resets its schedule when it changes.
-    if (!card->explicitId)
-        card->id = DeckIO::cardId(*card);
+    // Keep the id callers already have. When the content no longer matches the
+    // generated hash, serialize() pins the existing id with an `id:` line.
+    if (!card->explicitId && card->id != DeckIO::cardId(*card))
+        card->explicitId = true;
     if (finalId)
         *finalId = card->id;
 

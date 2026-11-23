@@ -364,10 +364,15 @@ void TestDeckRepository::modifyCardHandlesExplicitAndGeneratedIds() {
 
     QString finalId;
     QVERIFY(f.repo.modifyCard("D", oldId, "Changed", "A", "basic", {}, &error, &finalId));
-    const Card &changed = f.repo.deckByName("D")->cards.first();
-    QVERIFY(changed.id != oldId);
-    QCOMPARE(changed.id, DeckIO::cardId(changed));
-    QCOMPARE(finalId, changed.id);
+    QCOMPARE(finalId, oldId);
+    QCOMPARE(f.repo.deckByName("D")->cards.first().id, oldId);
+
+    // The id written on edit survives a reload and still resolves later.
+    f.repo.load(&f.current);
+    QCOMPARE(f.repo.deckByName("D")->cards.first().id, oldId);
+    finalId.clear();
+    QVERIFY(f.repo.modifyCard("D", oldId, "Changed again", "A", "basic", {}, &error, &finalId));
+    QCOMPARE(finalId, oldId);
 
     const QString pinnedPath = QDir(f.dir.filePath("decks")).filePath("Pinned.txt");
     QVERIFY(writeText(pinnedPath, "# Deck: Pinned\n---\nQ: Fixed\nA: Answer\nid: pinned-123\n"));
