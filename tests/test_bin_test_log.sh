@@ -3,7 +3,9 @@ set -eu
 
 # Self-test for the per-invocation log path in bin/test. It runs the real
 # bin/test against a fake test binary in an isolated checkout, twice at once,
-# so a fixed log path shows up as mixed or missing summaries.
+# so a fixed log path shows up as mixed or missing summaries. A plain run now
+# splits the suites into two concurrent groups; each group gets its own log and
+# environment, and the runner presents one combined summary.
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
@@ -23,19 +25,32 @@ chmod +x "$repo/build/omacards"
 cat > "$repo/build/tests/omacards_tests" <<'EOF'
 #!/bin/sh
 set -eu
-mode="${1:-}"
+mode=
+group=
+for arg in "$@"; do
+    case "$arg" in
+        run-a|run-b|fail|partial|info) mode=$arg ;;
+        Test*) if [ -z "$group" ]; then group=$arg; fi ;;
+    esac
+done
+printf 'GROUP: %s\n' "$group"
+printf 'ENV: HOME=%s XDG_CACHE_HOME=%s OMACARDS_STATE_DB=%s TMPDIR=%s\n' \
+    "${HOME:-unset}" "${XDG_CACHE_HOME:-unset}" "${OMACARDS_STATE_DB:-unset}" "${TMPDIR:-unset}"
 if [ "$mode" = info ]; then
     printf 'OMACARDS_TEST_MODE: info\n'
     exit 0
 fi
+case "$group" in
+    TestCli) suites=2; totals=2; marked=1 ;;
+    TestBackend) suites=3; totals=3; marked=1 ;;
+esac
 case "$mode" in
-    run-a) suites=2; totals=2; marked=1 ;;
-    run-b) suites=3; totals=3; marked=1 ;;
+    run-a|run-b) ;;
     fail) suites=1; totals=1; marked=0 ;;
     partial) suites=9; totals=2; marked=0 ;;
     *) exit 2 ;;
 esac
-if [ "$marked" -eq 1 ]; then
+if [ "${marked:-0}" -eq 1 ]; then
     sleep 0.2
     printf 'MARKER: %s\n' "$mode"
 fi
@@ -92,7 +107,24 @@ assert_not_contains() {
     fi
 }
 
-# Two overlapping runs in one checkout must each see only their own results.
+assert_matches() {
+    name=$1
+    want=$2
+    got=$3
+    if [ "$got" = "$want" ]; then
+        printf 'PASS %s\n' "$name"
+    else
+        report_failure "$name" "value $got, wanted $want"
+    fi
+}
+
+count_matches() {
+    count=$(grep -cF -- "$2" "$1" || true)
+    printf '%s' "$count"
+}
+
+# Two overlapping runs in one checkout must each see only their own results,
+# and a plain run must show both of its groups and their combined summary.
 PATH="$fakebin:$PATH" "$repo/bin/test" run-a > "$tmp/out-a.log" 2>&1 &
 pid_a=$!
 PATH="$fakebin:$PATH" "$repo/bin/test" run-b > "$tmp/out-b.log" 2>&1 &
@@ -108,27 +140,59 @@ assert_status concurrent_run_a_status 0 "$status_a"
 assert_status concurrent_run_b_status 0 "$status_b"
 assert_contains run_a_own_marker "$tmp/out-a.log" 'MARKER: run-a'
 assert_contains run_b_own_marker "$tmp/out-b.log" 'MARKER: run-b'
-assert_contains run_a_own_count "$tmp/out-a.log" 'across 2 suites'
-assert_contains run_b_own_count "$tmp/out-b.log" 'across 3 suites'
 assert_not_contains run_a_has_no_other_marker "$tmp/out-a.log" 'MARKER: run-b'
 assert_not_contains run_b_has_no_other_marker "$tmp/out-b.log" 'MARKER: run-a'
+assert_matches run_a_has_two_groups 2 "$(count_matches "$tmp/out-a.log" 'GROUP: ')"
+assert_matches run_b_has_two_groups 2 "$(count_matches "$tmp/out-b.log" 'GROUP: ')"
+assert_contains run_a_has_cli_group "$tmp/out-a.log" 'GROUP: TestCli'
+assert_contains run_a_has_backend_group "$tmp/out-a.log" 'GROUP: TestBackend'
+assert_contains run_a_aggregated_announcement "$tmp/out-a.log" 'OMACARDS_TEST_SUITES: 5'
+assert_contains run_a_combined_summary "$tmp/out-a.log" 'across 5 suites'
+assert_contains run_b_combined_summary "$tmp/out-b.log" 'across 5 suites'
 
-log_count=0
-a_log_count=0
-b_log_count=0
+combined_log_count=0
 for log in "$repo"/build/tests/run.*; do
     [ -f "$log" ] || continue
-    log_count=$((log_count + 1))
+    combined_log_count=$((combined_log_count + 1))
+done
+assert_status distinct_combined_log_count 2 "$combined_log_count"
+
+a_group_logs=0
+b_group_logs=0
+mixed_group_logs=0
+group_log_count=0
+for log in "$repo"/build/tests/group.*; do
+    [ -f "$log" ] || continue
+    group_log_count=$((group_log_count + 1))
     if grep -qF 'MARKER: run-a' "$log"; then
-        a_log_count=$((a_log_count + 1))
+        a_group_logs=$((a_group_logs + 1))
     fi
     if grep -qF 'MARKER: run-b' "$log"; then
-        b_log_count=$((b_log_count + 1))
+        b_group_logs=$((b_group_logs + 1))
+    fi
+    if grep -qF 'MARKER: run-a' "$log" && grep -qF 'MARKER: run-b' "$log"; then
+        mixed_group_logs=$((mixed_group_logs + 1))
     fi
 done
-assert_status distinct_log_count 2 "$log_count"
-assert_status one_log_per_run_a 1 "$a_log_count"
-assert_status one_log_per_run_b 1 "$b_log_count"
+assert_status four_group_logs 4 "$group_log_count"
+assert_status two_group_logs_for_run_a 2 "$a_group_logs"
+assert_status two_group_logs_for_run_b 2 "$b_group_logs"
+assert_status no_mixed_group_logs 0 "$mixed_group_logs"
+
+for key in HOME OMACARDS_STATE_DB TMPDIR; do
+    variants=$(grep -hoE "(^| )${key}=[^ ]*" "$repo"/build/tests/group.* | sort -u | wc -l)
+    assert_status "distinct_group_$key" 4 "$variants"
+done
+cache_variants=$(grep -hoE '(^| )XDG_CACHE_HOME=[^ ]*' "$repo"/build/tests/group.* | sort -u | wc -l)
+assert_status shared_warm_xdg_cache 1 "$cache_variants"
+
+set +e
+PATH="$fakebin:$PATH" "$repo/bin/test" --suite TestCli run-a > "$tmp/out-focused.log" 2>&1
+status_focused=$?
+set -e
+assert_status focused_status 0 "$status_focused"
+assert_matches focused_has_one_group 1 "$(count_matches "$tmp/out-focused.log" 'GROUP: ')"
+assert_contains focused_keeps_smaller_count "$tmp/out-focused.log" 'across 2 suites'
 
 set +e
 PATH="$fakebin:$PATH" "$repo/bin/test" fail > "$tmp/out-fail.log" 2>&1
@@ -142,9 +206,10 @@ PATH="$fakebin:$PATH" "$repo/bin/test" partial > "$tmp/out-partial.log" 2>&1
 status_partial=$?
 set -e
 assert_status partial_run_status 1 "$status_partial"
-assert_contains partial_run_guard "$tmp/out-partial.log" 'expected 9'
+assert_contains partial_run_guard "$tmp/out-partial.log" 'expected 18'
 
 PATH="$fakebin:$PATH" "$repo/bin/test" info > "$tmp/out-info.log" 2>&1
+assert_matches info_has_two_groups 2 "$(count_matches "$tmp/out-info.log" 'GROUP: ')"
 assert_contains info_mode_summary "$tmp/out-info.log" 'across 0 suites'
 
 if [ "$failures" -ne 0 ]; then

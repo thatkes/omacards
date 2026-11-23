@@ -1,4 +1,5 @@
 #include <QGuiApplication>
+#include <QStringList>
 #include <QTextStream>
 #include <QVector>
 #include <QtTest>
@@ -30,19 +31,40 @@ struct Suite {
     QObject *object;
 };
 
-bool takeSuite(int &argc, char **argv, QString *name, bool *present) {
-    *present = false;
+// Strip suite selectors before QtTest sees argv: it would read unknown
+// positional arguments as test function names. "--suite" keeps its single-suite
+// contract; plain suite class names let bin/test run several suites in one
+// process. Anything that is not a registered suite name is left for QtTest.
+bool takeSelectedSuites(int &argc, char **argv, const QVector<Suite> &suites, QStringList *selected) {
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--suite") != 0)
             continue;
-        *present = true;
         if (i + 1 >= argc)
             return false;
-        *name = QString::fromLocal8Bit(argv[i + 1]);
+        *selected << QString::fromLocal8Bit(argv[i + 1]);
         for (int j = i + 2; j < argc; ++j)
             argv[j - 2] = argv[j];
         argc -= 2;
-        return true;
+        break;
+    }
+
+    for (int i = 1; i < argc; ++i) {
+        const QString candidate = QString::fromLocal8Bit(argv[i]);
+        bool known = false;
+        for (const Suite &suite : suites) {
+            if (suite.name == candidate) {
+                known = true;
+                break;
+            }
+        }
+        if (!known)
+            continue;
+        if (!selected->contains(candidate))
+            *selected << candidate;
+        for (int j = i + 1; j < argc; ++j)
+            argv[j - 1] = argv[j];
+        --argc;
+        --i;
     }
     return true;
 }
@@ -73,14 +95,6 @@ bool isInformationalMode(int argc, char **argv) {
 int main(int argc, char **argv) {
     QGuiApplication app(argc, argv);
     Q_UNUSED(app);
-
-    QString selected;
-    bool hasSuite = false;
-    if (!takeSuite(argc, argv, &selected, &hasSuite)) {
-        QTextStream err(stderr);
-        err << "Usage: omacards_tests [--suite <name>] [QtTest options]\n";
-        return 2;
-    }
 
     TestCli cli;
     TestBackend backend;
@@ -126,6 +140,28 @@ int main(int argc, char **argv) {
         return 2;
     }
 
+    QStringList selected;
+    if (!takeSelectedSuites(argc, argv, suites, &selected)) {
+        QTextStream err(stderr);
+        err << "Usage: omacards_tests [--suite <name>] [suite names] [QtTest options]\n";
+        return 2;
+    }
+    for (const QString &name : selected) {
+        bool known = false;
+        for (const Suite &suite : suites) {
+            if (suite.name == name) {
+                known = true;
+                break;
+            }
+        }
+        if (!known) {
+            QTextStream err(stderr);
+            err << "Unknown suite: " << name << '\n';
+            printSuites(suites);
+            return 2;
+        }
+    }
+
     // bin/check-test-summary compares this with the number of Totals lines.
     // Announce the plan before any suite runs so a truncated run cannot pass.
     if (isInformationalMode(argc, argv)) {
@@ -133,26 +169,17 @@ int main(int argc, char **argv) {
         out << "OMACARDS_TEST_MODE: info\n";
         out.flush();
     } else {
-        const int plannedSuites = hasSuite ? 1 : kExpectedSuiteCount;
+        const int plannedSuites = selected.isEmpty() ? kExpectedSuiteCount : selected.size();
         QTextStream out(stdout);
         out << "OMACARDS_TEST_SUITES: " << plannedSuites << '\n';
         out.flush();
     }
 
-    if (hasSuite) {
-        for (const Suite &suite : suites) {
-            if (suite.name != selected)
-                continue;
-            return QTest::qExec(suite.object, argc, argv) == 0 ? 0 : 1;
-        }
-        QTextStream err(stderr);
-        err << "Unknown suite: " << selected << '\n';
-        printSuites(suites);
-        return 2;
-    }
-
     int failed = 0;
-    for (const Suite &suite : suites)
+    for (const Suite &suite : suites) {
+        if (!selected.isEmpty() && !selected.contains(suite.name))
+            continue;
         failed += QTest::qExec(suite.object, argc, argv);
+    }
     return failed == 0 ? 0 : 1;
 }
