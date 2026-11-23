@@ -87,6 +87,11 @@ private:
         QSize reservedSize;
     };
 
+    struct ActiveRender {
+        RenderRequest request;
+        quint64 generation = 0;
+    };
+
     void enqueueExpression(const RenderRequest &request);
     // A cached expression needs no new worker, but an active one still has to
     // record the ink now on screen before its old worker finishes.
@@ -104,9 +109,7 @@ private:
     QThreadPool m_pool;
     QQueue<RenderRequest> m_queue;
     QSet<QString> m_queuedKeys;
-    QSet<QString> m_activeKeys;
-    QHash<QString, RenderRequest> m_activeRequests;
-    QHash<QString, quint64> m_activeRequestGenerations;
+    QHash<QString, ActiveRender> m_activeRenders;
     quint64 m_generation = 0;
 
     QString renderLatex(const QString &expression) const;
