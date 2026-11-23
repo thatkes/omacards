@@ -28,3 +28,4 @@ cd "$ROOT"
 ./bin/check-format
 ./bin/check-doc-paths
 ./tests/test_check_doc_paths.sh
+./tests/test_wave_ready.sh

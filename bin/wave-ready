@@ -1,0 +1,205 @@
+#!/bin/sh
+set -eu
+
+# Pre-stage ticket worktrees from a proved base SHA. Each id is handled in turn
+# so one bad checkout does not stop the rest of the pool from being prepared.
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+
+usage() {
+    printf 'Usage: wave-ready <base-sha> --root DIR --suites MAP <id>...\n' >&2
+}
+
+report_error() {
+    printf 'ERROR %s %s\n' "$1" "$2" >&2
+    failures=$((failures + 1))
+}
+
+one_line() {
+    printf '%s' "$1" | tr '\n' ' ' | sed 's/  */ /g'
+}
+
+base=
+root=
+suites=
+ids=
+failures=0
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --root)
+            [ "$#" -ge 2 ] || { usage; exit 2; }
+            root=$2
+            shift 2
+            ;;
+        --suites)
+            [ "$#" -ge 2 ] || { usage; exit 2; }
+            suites="${suites:+$suites
+}$2"
+            shift 2
+            ;;
+        --root=*)
+            root=${1#--root=}
+            shift
+            ;;
+        --suites=*)
+            suites="${suites:+$suites
+}${1#--suites=}"
+            shift
+            ;;
+        -*)
+            usage
+            exit 2
+            ;;
+        *)
+            if [ -z "$base" ]; then
+                base=$1
+            else
+                ids="$ids $1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+if [ -z "$base" ] || [ -z "$root" ] || [ -z "$suites" ] || [ -z "$ids" ]; then
+    usage
+    exit 2
+fi
+if [ ! -d "$root" ]; then
+    printf 'ERROR worktree root is not a directory: %s\n' "$root" >&2
+    exit 2
+fi
+root=$(CDPATH= cd -- "$root" && pwd -P)
+
+expected=$(git -C "$ROOT" rev-parse --verify "$base^{commit}" 2>/dev/null || true)
+if [ -z "$expected" ]; then
+    printf 'ERROR unknown base SHA: %s\n' "$base" >&2
+    exit 2
+fi
+
+# Commas separate suites inside a pair; whitespace and semicolons separate
+# pairs. A token without '=' continues the preceding pair.
+suite_map=$(awk '
+    function add(token,    eq, key, value) {
+        if (token == "") return
+        eq = index(token, "=")
+        if (eq == 0) {
+            if (last == "") bad = 1
+            else pairs[last] = pairs[last] "," token
+            return
+        }
+        key = substr(token, 1, eq - 1)
+        value = substr(token, eq + 1)
+        sub(/^#/, "", key)
+        if (key !~ /^[0-9]+$/ || value == "") bad = 1
+        else {
+            pairs[key] = value
+            last = key
+        }
+    }
+    {
+        line = $0
+        gsub(/[,;]/, " ", line)
+        n = split(line, tokens, /[[:space:]]+/)
+        for (i = 1; i <= n; i++) add(tokens[i])
+    }
+    END {
+        if (bad) exit 1
+        for (key in pairs) print key "\t" pairs[key]
+    }
+' <<EOF
+$suites
+EOF
+) || {
+    printf 'ERROR invalid --suites map\n' >&2
+    exit 2
+}
+
+prove() {
+    path=$1
+    actual=$(git -C "$path" rev-parse --show-toplevel 2>/dev/null || true)
+    if [ "$actual" != "$path" ]; then
+        reason='worktree top level mismatch'
+        return 1
+    fi
+    head=$(git -C "$path" rev-parse --verify HEAD 2>/dev/null || true)
+    if [ "$head" != "$expected" ]; then
+        reason='wrong HEAD'
+        return 1
+    fi
+    if ! status=$(git -C "$path" status --porcelain --untracked-files=no 2>&1); then
+        reason="cannot read tracked status: $(one_line "$status")"
+        return 1
+    fi
+    if [ -n "$status" ]; then
+        reason='dirty tracked checkout'
+        return 1
+    fi
+    return 0
+}
+
+for raw in $ids; do
+    id=$raw
+    case "$id" in
+        \#*) id=${id#\#} ;;
+    esac
+    case "$id" in
+        ''|*[!0-9]*)
+            report_error "$raw" 'invalid id'
+            continue
+            ;;
+    esac
+    name="ticket-$id"
+    path="$root/$name"
+
+    id_suites=$(printf '%s\n' "$suite_map" |
+        awk -F '\t' -v key="$id" '$1 == key { print $2; exit }')
+    if [ -z "$id_suites" ]; then
+        report_error "$name" 'no suites mapping'
+        continue
+    fi
+
+    if [ -d "$path" ]; then
+        if ! prove "$path"; then
+            report_error "$name" "$reason"
+            continue
+        fi
+    elif [ -e "$path" ]; then
+        report_error "$name" 'worktree path is not a directory'
+        continue
+    else
+        branch_sha=$(git -C "$ROOT" rev-parse --verify --quiet \
+            "refs/heads/$name" 2>/dev/null || true)
+        if [ -n "$branch_sha" ] && [ "$branch_sha" != "$expected" ]; then
+            report_error "$name" "branch $name exists at $branch_sha"
+            continue
+        fi
+        if [ -n "$branch_sha" ]; then
+            set -- worktree add "$path" "$name"
+        else
+            set -- worktree add -b "$name" "$path" "$expected"
+        fi
+        if ! create_output=$(git -C "$ROOT" "$@" 2>&1); then
+            report_error "$name" \
+                "cannot create worktree: $(one_line "$create_output")"
+            continue
+        fi
+    fi
+
+    if ! sync_output=$("$ROOT/bin/sync-worktree-local-docs" "$path" 2>&1); then
+        report_error "$name" \
+            "cannot sync local docs: $(one_line "$sync_output")"
+        continue
+    fi
+
+    if ! prove "$path"; then
+        report_error "$name" "$reason"
+        continue
+    fi
+    printf '%s %s %s\n' "$name" "$path" "$id_suites"
+done
+
+if [ "$failures" -ne 0 ]; then
+    exit 1
+fi
+exit 0
