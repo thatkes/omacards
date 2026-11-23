@@ -157,18 +157,6 @@ QString cacheKey(const QString &path) {
     return QFileInfo(path).completeBaseName();
 }
 
-QString decodedMathSvg(const QString &html) {
-    static const QString prefix = QStringLiteral("<img src='data:image/svg+xml;base64,");
-    const int start = html.indexOf(prefix);
-    if (start < 0)
-        return {};
-    const int end = html.indexOf('\'', start + prefix.size());
-    if (end < 0)
-        return {};
-    const QByteArray encoded = html.mid(start + prefix.size(), end - start - prefix.size()).toLocal8Bit();
-    return QString::fromUtf8(QByteArray::fromBase64(encoded));
-}
-
 class AgainDelayGuard {
 public:
     AgainDelayGuard() : m_previous(qgetenv("OMACARDS_AGAIN_DELAY_MS")) {}
@@ -798,7 +786,7 @@ void TestStudySession::themeChangeDuringRenderUsesNewInk() {
     QTRY_VERIFY_WITH_TIMEOUT(!fixture.session.question().contains(QStringLiteral("<!--omacards-math:")), 5000);
     const QString question = fixture.session.question();
     QVERIFY(question.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
-    const QString svg = decodedMathSvg(question);
+    const QString svg = svgFromMathHtml(question);
     QVERIFY(svg.contains(QStringLiteral("fill=\"#112233\"")));
     QVERIFY(!svg.contains(QStringLiteral("fill=\"#000000\"")));
     // Switching ink reused the in-flight neutral render; it never started a
