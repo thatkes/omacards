@@ -39,39 +39,34 @@ command -v omacards
   decks, state and cache at a temporary directory removed on exit.
 - `bin/link` also registers the desktop launcher entry; see **Development**.
 
-## Common commands
+## Command list
 
 ```sh
-omacards check --json                        # Deck issues (incl. math warnings)
-omacards check --deck Spanish --json         # scope decks, cards and Deck issues to one deck
-omacards check --math --json                 # also add a mathWarnings array
-omacards check --strict --json               # exit 1 if any Deck issue exists
-omacards decks --json
-omacards decks current --json                # Current deck
-omacards use-deck Spanish --json             # choose the Current deck
-omacards cards --deck Spanish --json
-omacards search gato --json
-omacards preview --deck Spanish --card <card-id> --format text --json
-omacards warm --deck Spanish --json          # pre-render the Deck's math SVGs
-omacards add-deck "Spanish" --description "Vocab" --json
-omacards add-cards --deck Spanish --input cards.json --json
-omacards add-card --deck Spanish -q 'What is "gato"?' -a 'cat' --tags vocab,animals --json
-omacards add-card --deck Physics -q 'Solve \(x^2+1=0\)' -a '\(x=\pm i\)' --json
-omacards edit-card -c <card-id> -a 'a cat' --tags vocab --json
-omacards delete-card -c <card-id> --json
-omacards delete-deck Spanish --json
-omacards import ~/Downloads/deck.apkg --deck Spanish --json
-omacards import ~/Downloads/words.csv --deck Spanish --json
-omacards import ~/Downloads/deck.json --json
-omacards due --json
-omacards review -c <card-id> -r 3 --json
-omacards cram --deck Spanish --steps 20 --json
-omacards stats --json
-omacards config --json
-omacards config --new-card-allowance 10 --day-start-hour 3 --retention 0.9 --json
-omacards help                                # usage text; ignores --json
-omacards open                                # start the GUI; ignores --json
-omacards skill install
+omacards add-card [--deck <deck>] -q <question> -a <answer> [--tags <tags>] [--json]
+omacards add-cards [--deck <deck>] [--description <text>] --input <file> [--json]
+omacards add-deck <deck> [--description <text>] [--json]
+omacards cards [--deck <deck>] [--json]
+omacards check [--deck <deck>] [--math] [--strict] [--json]
+omacards config [--new-card-allowance <n>] [--day-start-hour <h>] [--retention <r>] [--json]
+omacards cram [--deck <deck>] [--steps <n>] [--json]
+omacards decks [--json]
+omacards decks current [--json]
+omacards delete-card -c <card-id> [--json]
+omacards delete-deck <deck> [--json]
+omacards due [--deck <deck>] [--json]
+omacards edit-card -c <card-id> -a <answer> [--type <type>] [--tags <tags>] [--json]
+omacards help  # aliases: --help, -h
+omacards import <file> [--deck <deck>] [--json]
+omacards open  # start the GUI; ignores --json
+omacards preview [--deck <deck>] [--card <card-id>] [--format <format>] [--json]
+omacards rename-deck <old-name> <new-name> [--json]
+omacards review -c <card-id> -r <rating> [--json]
+omacards search <term> [--deck <deck>] [--json]
+omacards skill <subcommand> [--json]
+omacards skill install [--json]
+omacards stats [--json]
+omacards use-deck <deck> [--json]
+omacards warm [--deck <deck>] [--json]
 ```
 
 `add-card` without `--deck` writes to the Current deck, so check

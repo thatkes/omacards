@@ -120,42 +120,37 @@ Anki `.apkg` imports preserve HTML entities, tags, and cloze note types (`{{c1::
 
 ## Agent CLI
 
-Headless commands accept `--json` and exit 0 or 1. In text mode errors go to
+The headless CLI is built for agents and useful from a shell too. Headless
+commands accept `--json` and exit 0 or 1. In text mode errors go to
 stderr; in JSON mode failures print an `error`/`ok:false` object to stdout.
 `open` and `help` ignore `--json`.
 
 ```sh
-omacards check
-omacards check --deck Spanish
-omacards check --math --json                  # also list mathWarnings
-omacards check --strict --json                # exit 1 if any Deck issue exists
-omacards decks
-omacards decks current                        # Current deck
-omacards use-deck Spanish
-omacards cards --deck Spanish
-omacards search gato --deck Spanish
-omacards preview --deck Spanish --format text # Unicode rendering
-omacards preview --deck Spanish --card <card-id> --format html
-omacards warm --deck Spanish                  # pre-render the Deck's math SVGs
-omacards add-deck Spanish --description 'Vocab'
-omacards add-cards --deck Spanish --input cards.json
-omacards add-cards --deck Spanish --input -    # read cards from stdin
-omacards add-card --deck Spanish -q 'What is "gato"?' -a cat --tags vocab
-omacards edit-card -c <card-id> -a 'a cat' --type basic
-omacards delete-card -c <card-id>
-omacards delete-deck Spanish
-omacards import ~/Downloads/deck.apkg --deck Spanish
-omacards import ~/Downloads/words.csv --deck Spanish
-omacards import ~/Downloads/deck.json --deck Spanish
-omacards due --deck Spanish
-omacards review -c <card-id> -r 3
-omacards cram --deck Spanish --steps 20
-omacards stats
-omacards config
-omacards config --new-card-allowance 10 --day-start-hour 3 --retention 0.9
-omacards skill install
-omacards help                                 # also --help or -h
-omacards open                                 # start the GUI
+omacards add-card [--deck <deck>] -q <question> -a <answer> [--tags <tags>] [--json]
+omacards add-cards [--deck <deck>] [--description <text>] --input <file> [--json]
+omacards add-deck <deck> [--description <text>] [--json]
+omacards cards [--deck <deck>] [--json]
+omacards check [--deck <deck>] [--math] [--strict] [--json]
+omacards config [--new-card-allowance <n>] [--day-start-hour <h>] [--retention <r>] [--json]
+omacards cram [--deck <deck>] [--steps <n>] [--json]
+omacards decks [--json]
+omacards decks current [--json]
+omacards delete-card -c <card-id> [--json]
+omacards delete-deck <deck> [--json]
+omacards due [--deck <deck>] [--json]
+omacards edit-card -c <card-id> -a <answer> [--type <type>] [--tags <tags>] [--json]
+omacards help  # aliases: --help, -h
+omacards import <file> [--deck <deck>] [--json]
+omacards open  # start the GUI
+omacards preview [--deck <deck>] [--card <card-id>] [--format <format>] [--json]
+omacards rename-deck <old-name> <new-name> [--json]
+omacards review -c <card-id> -r <rating> [--json]
+omacards search <term> [--deck <deck>] [--json]
+omacards skill <subcommand> [--json]
+omacards skill install [--json]
+omacards stats [--json]
+omacards use-deck <deck> [--json]
+omacards warm [--deck <deck>] [--json]
 ```
 
 `omacards skill install` writes a short agent skill to `~/.agents/skills/omacards/SKILL.md`. Set `OMACARDS_DECKS_DIR` and `OMACARDS_STATE_DB` to isolate data for tests or scripts.
