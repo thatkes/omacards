@@ -123,7 +123,7 @@ Anki `.apkg` imports preserve HTML entities, tags, and cloze note types (`{{c1::
 
 ## Agent CLI
 
-Every command accepts `--json`, prints errors to stderr and exits 0 or 1.
+Every command accepts `--json`; in text mode errors go to stderr, while in JSON mode failures print an `error`/`ok:false` object to stdout, and commands exit 0 or 1.
 
 ```sh
 omacards check
