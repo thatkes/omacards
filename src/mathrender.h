@@ -88,6 +88,9 @@ private:
     };
 
     void enqueueExpression(const RenderRequest &request);
+    // A cached expression needs no new worker, but an active one still has to
+    // record the ink now on screen before its old worker finishes.
+    void refreshActiveRequestInk(const QString &key, const QString &ink, double scale);
     void startNextRender();
     QString renderRequest(const RenderRequest &request);
     QString renderExpression(const QString &expression, const QString &ink, double scale,

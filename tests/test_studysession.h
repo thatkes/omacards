@@ -28,4 +28,5 @@ private slots:
     void prefetchResultIsIgnoredForCardsAlreadyLeftBehind();
     void themeChangeRecolorsFromCacheWithoutPrefetch();
     void themeChangeDuringRenderUsesNewInk();
+    void themeChangeAfterSvgIsCachedUsesNewInk();
 };
