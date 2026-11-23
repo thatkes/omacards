@@ -2,6 +2,13 @@
 set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT"
+
+# Extension convention: this runner only resolves the repo root and calls
+# scripts. Each check belongs in an executable bin/check-<concern> script and
+# each shell self-test in tests/. A new check adds one call here; keep the
+# existing calls in their current order so their output order is unchanged.
+# Do not add check logic to this file.
+
 ./bin/check-cli-contract
 ./bin/check-local-only-files
 ./bin/check-sync-worktree-local-docs
@@ -14,4 +21,5 @@ cd "$ROOT"
 ./tests/test_check_ledger_open_ids.sh
 ./tests/test_wave_timing.sh
 ./tests/test_merge_backstop.sh
-clang-format --dry-run --Werror src/*.h src/*.cpp tests/*.h tests/*.cpp
+./tests/test_check_format.sh
+./bin/check-format
