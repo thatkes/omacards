@@ -111,6 +111,48 @@ no input file, the command fails clearly instead of blocking. `import FILE.json`
 routes to the same parser and derives the deck name from the filename unless
 `--deck` is given.
 
+## Worked multi-line Answer recipes
+
+For a one-off Card, use ANSI-C single quotes so `\n` becomes a real newline.
+Plain single quotes leave `\n` as a literal backslash and n; the Answer then
+contains two characters instead of a line break. Double LaTeX backslashes
+inside `$'...'` (`\\(` for `\(`, `\\frac` for `\frac`) because bash otherwise
+reads `\f` and `\t` as its own escapes:
+
+```sh
+omacards add-card --deck Calculus \
+  -q 'Write the geometric series.' \
+  -a $'For |x| < 1:\n\\(\\sum_{n=0}^{\\infty} x^n = \\frac{1}{1-x}\\)' \
+  --json
+```
+
+For `add-cards`, write the line break as the JSON escape `\n` inside the Answer
+string and keep LaTeX backslashes doubled for JSON. In `cards.json`:
+
+```json
+{
+  "cards": [
+    {
+      "question": "Write the geometric series.",
+      "answer": "For |x| < 1:\n\\(\\sum_{n=0}^{\\infty} x^n = \\frac{1}{1-x}\\)"
+    }
+  ]
+}
+```
+
+```sh
+omacards add-cards --deck Calculus --input cards.json --json
+```
+
+The same JSON works on stdin. A quoted heredoc leaves the backslashes for the
+JSON parser:
+
+```sh
+omacards add-cards --deck Calculus --input - --json <<'JSON'
+{"cards":[{"question":"Write the geometric series.","answer":"For |x| < 1:\n\\(\\sum_{n=0}^{\\infty} x^n = \\frac{1}{1-x}\\)"}]}
+JSON
+```
+
 ## Hand-edited deck format
 
 When editing a `.txt` file directly, use this format:
