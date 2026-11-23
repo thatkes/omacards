@@ -9,7 +9,7 @@
 StudySession::StudySession(DeckRepository &decks, StudyPlanner &planner, RatingRecording &ratings, QObject *parent)
     : QObject(parent), m_decks(decks), m_planner(planner), m_ratings(ratings), m_repeatDelayMs(Config::againDelayMs()) {
     m_repeatTimer.setSingleShot(true);
-    connect(&m_repeatTimer, &QTimer::timeout, this, &StudySession::presentCard);
+    connect(&m_repeatTimer, &QTimer::timeout, this, [this] { presentCard(); });
     connect(&m_math, &MathRenderer::mathRendered, this, &StudySession::applyMathRenderResult);
 }
 
@@ -138,8 +138,10 @@ bool StudySession::rate(Rating rating, double desiredRetention) {
         answerCram(rating);
     else
         answerReview(rating, desiredRetention);
-    presentCard();
-    // Subscribers see the presented Flashcard's Leitner box, not the rated one.
+    presentCard(false);
+    // One settled notification after presentation: subscribers see the next
+    // Flashcard's Leitner box, not the rated one. Presentation itself emits
+    // stats only for callers that do not rate a Card.
     emit statsChanged();
     return true;
 }
@@ -183,7 +185,7 @@ void StudySession::startRepeatTimer(qint64 waitMs) {
         m_repeatTimer.start(waitMs);
 }
 
-void StudySession::presentCard() {
+void StudySession::presentCard(bool notifyStats) {
     m_showingAnswer = false;
     m_waitingForRepeat = false;
     const bool cram = m_mode == StudyMode::Cram;
@@ -217,7 +219,7 @@ void StudySession::presentCard() {
     if (!card) {
         m_progression.remove(m_currentId);
         m_currentId.clear();
-        presentCard();
+        presentCard(notifyStats);
         return;
     }
     m_question = m_math.renderWithPlaceholders(DeckIO::displayQuestion(*card), m_questionInk, MathScale::kQuestion);
@@ -233,7 +235,10 @@ void StudySession::presentCard() {
                       .arg(Config::kLeitnerBoxes)
                       .arg(cramNextInCards()));
     }
-    emit statsChanged();
+    // Non-rating callers keep the notification at this point in the
+    // card-changed and math-prefetch order.
+    if (notifyStats)
+        emit statsChanged();
     emit cardChanged();
     queueMathPrefetch();
 }

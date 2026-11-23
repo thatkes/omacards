@@ -11,6 +11,8 @@ private slots:
     void setModeCanonicalInputIsNoOp();
     void setModeCramSwitchesAndResets();
     void statsChangedSeesPresentedLeitnerBox();
+    void waitingExitEmitsOneSettledStatsNotification();
+    void finishedExitEmitsOneSettledStatsNotification();
     void invalidRatingsAreNoOps();
     void reviewPassesTypedRatingToRecording();
     void reviewFailuresKeepTranslatedText();
