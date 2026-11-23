@@ -132,6 +132,19 @@ no input file, the command fails clearly instead of blocking. `import FILE.json`
 routes to the same parser and derives the deck name from the filename unless
 `--deck` is given.
 
+## Deck creation and descriptions
+
+`add-card --deck NEW` creates the Deck if it does not exist, so a one-off Card
+needs no separate `add-deck`:
+
+```sh
+omacards add-card --deck BrandNew -q 'Question?' -a 'Answer' --json
+```
+
+`add-cards --deck NAME --description TEXT` updates an existing Deck's
+description as well as adding the Cards. On a new Deck, the same flag sets the
+initial description.
+
 ## Worked multi-line Answer recipes
 
 For a one-off Card, use ANSI-C single quotes so `\n` becomes a real newline.
