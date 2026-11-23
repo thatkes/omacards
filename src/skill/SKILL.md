@@ -187,15 +187,22 @@ After editing a file by hand, run the **validation loop** below.
 
 ## Math notation
 
+`$$...$$` and `\(...\)` are the supported delimiters. Single-dollar `$...$`
+is not rendered: it stays literal in both text and HTML output.
+
 No renderer is bundled, so math falls back to Unicode unless a toolchain is
 detected on `PATH`: `tectonic` + `pdftocairo`, `latex` + `dvisvgm`, or
-`pdflatex` + `pdftocairo`. This checkout has `tectonic` and `pdftocairo`, so
-`omacards check --json` reports `"math":"LaTeX (SVG)"`. Use notation that
-survives the fallback:
+`pdflatex` + `pdftocairo`. With one of those installed,
+`omacards check --json` reports `"math":"LaTeX (SVG)"`; otherwise it
+reports `"math":"Unicode fallback"`. Use notation that survives it:
 
 - Fractions as `(a)/(b)` and powers as `x^(2n+1)` — these render legibly.
-- Write one backslash in shell arguments and deck files: `\(...\)`, not
-  `\\(...\\)`. JSON examples need `\\(` because JSON escapes backslashes.
+- Backslashes are consumed by each layer. In single-quoted shell arguments
+  and deck files write one: `\(...\)`. In a shell double-quoted argument
+  write `\\(`, for example `-a "Expand \\(x\\)"`, which reaches the card
+  as `\(x\)`. In a JSON file write `\\(`; when that JSON sits inside a
+  shell double-quoted argument, write `\\\\(` so the shell halves the
+  backslashes before JSON parses them.
 - Safe macros: `\sum`, `\infty`, `\frac`, `\binom`, `\sqrt`, `\sin`, `\cos`,
   `\ln`, `\pi`, `\pm`, `\leq`, `\to`, `\int`, `\cdots`, inside `\(...\)` or
   `$$...$$`. The fallback maps nested `\frac{a}{b}` to `(a)/(b)`,
