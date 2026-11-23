@@ -62,6 +62,7 @@ void TestCli::helpIsHeadless() {
     QVERIFY(help.contains("(alias: active)"));
     QVERIFY(help.contains("--new-card-allowance"));
     QVERIFY(help.contains("--new-per-day"));
+    QVERIFY(help.contains("--day-start-hour"));
 }
 
 void TestCli::addCardsCreatesDeckBulk() {

@@ -123,28 +123,43 @@ Anki `.apkg` imports preserve HTML entities, tags, and cloze note types (`{{c1::
 
 ## Agent CLI
 
-Every command accepts `--json`, prints errors to stderr and exits 0 or 1.
+Headless commands accept `--json`, exit 0 or 1, and print errors to stderr
+unless `--json` is set. `open` and `help` ignore `--json`.
 
 ```sh
 omacards check
 omacards check --deck Spanish
+omacards check --math --json                  # also list mathWarnings
+omacards check --strict --json                # exit 1 if any Deck issue exists
 omacards decks
+omacards decks current                        # Current deck (alias: active)
+omacards decks active
+omacards use-deck Spanish
 omacards cards --deck Spanish
 omacards search gato --deck Spanish
-omacards add-deck Spanish
+omacards preview --deck Spanish --format text # Unicode rendering
+omacards preview --deck Spanish --card <card-id> --format html
+omacards warm --deck Spanish                  # pre-render the Deck's math SVGs
+omacards add-deck Spanish --description 'Vocab'
+omacards add-cards --deck Spanish --input cards.json
+omacards add-cards --deck Spanish --input -    # read cards from stdin
 omacards add-card --deck Spanish -q 'What is "gato"?' -a cat --tags vocab
-omacards edit-card -c <card-id> -a 'a cat'
+omacards edit-card -c <card-id> -a 'a cat' --type basic
 omacards delete-card -c <card-id>
 omacards delete-deck Spanish
 omacards import ~/Downloads/deck.apkg --deck Spanish
 omacards import ~/Downloads/words.csv --deck Spanish
+omacards import ~/Downloads/deck.json --deck Spanish
 omacards due --deck Spanish
 omacards review -c <card-id> -r 3
 omacards cram --deck Spanish --steps 20
 omacards stats
 omacards config
 omacards config --new-card-allowance 10 --day-start-hour 3 --retention 0.9
+omacards config --new-per-day 10               # alias for --new-card-allowance
 omacards skill install
+omacards help                                 # also --help or -h
+omacards open                                 # start the GUI
 ```
 
 `omacards skill install` writes a short agent skill to `~/.agents/skills/omacards/SKILL.md`. Set `OMACARDS_DECKS_DIR` and `OMACARDS_STATE_DB` to isolate data for tests or scripts.
