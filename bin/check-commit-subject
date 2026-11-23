@@ -3,7 +3,10 @@ set -eu
 
 status=0
 
-types='feat fix chore style perf test refactor docs'
+# Reverts use a typed subject: revert: "<original subject>". Keep the quoted
+# original so readers can tell what was undone, but shorten the quoted text
+# when it would push the subject over the 50-character cap.
+types='feat fix chore style perf test refactor docs revert'
 
 check_subject() {
     label=$1

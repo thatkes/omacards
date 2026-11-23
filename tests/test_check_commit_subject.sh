@@ -98,6 +98,19 @@ check_file merge_subject_typed_accepted 0 '' "$tmp/merge.txt"
 write_message "$tmp/untyped-merge.txt" 'Merge ticket-42 into integration'
 check_file untyped_merge_rejected 1 'type prefix' "$tmp/untyped-merge.txt"
 
+write_message "$tmp/revert-type.txt" 'revert: "drop stale card count"'
+check_file revert_type_accepted 0 '' "$tmp/revert-type.txt"
+
+write_message "$tmp/git-revert.txt" \
+    'Revert "fix: skip skill check in linked worktrees"'
+check_file git_revert_subject_rejected 1 'unknown commit subject type' \
+    "$tmp/git-revert.txt"
+
+write_message "$tmp/revert-long.txt" \
+    'revert: "this quoted original subject is deliberately longer than fifty characters"'
+check_file revert_subject_over_50_rejected 1 'over 50 characters' \
+    "$tmp/revert-long.txt"
+
 write_message "$tmp/long-subject.txt" \
     'fix: this commit subject is deliberately longer than fifty characters'
 check_file subject_over_50_rejected 1 'over 50 characters' "$tmp/long-subject.txt"
@@ -118,6 +131,8 @@ check_stdin stdin_untyped_merge_rejected 1 'type prefix' \
     'Merge ticket-42 into integration'
 check_stdin stdin_unknown_type_rejected 1 'unknown commit subject type' \
     'doctype: update README'
+check_stdin stdin_revert_type_accepted 0 '' \
+    'revert: "drop stale card count"'
 check_stdin stdin_over_50_rejected 1 'over 50 characters' \
     'fix: this commit subject is deliberately longer than fifty characters'
 
