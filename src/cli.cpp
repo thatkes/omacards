@@ -767,6 +767,21 @@ int run(const QStringList &arguments) {
     const QVector<Deck> decks = backend.allDecks();
     const bool json = options.json;
 
+    // Shared lookup and validation for read-only command branches. An empty
+    // name means all Decks here, so only a named Deck is validated.
+    const auto requireDeck = [&](const QString &deckName, QString *resolvedPath = nullptr) -> bool {
+        if (deckName.isEmpty())
+            return true;
+        const QString path = resolveDeckPath(decks, backend.decksDirectory(), deckName);
+        if (path.isEmpty()) {
+            fail(QObject::tr("No such deck: %1").arg(deckName), json);
+            return false;
+        }
+        if (resolvedPath)
+            *resolvedPath = path;
+        return true;
+    };
+
     if (options.command == "check") {
         const QString targetPath =
             options.deck.isEmpty() ? QString() : resolveDeckPath(decks, backend.decksDirectory(), options.deck);
@@ -1051,8 +1066,8 @@ int run(const QStringList &arguments) {
     }
 
     if (options.command == "cards") {
-        if (!options.deck.isEmpty() && resolveDeckPath(decks, backend.decksDirectory(), options.deck).isEmpty())
-            return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
+        if (!requireDeck(options.deck))
+            return 1;
         QJsonArray array;
         for (const Card &card : allCards(decks, options.deck))
             array << cardJson(card);
@@ -1067,8 +1082,8 @@ int run(const QStringList &arguments) {
     }
 
     if (options.command == "search") {
-        if (!options.deck.isEmpty() && resolveDeckPath(decks, backend.decksDirectory(), options.deck).isEmpty())
-            return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
+        if (!requireDeck(options.deck))
+            return 1;
         const QVector<Card> matches = backend.searchCards(options.path, options.deck);
         QJsonArray array;
         for (const Card &card : matches)
@@ -1258,9 +1273,9 @@ int run(const QStringList &arguments) {
             return fail(QObject::tr("Give a deck name"), json);
         if (!options.descriptionSet)
             return fail(QObject::tr("Use --description TEXT"), json);
-        const QString targetPath = resolveDeckPath(decks, backend.decksDirectory(), name);
-        if (targetPath.isEmpty())
-            return fail(QObject::tr("No such deck: %1").arg(name), json);
+        QString targetPath;
+        if (!requireDeck(name, &targetPath))
+            return 1;
         if (!backend.setDeckDescription(name, options.description, &error))
             return fail(error, json);
 
@@ -1315,8 +1330,8 @@ int run(const QStringList &arguments) {
     }
 
     if (options.command == "due") {
-        if (!options.deck.isEmpty() && resolveDeckPath(decks, backend.decksDirectory(), options.deck).isEmpty())
-            return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
+        if (!requireDeck(options.deck))
+            return 1;
         const QVector<Card> cards = backend.dueCards(options.deck);
         QJsonArray array;
         for (const Card &card : cards)
