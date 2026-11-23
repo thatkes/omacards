@@ -6,7 +6,6 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
-#include <QFontMetricsF>
 #include <QImage>
 #include <QMouseEvent>
 #include <QWheelEvent>
@@ -252,18 +251,6 @@ private:
         return true;
     }
 };
-
-// The fake SVG has to declare the logical size the renderer will reserve for
-// this expression. Derive it from Qt's math-font metrics instead of calling
-// the renderer's private sizing helper.
-QSize expectedMathSize(const QString &expression, double scale) {
-    QFont font(QStringLiteral("Noto Sans Math"));
-    font.setPixelSize(qMax(1, qRound(10.0 * scale)));
-    const QFontMetricsF metrics(font);
-    const QRectF glyphs = metrics.boundingRect(unicodeMath(expression));
-    const auto evenPixels = [](qreal value) { return qMax(2, 2 * qCeil(value / 2.0)); };
-    return QSize(evenPixels(glyphs.width() + 4.0), evenPixels(glyphs.height() + 4.0));
-}
 
 QSize mathImageSize(const QString &html) {
     static const QRegularExpression image(R"re(<img\b[^>]*\bwidth=['"]?(\d+)['"]?[^>]*\bheight=['"]?(\d+)['"]?)re");
@@ -2519,13 +2506,13 @@ void TestBackend::qmlStudyShowsMathPlaceholderUntilSvgArrives() {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
     const QString bin = dir.filePath("bin");
-    const QSize reserved = expectedMathSize(QStringLiteral("x^2"), MathScale::kQuestion);
-    // svgPixelSize() halves the supersampled file, then the question scale
-    // doubles it again: a Wpx root becomes a W x H image at scale 2.
-    const QString svg = QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%1px\" height=\"%2px\" "
-                                       "viewBox=\"0 0 %1 %2\"><g fill=\"rgb(0%, 0%, 0%)\"/></svg>")
-                            .arg(reserved.width() / 2)
-                            .arg(reserved.height() / 2);
+    // normalizeCachedSvg() supersamples the root to 120px x 48px and
+    // svgPixelSize() halves it again, for a 60 x 24 logical size. At the
+    // question scale the finished image would be 120 x 48 if it were sized
+    // from the SVG instead of the reserved box.
+    const QSize svgImageSize(120, 48);
+    const QString svg = QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"60px\" height=\"24px\" "
+                                       "viewBox=\"0 0 60 24\"><g fill=\"rgb(0%, 0%, 0%)\"/></svg>");
     QVERIFY(writeFakePdfToolchain(bin, svg, QStringLiteral("sleep 1\n")));
 
     TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
@@ -2550,7 +2537,11 @@ void TestBackend::qmlStudyShowsMathPlaceholderUntilSvgArrives() {
     QVERIFY2(text.contains(QStringLiteral("<!--omacards-math:")), qPrintable(text));
     QVERIFY(!text.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
     QVERIFY(!text.contains(QStringLiteral("font-family: monospace")));
-    QCOMPARE(mathImageSize(text), reserved);
+    // The font-metric reservation must differ from the SVG's eventual size;
+    // otherwise the fixture would hide the bug again.
+    const QSize reserved = mathImageSize(text);
+    QVERIFY(!reserved.isEmpty());
+    QVERIFY(reserved != svgImageSize);
 
     const QSizeF questionSizeBefore(question->property("contentWidth").toReal(),
                                     question->property("contentHeight").toReal());
@@ -2560,6 +2551,7 @@ void TestBackend::qmlStudyShowsMathPlaceholderUntilSvgArrives() {
                              5000);
     const QString swapped = question->property("text").toString();
     QVERIFY(swapped.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
+    QVERIFY(svgFromMathHtml(swapped).contains(QStringLiteral("width=\"120px\" height=\"48px\"")));
     QCOMPARE(mathImageSize(swapped), reserved);
 
     const QSizeF questionSizeAfter(question->property("contentWidth").toReal(),
