@@ -14,6 +14,10 @@ _Avoid_: collection, folder, set
 The Deck chosen for study in the current and next Study session. It is moved to the top of the last-studied order when chosen.
 _Avoid_: active deck, selected deck, last studied deck
 
+**Candidate deck**:
+A Deck under consideration in the open Deck selector before it is committed as the Current deck.
+_Avoid_: selected deck, highlighted deck, pending deck
+
 **Card**:
 A single study item with a question and an answer.
 _Avoid_: note, item
