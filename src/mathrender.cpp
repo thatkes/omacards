@@ -377,9 +377,14 @@ QString MathRenderer::renderWithPlaceholders(const QString &text, const QString 
         text,
         [this, ink, scale](const QString &expression) {
             const QString path = mathSvgPath(expression);
-            if (QFileInfo::exists(path))
-                return renderExpression(expression, ink, scale);
             const QString key = QFileInfo(path).completeBaseName();
+            if (QFileInfo::exists(path)) {
+                // The SVG is ready, so no worker is started here. An older
+                // worker may still be holding this key: give it the ink that
+                // is about to be displayed before its result arrives.
+                refreshActiveRequestInk(key, ink, scale);
+                return renderExpression(expression, ink, scale);
+            }
             const QSize size = reservedMathSize(expression, scale, path);
             enqueueExpression({key, expression, ink, scale, size});
             return mathPlaceholderTag(key, size);
@@ -405,8 +410,9 @@ void MathRenderer::clearPendingMath() {
     m_queue.clear();
     m_queuedKeys.clear();
     // A worker already running keeps its slot, but its markup belongs to the
-    // old theme. finishRender detects the generation change and recolors from
-    // the neutral SVG the worker is about to write.
+    // old theme. The next request records this generation; finishRender then
+    // compares it with the worker's and recolors from the neutral SVG if they
+    // differ.
     ++m_generation;
 }
 
@@ -433,6 +439,18 @@ void MathRenderer::enqueueExpression(const RenderRequest &request) {
     startNextRender();
 }
 
+void MathRenderer::refreshActiveRequestInk(const QString &key, const QString &ink, double scale) {
+    if (!m_activeKeys.contains(key) || !m_activeRequests.contains(key))
+        return;
+    if (m_activeRequestGenerations.value(key) == m_generation)
+        return;
+    RenderRequest request = m_activeRequests.value(key);
+    request.ink = ink;
+    request.scale = scale;
+    m_activeRequests.insert(key, request);
+    m_activeRequestGenerations.insert(key, m_generation);
+}
+
 void MathRenderer::startNextRender() {
     constexpr int kMaxActive = 2;
     while (m_activeKeys.size() < kMaxActive && !m_queue.isEmpty()) {
@@ -457,15 +475,18 @@ void MathRenderer::finishRender(const QString &key, const QString &html, quint64
     if (!m_activeKeys.remove(key))
         return;
     const RenderRequest request = m_activeRequests.take(key);
-    m_activeRequestGenerations.remove(key);
-    QString result = html;
-    if (generation != m_generation) {
-        // The theme changed while this worker ran. Its SVG is neutral and now
-        // cached, so renderExpression only rebuilds the data URI; no toolchain
-        // runs on a theme switch.
-        result = QFileInfo::exists(mathSvgPath(request.expression))
-                     ? renderExpression(request.expression, request.ink, request.scale, request.reservedSize)
-                     : QString();
+    const quint64 requestGeneration = m_activeRequestGenerations.take(key);
+    QString result;
+    if (requestGeneration == m_generation) {
+        result = html;
+        if (generation != requestGeneration) {
+            // The worker's markup was built with the ink from an earlier
+            // generation. Its SVG is neutral and cached by now, so rebuild the
+            // data URI from the active request; no toolchain runs here.
+            result = QFileInfo::exists(mathSvgPath(request.expression))
+                         ? renderExpression(request.expression, request.ink, request.scale, request.reservedSize)
+                         : QString();
+        }
     }
     if (!result.isEmpty())
         emit mathRendered(key, result);

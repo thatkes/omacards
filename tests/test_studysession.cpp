@@ -817,3 +817,63 @@ void TestStudySession::themeChangeDuringRenderUsesNewInk() {
     // second toolchain run or changed the cached SVG.
     QCOMPARE(tectonicRenders(argsLog), 1);
 }
+
+void TestStudySession::themeChangeAfterSvgIsCachedUsesNewInk() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString bin = dir.filePath("bin");
+    const QString cache = dir.filePath("cache/omacards/math");
+    const QString argsLog = dir.filePath("args.log");
+    const QString cached = dir.filePath("cached");
+    const QString release = dir.filePath("release");
+    // The fake converter writes the neutral SVG, announces it, then waits.
+    // Both theme switches therefore take the cached path while the worker still
+    // holds the active request, just before it posts its queued completion.
+    const QString gate = QStringLiteral("printf '%s\\n' '") + kTinySvg +
+                         QStringLiteral("' > \"$svg\"\n"
+                                        "printf 'cached' > \"$OMACARDS_TEST_CACHED\"\n"
+                                        "i=0\n"
+                                        "while [ ! -e \"$OMACARDS_TEST_RELEASE\" ] && [ $i -lt 200 ]; do\n"
+                                        "    sleep 0.05\n"
+                                        "    i=$((i+1))\n"
+                                        "done\n");
+    QVERIFY(writeFakePdfToolchain(bin, kTinySvg, gate));
+
+    TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
+    TestSupport::ScopedEnv argsEnv("OMACARDS_TEST_ARGS", argsLog);
+    TestSupport::ScopedEnv cachedEnv("OMACARDS_TEST_CACHED", cached);
+    TestSupport::ScopedEnv releaseEnv("OMACARDS_TEST_RELEASE", release);
+    TestSupport::PathPrependGuard pathGuard(bin);
+
+    MathRenderer renderer(cache);
+    QSignalSpy rendered(&renderer, &MathRenderer::mathRendered);
+    const QString expression = QStringLiteral("\\(x^2\\)");
+    const QString key = cacheKey(renderer.mathSvgPath("x^2"));
+    const QString placeholder = renderer.renderWithPlaceholders(expression, "#000000", MathScale::kQuestion);
+    QVERIFY(placeholder.contains(QStringLiteral("<!--omacards-math:%1-->").arg(key)));
+
+    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(cached), 5000);
+    QCOMPARE(tectonicRenders(argsLog), 1);
+
+    renderer.clearPendingMath();
+    const QString first = renderer.renderWithPlaceholders(expression, "#112233", MathScale::kQuestion);
+    renderer.clearPendingMath();
+    const QString live = renderer.renderWithPlaceholders(expression, "#abcdef", MathScale::kQuestion);
+    QVERIFY(!live.contains(QStringLiteral("<!--omacards-math:")));
+    QVERIFY(svgFromMathHtml(live).contains(QStringLiteral("fill=\"#abcdef\"")));
+    QVERIFY(!svgFromMathHtml(live).contains(QStringLiteral("fill=\"#112233\"")));
+    // The intermediate ink is not left on screen either.
+    QVERIFY(!svgFromMathHtml(first).contains(QStringLiteral("fill=\"#000000\"")));
+
+    QVERIFY(writeFile(release, ""));
+    QTRY_VERIFY_WITH_TIMEOUT(rendered.count() >= 1, 5000);
+    QCOMPARE(rendered.count(), 1);
+    const QString emitted = rendered.at(0).at(1).toString();
+    QVERIFY(emitted.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
+    const QString emittedSvg = svgFromMathHtml(emitted);
+    QVERIFY(!emittedSvg.contains(QStringLiteral("fill=\"#112233\"")));
+    QVERIFY(!emittedSvg.contains(QStringLiteral("fill=\"#000000\"")));
+    QVERIFY(emittedSvg.contains(QStringLiteral("fill=\"#abcdef\"")));
+    // Recoloring from the neutral cache never starts a second toolchain run.
+    QCOMPARE(tectonicRenders(argsLog), 1);
+}
