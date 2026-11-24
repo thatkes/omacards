@@ -21,4 +21,7 @@ private slots:
     void apkgReportsMissingUnzip();
     void apkgImportsHtmlClozeAndMedia();
     void apkgImportsWithoutMedia();
+    void apkgImportsMultipleMediaWithMixedNoteTypes();
+    void apkgUsesOneUnzipForCollectionAndMedia();
+    void apkgMediaFailureLeavesNoPartialFile();
 };

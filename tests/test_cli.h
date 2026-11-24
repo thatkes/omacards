@@ -48,6 +48,7 @@ private slots:
     void addCardsInputValidationErrors();
     void editDeleteErrorContracts();
     void importJsonAndCsvContracts();
+    void importJsonKeepsExactContractKeys();
     void previewJsonContracts();
     void previewZeroCardDeckIssues();
     void configValidationAndPersistence();

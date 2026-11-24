@@ -109,25 +109,34 @@ QString stripHtml(const QString &html) {
     return text.trimmed();
 }
 
-QString rewriteAnkiMedia(const QString &html, const QHash<QString, QString> &media) {
-    QString text = html;
-    for (auto it = media.constBegin(); it != media.constEnd(); ++it) {
-        for (const QString &quote : {QStringLiteral("\""), QStringLiteral("'")}) {
-            const QString from = QStringLiteral("src=%1%2%1").arg(quote, it.key());
-            const QString to = QStringLiteral("src=%1%2%1").arg(quote, it.value());
-            text.replace(from, to, Qt::CaseInsensitive);
-        }
-    }
-    return text;
+using MediaPaths = QHash<QString, QString>;
+
+// Fold the keys once per import so each field can match them with a hash
+// lookup instead of a scan per media entry.
+MediaPaths foldMediaKeys(const MediaPaths &media) {
+    MediaPaths folded;
+    for (auto it = media.constBegin(); it != media.constEnd(); ++it)
+        folded.insert(it.key().toCaseFolded(), it.value());
+    return folded;
 }
 
-QHash<QString, QString> apkgMedia(const QString &path, const QString &directory, const QString &unzip, QString *error) {
-    QHash<QString, QString> media;
-    QProcess mapping;
-    mapping.start(unzip, {"-p", path, "media"});
-    if (!mapping.waitForFinished(10000) || mapping.exitCode() != 0)
+QString rewriteAnkiMedia(const QString &html, const MediaPaths &folded) {
+    static const QRegularExpression expression(R"re(src=(["'])([^"']+)\1)re",
+                                               QRegularExpression::CaseInsensitiveOption);
+    return replaceRegex(html, expression, [&](const QRegularExpressionMatch &match) {
+        const auto found = folded.constFind(match.captured(2).toCaseFolded());
+        if (found == folded.constEnd())
+            return match.captured();
+        return QStringLiteral("src=%1%2%1").arg(match.captured(1), found.value());
+    });
+}
+
+MediaPaths apkgMedia(const QString &extracted, const QString &directory, QString *error) {
+    MediaPaths media;
+    QFile mapping(QDir(extracted).filePath(QStringLiteral("media")));
+    if (!mapping.open(QIODevice::ReadOnly))
         return media; // packages without media are common
-    const QJsonDocument document = QJsonDocument::fromJson(mapping.readAllStandardOutput());
+    const QJsonDocument document = QJsonDocument::fromJson(mapping.readAll());
     if (!document.isObject())
         return media;
 
@@ -139,11 +148,10 @@ QHash<QString, QString> apkgMedia(const QString &path, const QString &directory,
         const QString name = QFileInfo(it.value().toString()).fileName();
         if (name.isEmpty() || name == QStringLiteral(".") || name == QStringLiteral(".."))
             continue;
+        const QString source = QDir(extracted).filePath(QFileInfo(it.key()).fileName());
         const QString destination = target.filePath(name);
-        QProcess extract;
-        extract.setStandardOutputFile(destination);
-        extract.start(unzip, {"-p", path, it.key()});
-        if (!extract.waitForFinished(10000) || extract.exitCode() != 0) {
+        QFile::remove(destination);
+        if (!QFile::exists(source) || !QFile::copy(source, destination)) {
             QFile::remove(destination);
             if (error)
                 *error = tr("Could not extract media %1").arg(name);
@@ -208,35 +216,41 @@ bool apkg(const QString &path, const QString &deckName, const QString &decksDir,
             *error = tr("Cannot create a temporary directory");
         return false;
     }
-    const QString database = temp.filePath("collection.db");
     const auto unzip = QStandardPaths::findExecutable("unzip");
     if (unzip.isEmpty()) {
         if (error)
             *error = tr("Importing .apkg needs the unzip command");
         return false;
     }
-    auto extract = [&](const QString &entry) {
-        QProcess process;
-        process.setStandardOutputFile(database);
-        process.start(unzip, {"-p", path, entry});
-        return process.waitForFinished(10000) && process.exitCode() == 0 && QFileInfo::exists(database);
-    };
 
-    bool ok = extract("collection.anki2") || extract("collection.anki21");
-    if (!ok) {
-        // Anki 21b is a gzip-compressed SQLite file inside the archive.
-        QProcess unzipper;
-        unzipper.start(unzip, {"-p", path, "collection.anki21b"});
-        if (unzipper.waitForFinished(10000) && unzipper.exitCode() == 0) {
-            QProcess gzip;
-            gzip.setStandardOutputFile(database);
-            gzip.start(QStandardPaths::findExecutable("gzip"), {"-dc"});
-            gzip.write(unzipper.readAllStandardOutput());
-            gzip.closeWriteChannel();
-            ok = gzip.waitForFinished(10000) && gzip.exitCode() == 0 && QFileInfo::exists(database);
-        }
+    // The collection and the media members share one unzip run. Anki stores
+    // them flat, so -j gives the temporary directory a predictable layout.
+    QProcess archive;
+    archive.start(unzip, {QStringLiteral("-o"), QStringLiteral("-j"), QStringLiteral("-d"), temp.path(), path});
+    if (!archive.waitForFinished(30000) || archive.exitCode() != 0) {
+        if (error)
+            *error = tr("Not a readable Anki package: %1").arg(path);
+        return false;
     }
-    if (!ok) {
+    const QDir extracted(temp.path());
+    QString database = extracted.filePath(QStringLiteral("collection.anki2"));
+    if (!QFile::exists(database))
+        database = extracted.filePath(QStringLiteral("collection.anki21"));
+    if (!QFile::exists(database)) {
+        // Anki 21b is a gzip-compressed SQLite file inside the archive.
+        const QString compressed = extracted.filePath(QStringLiteral("collection.anki21b"));
+        const QString decompressed = extracted.filePath(QStringLiteral("collection.db"));
+        QFile input(compressed);
+        QProcess gzip;
+        gzip.setStandardOutputFile(decompressed);
+        gzip.start(QStandardPaths::findExecutable("gzip"), {"-dc"});
+        if (input.open(QIODevice::ReadOnly))
+            gzip.write(input.readAll());
+        gzip.closeWriteChannel();
+        database = gzip.waitForFinished(10000) && gzip.exitCode() == 0 && QFile::exists(decompressed) ? decompressed
+                                                                                                      : QString();
+    }
+    if (database.isEmpty()) {
         if (error)
             *error = tr("Not a readable Anki package: %1").arg(path);
         return false;
@@ -276,8 +290,9 @@ bool apkg(const QString &path, const QString &deckName, const QString &decksDir,
     }
 
     result->deckName = deckName.isEmpty() ? QFileInfo(path).completeBaseName() : deckName;
-    const QHash<QString, QString> media =
-        apkgMedia(path, decksDir + "/media/" + DeckIO::safeFileName(result->deckName), unzip, error);
+    const MediaPaths media =
+        apkgMedia(temp.path(), decksDir + "/media/" + DeckIO::safeFileName(result->deckName), error);
+    const MediaPaths folded = foldMediaKeys(media);
     while (query.next()) {
         const QStringList fields = query.value(0).toString().split(QChar(0x1f));
         if (fields.isEmpty())
@@ -291,7 +306,7 @@ bool apkg(const QString &path, const QString &deckName, const QString &decksDir,
                 return QStringLiteral("{{c1::%1}}").arg(match.captured(1));
             });
         }
-        question = rewriteAnkiMedia(question, media);
+        question = rewriteAnkiMedia(question, folded);
         if (!cloze) {
             static const QRegularExpression imageSrc(R"re(<img\b[^>]*\bsrc="([^"]+)"[^>]*>)re");
             answer = replaceRegex(answer, imageSrc, [&](const QRegularExpressionMatch &match) {
