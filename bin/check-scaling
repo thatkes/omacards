@@ -1,0 +1,143 @@
+#!/bin/sh
+set -eu
+LC_ALL=C
+export LC_ALL
+
+# Scaling guard for the two CLI paths most exposed to Deck size. It writes a
+# synthetic Deck at two sizes, times `check --json` and `decks --json`, and
+# fails when the larger run costs too much more than the smaller one.
+#
+# Usage: check-scaling [binary]          (default: build/omacards)
+# Sizes: OMACARDS_SCALING_SMALL (2000) and OMACARDS_SCALING_LARGE (8000).
+# Limits: 8x for check --json, 6x for decks --json, at a 4x Deck size. The
+# limits are deliberately above linear growth (4x) so startup and machine
+# noise pass, while the pre-#130 regression (about 16x) fails. Every result
+# prints both timings and the ratio, so a slow machine shows up as data rather
+# than a silent pass.
+#
+# Decks, state and the XDG cache live under one mktemp root outside the
+# checkout and are removed on exit. Synthetic Cards contain no math, so the
+# cold cache never triggers a Tectonic bundle download.
+
+if [ "$#" -gt 1 ]; then
+    printf 'Usage: %s [binary]\n' "$0" >&2
+    exit 2
+fi
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+binary=${1:-"$ROOT/build/omacards"}
+if [ ! -x "$binary" ]; then
+    printf 'No executable CLI binary at %s; run ./bin/build first\n' "$binary" >&2
+    exit 2
+fi
+
+small=${OMACARDS_SCALING_SMALL:-2000}
+large=${OMACARDS_SCALING_LARGE:-8000}
+for value in "$small" "$large"; do
+    case "$value" in
+        ''|*[!0-9]*) printf 'Scaling Deck sizes must be positive integers\n' >&2; exit 2 ;;
+    esac
+    if [ "$value" -eq 0 ]; then
+        printf 'Scaling Deck sizes must be positive integers\n' >&2
+        exit 2
+    fi
+done
+if [ "$large" -le "$small" ]; then
+    printf 'OMACARDS_SCALING_LARGE must exceed OMACARDS_SCALING_SMALL\n' >&2
+    exit 2
+fi
+
+check_limit=8
+decks_limit=6
+
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/omacards-scaling.XXXXXX")"
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+mkdir -p "$tmp/decks" "$tmp/cache"
+export OMACARDS_DECKS_DIR="$tmp/decks"
+export OMACARDS_STATE_DB="$tmp/state.db"
+export XDG_CACHE_HOME="$tmp/cache"
+
+write_deck() {
+    awk -v count="$1" '
+        BEGIN {
+            print "# Deck: Scaling"
+            for (i = 1; i <= count; ++i) {
+                print "---"
+                print "Q: question " i
+                print "A: answer " i
+            }
+        }
+    ' > "$OMACARDS_DECKS_DIR/Scaling.txt"
+}
+
+now_ms() {
+    ns=$(date +%s%N)
+    printf '%s\n' "$((ns / 1000000))"
+}
+
+# Take the faster of two samples: the slower one usually carries scheduler or
+# filesystem noise, while a scaling regression survives in both.
+measure() {
+    label=$1
+    shift
+    best=
+    sample=1
+    while [ "$sample" -le 2 ]; do
+        started=$(now_ms)
+        set +e
+        "$binary" "$@" >/dev/null 2>"$tmp/stderr"
+        code=$?
+        set -e
+        finished=$(now_ms)
+        if [ "$code" -ne 0 ]; then
+            printf '%s exited %s: ' "$label" "$code" >&2
+            cat "$tmp/stderr" >&2
+            exit 1
+        fi
+        elapsed=$((finished - started))
+        if [ "$elapsed" -lt 1 ]; then
+            elapsed=1
+        fi
+        if [ -z "$best" ] || [ "$elapsed" -lt "$best" ]; then
+            best=$elapsed
+        fi
+        sample=$((sample + 1))
+    done
+    printf '%s\n' "$best"
+}
+
+report() {
+    label=$1
+    limit=$2
+    small_ms=$3
+    large_ms=$4
+    ratio_x100=$((large_ms * 100 / small_ms))
+    ratio=$(awk -v value="$ratio_x100" 'BEGIN { printf "%.2f", value / 100 }')
+    last_line="$small_ms ms -> $large_ms ms (${ratio}x, limit ${limit}x)"
+    if [ "$ratio_x100" -gt "$((limit * 100))" ]; then
+        printf 'FAIL %s scaling regression: %s -> %s cards took %s\n' \
+            "$label" "$small" "$large" "$last_line"
+        status=1
+    else
+        printf 'OK %s scaling: %s -> %s cards took %s\n' \
+            "$label" "$small" "$large" "$last_line"
+    fi
+}
+
+status=0
+write_deck "$small"
+small_check=$(measure 'check --json' check --json)
+small_decks=$(measure 'decks --json' decks --json)
+write_deck "$large"
+large_check=$(measure 'check --json' check --json)
+large_decks=$(measure 'decks --json' decks --json)
+
+report 'check --json' "$check_limit" "$small_check" "$large_check"
+check_line=$last_line
+report 'decks --json' "$decks_limit" "$small_decks" "$large_decks"
+decks_line=$last_line
+
+if [ "$status" -eq 0 ]; then
+    printf 'Scaling OK: check --json %s; decks --json %s\n' "$check_line" "$decks_line"
+fi
+exit "$status"

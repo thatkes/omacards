@@ -10,11 +10,17 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
+# Keep the scaling guard's synthetic Deck tiny; this suite exercises the log
+# path, not CLI timing.
+OMACARDS_SCALING_SMALL=20
+OMACARDS_SCALING_LARGE=80
+export OMACARDS_SCALING_SMALL OMACARDS_SCALING_LARGE
+
 repo="$tmp/repo"
 fakebin="$tmp/fake-bin"
 mkdir -p "$repo/bin" "$repo/build/tests" "$fakebin"
-cp "$ROOT/bin/test" "$ROOT/bin/check-test-summary" "$repo/bin/"
-chmod +x "$repo/bin/test" "$repo/bin/check-test-summary"
+cp "$ROOT/bin/test" "$ROOT/bin/check-test-summary" "$ROOT/bin/check-scaling" "$repo/bin/"
+chmod +x "$repo/bin/test" "$repo/bin/check-test-summary" "$repo/bin/check-scaling"
 
 printf '#!/bin/sh\nexit 0\n' > "$fakebin/qmake6"
 printf '#!/bin/sh\nexit 0\n' > "$fakebin/make"
