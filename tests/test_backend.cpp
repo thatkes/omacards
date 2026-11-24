@@ -48,23 +48,44 @@ namespace {
 constexpr int kTestWatcherDebounceMs = 10;
 constexpr int kWatcherSettleMarginMs = 30;
 
+// One compiled Main.qml and engine for the whole test process. Each fixture
+// still gets its own child context, Backend, Theme and window object tree.
+// The shared objects are deliberately leaked: their lifetime is the process,
+// so no static destructor can race a live QML binding at exit.
+struct SharedMainWindowComponent {
+    SharedMainWindowComponent()
+        : component(&engine, QUrl::fromLocalFile(QStringLiteral(OMACARDS_SOURCE_DIR) + "/Main.qml")) {}
+
+    QQmlEngine engine;
+    QQmlComponent component;
+};
+
+SharedMainWindowComponent *sharedMainWindowComponent() {
+    static auto *shared = new SharedMainWindowComponent;
+    return shared;
+}
+
 // The single seam for loading Main.qml in a test: callers verify view.window
-// before using it, and the harness owns the engine and window for them.
+// before using it, and the harness owns the fixture context and window.
 struct MainWindowHarness {
-    explicit MainWindowHarness(Backend &backend) {
-        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
-        engine.rootContext()->setContextProperty(QStringLiteral("theme"), &theme);
-        QQmlComponent component(&engine, QUrl::fromLocalFile(QStringLiteral(OMACARDS_SOURCE_DIR) + "/Main.qml"));
-        if (!component.isReady()) {
-            qWarning() << component.errorString();
+    explicit MainWindowHarness(Backend &backend)
+        : context(new QQmlContext(sharedMainWindowComponent()->engine.rootContext())) {
+        auto *shared = sharedMainWindowComponent();
+        context->setContextProperty(QStringLiteral("backend"), &backend);
+        context->setContextProperty(QStringLiteral("theme"), &theme);
+        if (!shared->component.isReady()) {
+            qWarning() << shared->component.errorString();
             return;
         }
-        window = component.create();
+        window = shared->component.create(context);
         if (!window)
-            qWarning() << component.errorString();
+            qWarning() << shared->component.errorString();
     }
 
-    ~MainWindowHarness() { delete window; }
+    ~MainWindowHarness() {
+        delete window;
+        delete context;
+    }
 
     QQuickItem *item(const QString &objectName) const {
         return window ? window->findChild<QQuickItem *>(objectName) : nullptr;
@@ -156,7 +177,7 @@ struct MainWindowHarness {
         QCoreApplication::processEvents();
     }
 
-    QQmlEngine engine;
+    QQmlContext *context = nullptr;
     Theme theme;
     QObject *window = nullptr;
 };
