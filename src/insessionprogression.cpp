@@ -1,11 +1,13 @@
 #include "insessionprogression.h"
 #include "config.h"
 
-#include <algorithm>
-
 void InSessionProgression::clear() {
-    m_cramQueue.clear();
+    m_cramOrder.clear();
+    m_cramById.clear();
+    m_cramBoxCounts = QVector<int>(Config::kLeitnerBoxes, 0);
+    m_cramSequence = 0;
     m_reviewQueue.clear();
+    m_reviewQueueIds.clear();
     m_reviewAgainNotBefore.clear();
     m_cramReviews = 0;
     m_currentLeitnerBox = 0;
@@ -16,6 +18,7 @@ void InSessionProgression::buildReview(const QStringList &dueIds, const QStringL
     clear();
     m_reviewQueue = dueIds;
     m_reviewQueue << newIds;
+    m_reviewQueueIds = QSet<QString>(m_reviewQueue.cbegin(), m_reviewQueue.cend());
     for (auto it = pending.constBegin(); it != pending.constEnd(); ++it) {
         // A repeat's FSRS due date is in the future, so it is not part of the
         // database-derived queue; keep it as session-only work with its
@@ -26,20 +29,22 @@ void InSessionProgression::buildReview(const QStringList &dueIds, const QStringL
 
 void InSessionProgression::buildCram(const QVector<Card> &orderedCards) {
     clear();
-    for (int i = 0; i < orderedCards.size(); ++i)
-        m_cramQueue.append(CramEntry{orderedCards.at(i).id, 0, i});
+    for (int i = 0; i < orderedCards.size(); ++i) {
+        const CramEntry entry{orderedCards.at(i).id, 0, i, m_cramSequence++};
+        m_cramById.insert(entry.cardId, entry);
+        m_cramOrder.emplace(CramOrderKey{entry.nextShowReview, entry.sequence}, entry.cardId);
+        ++m_cramBoxCounts[entry.leitnerBox];
+    }
 }
 
 InSessionProgression::NextResult InSessionProgression::next(qint64 now) {
     NextResult result;
-    if (!m_cramQueue.isEmpty()) {
-        int best = 0;
-        for (int i = 1; i < m_cramQueue.size(); ++i)
-            if (m_cramQueue.at(i).nextShowReview < m_cramQueue.at(best).nextShowReview)
-                best = i;
+    if (!m_cramOrder.empty()) {
+        const auto first = m_cramOrder.cbegin();
+        const auto entry = m_cramById.constFind(first->second);
         result.kind = Next::Ready;
-        result.cardId = m_cramQueue.at(best).cardId;
-        m_currentLeitnerBox = m_cramQueue.at(best).leitnerBox + 1;
+        result.cardId = first->second;
+        m_currentLeitnerBox = entry.value().leitnerBox + 1;
         result.leitnerBox = m_currentLeitnerBox;
         return result;
     }
@@ -61,6 +66,7 @@ InSessionProgression::NextResult InSessionProgression::next(qint64 now) {
     }
 
     const QString chosen = m_reviewQueue.takeAt(ready);
+    m_reviewQueueIds.remove(chosen);
     m_reviewAgainNotBefore.remove(chosen);
     result.kind = Next::Ready;
     result.cardId = chosen;
@@ -69,10 +75,7 @@ InSessionProgression::NextResult InSessionProgression::next(qint64 now) {
 }
 
 QVector<int> InSessionProgression::boxDistribution() const {
-    QVector<int> counts(Config::kLeitnerBoxes, 0);
-    for (const CramEntry &entry : m_cramQueue)
-        ++counts[entry.leitnerBox];
-    return counts;
+    return m_cramBoxCounts;
 }
 
 QStringList InSessionProgression::upcoming(int limit) const {
@@ -80,23 +83,11 @@ QStringList InSessionProgression::upcoming(int limit) const {
     if (limit <= 0)
         return result;
 
-    if (!m_cramQueue.isEmpty()) {
-        // Pick the minimum one at a time so ties follow queue order, exactly
-        // as next() does when several cards have the same deadline.
-        QVector<bool> taken(m_cramQueue.size(), false);
-        while (result.size() < limit) {
-            int best = -1;
-            for (int i = 0; i < m_cramQueue.size(); ++i) {
-                if (taken.at(i))
-                    continue;
-                if (best < 0 || m_cramQueue.at(i).nextShowReview < m_cramQueue.at(best).nextShowReview)
-                    best = i;
-            }
-            if (best < 0)
-                break;
-            taken[best] = true;
-            result << m_cramQueue.at(best).cardId;
-        }
+    if (!m_cramOrder.empty()) {
+        // Walking the deadline index gives the same order as repeatedly
+        // picking the minimum from the old vector, including ties.
+        for (auto it = m_cramOrder.cbegin(); it != m_cramOrder.cend() && result.size() < limit; ++it)
+            result << it->second;
         return result;
     }
 
@@ -113,9 +104,10 @@ QStringList InSessionProgression::upcoming(int limit) const {
 qint64 InSessionProgression::pendingWait(qint64 now) const {
     qint64 next = 0;
     bool haveNext = false;
-    for (const QString &id : m_reviewQueue) {
-        const auto it = m_reviewAgainNotBefore.constFind(id);
-        if (it != m_reviewAgainNotBefore.cend() && (!haveNext || it.value() < next)) {
+    for (auto it = m_reviewAgainNotBefore.cbegin(); it != m_reviewAgainNotBefore.cend(); ++it) {
+        if (!m_reviewQueueIds.contains(it.key()))
+            continue;
+        if (!haveNext || it.value() < next) {
             next = it.value();
             haveNext = true;
         }
@@ -123,29 +115,47 @@ qint64 InSessionProgression::pendingWait(qint64 now) const {
     return haveNext ? qMax<qint64>(1, next - now) : 0;
 }
 
+void InSessionProgression::detachCramEntry(const CramEntry &entry) {
+    const QString id = entry.cardId;
+    m_cramOrder.erase(CramOrderKey{entry.nextShowReview, entry.sequence});
+    --m_cramBoxCounts[entry.leitnerBox];
+    m_cramById.remove(id);
+}
+
+void InSessionProgression::eraseCramEntry(const QString &id) {
+    const auto found = m_cramById.constFind(id);
+    if (found != m_cramById.cend())
+        detachCramEntry(found.value());
+}
+
 void InSessionProgression::remove(const QString &id) {
     m_reviewQueue.removeAll(id);
+    m_reviewQueueIds.remove(id);
     m_reviewAgainNotBefore.remove(id);
-    m_cramQueue.erase(std::remove_if(m_cramQueue.begin(), m_cramQueue.end(),
-                                     [&](const CramEntry &entry) { return entry.cardId == id; }),
-                      m_cramQueue.end());
+    eraseCramEntry(id);
 }
 
 void InSessionProgression::repeatAfter(const QString &id, qint64 notBefore) {
-    if (!m_reviewQueue.contains(id))
+    if (!m_reviewQueueIds.contains(id)) {
         m_reviewQueue << id;
+        m_reviewQueueIds.insert(id);
+    }
     m_reviewAgainNotBefore.insert(id, notBefore);
 }
 
 void InSessionProgression::advanceCram(const QString &id, Rating rating) {
-    for (int i = 0; i < m_cramQueue.size(); ++i) {
-        if (m_cramQueue.at(i).cardId != id)
-            continue;
-        CramEntry entry = m_cramQueue.takeAt(i);
-        entry.leitnerBox = rating == Rating::Again ? 0 : qMin(Config::kLeitnerBoxes - 1, entry.leitnerBox + 1);
-        entry.nextShowReview = ++m_cramReviews + Config::kLeitnerIntervals[entry.leitnerBox];
-        m_cramQueue.append(entry);
-        m_currentLeitnerBox = entry.leitnerBox + 1;
+    const auto found = m_cramById.constFind(id);
+    if (found == m_cramById.cend())
         return;
-    }
+
+    CramEntry entry = found.value();
+    detachCramEntry(entry);
+
+    entry.leitnerBox = rating == Rating::Again ? 0 : qMin(Config::kLeitnerBoxes - 1, entry.leitnerBox + 1);
+    entry.nextShowReview = ++m_cramReviews + Config::kLeitnerIntervals[entry.leitnerBox];
+    entry.sequence = m_cramSequence++;
+    ++m_cramBoxCounts[entry.leitnerBox];
+    m_cramById.insert(id, entry);
+    m_cramOrder.emplace(CramOrderKey{entry.nextShowReview, entry.sequence}, id);
+    m_currentLeitnerBox = entry.leitnerBox + 1;
 }
