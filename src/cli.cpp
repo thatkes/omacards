@@ -629,6 +629,22 @@ int run(const QStringList &arguments) {
         fprintf(stdout, "%s", qPrintable(commandHelp(commandPaths().contains(key) ? key : options.command)));
         return 0;
     }
+    // `help <command>` answers with the same text as `<command> --help`. The
+    // parser keeps only the first positional in options.path, so read the
+    // requested path from the arguments to cover two-token paths as well.
+    if (options.command == QLatin1String("help") && !options.path.isEmpty()) {
+        const int helpIndex = arguments.indexOf(options.command);
+        QStringList requested;
+        for (const QString &arg : arguments.mid(helpIndex + 1)) {
+            if (!arg.startsWith(QLatin1Char('-')))
+                requested << arg;
+        }
+        const QString key = requested.join(QLatin1Char(' '));
+        if (Cli::commandPaths().contains(key)) {
+            fprintf(stdout, "%s", qPrintable(commandHelp(key)));
+            return 0;
+        }
+    }
     if (options.command.isEmpty() || isHelpCommand(options.command)) {
         fprintf(stdout, "%s", qPrintable(usage()));
         // `help` is the one text-mode entry point that nudges an agent towards
@@ -1373,7 +1389,7 @@ int run(const QStringList &arguments) {
     if (options.command == "skill") {
         const QString action = options.path.isEmpty() ? QString("install") : options.path;
         if (action != "install")
-            return fail(QObject::tr("Usage: omacards skill install"), json);
+            return fail(QObject::tr("Usage: omacards skill install | omacards skill status"), json);
         const SkillStatus before = readSkillStatus();
         QFile bundled(QStringLiteral(":/skill/SKILL.md"));
         if (!bundled.open(QIODevice::ReadOnly))
