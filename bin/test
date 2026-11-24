@@ -1,18 +1,112 @@
 #!/bin/sh
 set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+
+# --timing is observational only. Remove it before forwarding arguments so
+# QtTest never sees an unknown positional argument; rebuild "$@" one quoted
+# word at a time to keep suite names and test-function selectors intact.
+timing=0
+remaining=$#
+while [ "$remaining" -gt 0 ]; do
+    arg=$1
+    shift
+    remaining=$((remaining - 1))
+    if [ "$arg" = "--timing" ]; then
+        timing=1
+    else
+        set -- "$@" "$arg"
+    fi
+done
+
+timing_lines=
+now_ms() {
+    nanoseconds=$(date +%s%N)
+    printf '%s\n' $((nanoseconds / 1000000))
+}
+
+field_at() {
+    printf '%s\n' "$1" | awk -F'|' -v n="$2" '{ print $(n + 1) }'
+}
+
+nth_word() {
+    nw_wanted=$1
+    nw_index=1
+    # Registered suite names contain no spaces; word splitting is intentional.
+    for nw_word in $2; do
+        if [ "$nw_index" -eq "$nw_wanted" ]; then
+            printf '%s\n' "$nw_word"
+            return 0
+        fi
+        nw_index=$((nw_index + 1))
+    done
+    printf '\n'
+}
+
+record_phase() {
+    rp_label=$1
+    rp_start=$2
+    rp_end=$3
+    rp_elapsed=$((rp_end - rp_start))
+    timing_lines="${timing_lines}TIMING phase ${rp_label}: ${rp_elapsed} ms
+"
+}
+
+# QtTest puts the suite's own elapsed milliseconds on each Totals line. Group
+# logs run suites in registry order, so the registered names from
+# tests/test_main.cpp pair with those lines one by one.
+emit_suite_timings() {
+    esi_index=0
+    for esi_log in $group_logs; do
+        esi_index=$((esi_index + 1))
+        esi_spec=$(field_at "$group_specs" "$esi_index")
+        esi_position=1
+        while IFS= read -r esi_line; do
+            case "$esi_line" in
+                Totals:*ms)
+                    esi_ms=${esi_line##*, }
+                    esi_ms=${esi_ms%ms}
+                    esi_suite=$(nth_word "$esi_position" "$esi_spec")
+                    if [ -n "$esi_suite" ]; then
+                        timing_lines="${timing_lines}TIMING suite ${esi_suite}: ${esi_ms} ms
+"
+                    fi
+                    esi_position=$((esi_position + 1))
+                    ;;
+            esac
+        done < "$esi_log"
+    done
+}
+
 # CLI tests spawn the app binary, so an old build would verify code that no
 # longer exists. Build on every run: make skips unchanged work, and a CLI
 # source edit reaches the binary before the scaling guard and suites use it.
+if [ "$timing" -eq 1 ]; then
+    build_start=$(now_ms)
+fi
 "$ROOT/bin/build"
+if [ "$timing" -eq 1 ]; then
+    record_phase app-build "$build_start" "$(now_ms)"
+fi
 # The CLI scaling guard needs the built binary and runs once per test run,
 # including focused suites. It keeps Deck files and the cold XDG cache outside
 # the checkout, so it does not disturb the per-group environments below.
+if [ "$timing" -eq 1 ]; then
+    scaling_start=$(now_ms)
+fi
 "$ROOT/bin/check-scaling"
+if [ "$timing" -eq 1 ]; then
+    record_phase scaling-guard "$scaling_start" "$(now_ms)"
+fi
 mkdir -p "$ROOT/build/tests"
 cd "$ROOT/build/tests"
+if [ "$timing" -eq 1 ]; then
+    test_build_start=$(now_ms)
+fi
 qmake6 "$ROOT/tests/omacards_tests.pro"
 make -j"$(nproc)"
+if [ "$timing" -eq 1 ]; then
+    record_phase test-binary-build "$test_build_start" "$(now_ms)"
+fi
 
 focused=0
 for arg in "$@"; do
@@ -25,10 +119,12 @@ done
 # The test binary owns the suite registry. TestCli is the long pole, so every
 # suite with that prefix runs alone and all the others share the second group.
 # A suite registered in tests/test_main.cpp lands in a group without an edit
-# here; focused runs keep their single-group contract.
+# here; focused runs keep their single-group contract. A timing run also reads
+# the registry in focused mode so per-suite lines use the registered names.
 cli_suites=
 other_suites=
-if [ "$focused" -eq 0 ]; then
+suite_names=
+if [ "$focused" -eq 0 ] || [ "$timing" -eq 1 ]; then
     suite_list="$(QT_QPA_PLATFORM=offscreen ./omacards_tests --list-suites)"
     case "$suite_list" in
         *'OMACARDS_TEST_MODE: info'*) ;;
@@ -44,6 +140,8 @@ if [ "$focused" -eq 0 ]; then
         printf '%s\n' "$suite_list" >&2
         exit 1
     fi
+fi
+if [ "$focused" -eq 0 ]; then
     for suite in $suite_names; do
         case "$suite" in
             TestCli*) cli_suites="$cli_suites $suite" ;;
@@ -56,8 +154,23 @@ if [ "$focused" -eq 0 ]; then
     fi
 fi
 
+focused_suites=
+if [ "$focused" -eq 1 ] && [ "$timing" -eq 1 ]; then
+    for suite in $suite_names; do
+        for arg in "$@"; do
+            if [ "$arg" = "$suite" ]; then
+                focused_suites="$focused_suites $suite"
+                break
+            fi
+        done
+    done
+fi
+
 group_logs=
 pids=
+group_labels=
+group_starts=
+group_specs=
 
 # The XDG cache stays on the warmed parent value: an offscreen CLI with a fresh
 # cache tries to download a tectonic bundle and stalls for a minute. Every suite
@@ -83,8 +196,17 @@ run_group() {
 }
 
 launch_group() {
+    lg_label=$1
+    lg_spec=$2
+    shift 2
     log="$(mktemp "$ROOT/build/tests/group.XXXXXX")"
     group_logs="$group_logs $log"
+    if [ "$timing" -eq 1 ]; then
+        lg_start=$(now_ms)
+        group_labels="${group_labels}|$lg_label"
+        group_starts="${group_starts}|$lg_start"
+        group_specs="${group_specs}|$lg_spec"
+    fi
     run_group "$log" "$@" &
     pids="$pids $!"
 }
@@ -96,20 +218,28 @@ cleanup_group_envs() {
 }
 
 if [ "$focused" -eq 1 ]; then
-    launch_group "$@"
+    launch_group focused-group "$focused_suites" "$@"
 else
-    launch_group $cli_suites "$@"
-    launch_group $other_suites "$@"
+    launch_group cli-group "$cli_suites" $cli_suites "$@"
+    launch_group other-group "$other_suites" $other_suites "$@"
 fi
 
 status=0
+group_index=0
 for pid in $pids; do
+    group_index=$((group_index + 1))
     set +e
     wait "$pid"
     group_status=$?
     set -e
     if [ "$status" -eq 0 ] && [ "$group_status" -ne 0 ]; then
         status=$group_status
+    fi
+    if [ "$timing" -eq 1 ]; then
+        group_end=$(now_ms)
+        group_start=$(field_at "$group_starts" "$group_index")
+        group_label=$(field_at "$group_labels" "$group_index")
+        record_phase "$group_label" "$group_start" "$group_end"
     fi
 done
 
@@ -152,6 +282,11 @@ set +e
 summary_status=$?
 set -e
 cleanup_group_envs
+
+if [ "$timing" -eq 1 ]; then
+    emit_suite_timings
+    printf '%s' "$timing_lines"
+fi
 
 if [ "$status" -ne 0 ]; then
     exit "$status"
