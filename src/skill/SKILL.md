@@ -232,6 +232,9 @@ After editing a file by hand, run the **validation loop** below.
 `$$...$$` and `\(...\)` are the supported delimiters. Single-dollar `$...$`
 is not rendered: it stays literal in both text and HTML output.
 
+`preview --format markdown` returns unrendered source: math delimiters stay
+as written, with no Unicode fallback or SVG images.
+
 No renderer is bundled, so math falls back to Unicode unless a toolchain is
 detected on `PATH`: `tectonic` + `pdftocairo`, `latex` + `dvisvgm`, or
 `pdflatex` + `pdftocairo`. Run `omacards check --json` on the machine you are
@@ -267,6 +270,8 @@ is installed. Use notation that survives the fallback:
 `preview --format text` uses the Unicode fallback even when LaTeX is active;
 `--format html` emits `<img>` references. Text items in the JSON have `id`,
 `question` and `answer`; html items have `id`, `questionHtml` and `answerHtml`.
+`--format markdown` returns the raw source in `question` and `answer`, with
+math unrendered.
 Check a card before authoring many similar ones.
 
 The agent wiki page `docs/agents/wiki/subsystem-math-rendering.md` is a
@@ -279,6 +284,7 @@ After authoring or editing a deck:
 
 ```sh
 omacards preview --deck "My Deck" --format text --json   # Unicode rendering
+omacards preview --deck "My Deck" --format markdown --json  # raw source
 omacards check --json                                    # syntax + Deck issues
 omacards check --math --json                             # also list mathWarnings
 ```
