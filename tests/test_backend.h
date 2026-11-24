@@ -69,4 +69,9 @@ private slots:
     void qmlStudyUsesCachedSvgWithoutPlaceholder();
     void cachedBackendListsFollowMutations();
     void ratingRefreshesCachedBoxCountsBeforeStats();
+    void qmlSettingsBoundsFollowConfig();
+    void qmlLibrarySelectionClampsAfterExternalRefresh();
+    void qmlNoticeKeepsErrorSignalMessage();
+    void qmlUndoShortcutsRespectKeyboardOwners();
+    void qmlScreenOrderAndRadiusHaveOneSource();
 };

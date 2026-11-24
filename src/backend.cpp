@@ -80,7 +80,8 @@ bool Backend::initialize(QString *error) {
         qBound(Config::kMinRetention,
                m_store.setting("desired_retention", QString::number(Config::kDefaultRetention)).toDouble(),
                Config::kMaxRetention);
-    m_dayStartHour = qBound(0, m_store.setting("day_start_hour", QString::number(Config::kDefaultDayStartHour)).toInt(),
+    m_dayStartHour = qBound(Config::kMinDayStartHour,
+                            m_store.setting("day_start_hour", QString::number(Config::kDefaultDayStartHour)).toInt(),
                             Config::kMaxDayStartHour);
     m_deckRepo.watchDirectory();
     refresh();
@@ -144,7 +145,7 @@ void Backend::setCardFilter(const QString &filter) {
 }
 
 void Backend::setNewCardAllowance(int count) {
-    const int clean = qBound(0, count, Config::kMaxNewPerDay);
+    const int clean = qBound(Config::kMinNewPerDay, count, Config::kMaxNewPerDay);
     if (m_newCardAllowance == clean)
         return;
     m_newCardAllowance = clean;
@@ -175,7 +176,7 @@ void Backend::setDesiredRetention(double retention) {
 }
 
 void Backend::setDayStartHour(int hour) {
-    const int clean = qBound(0, hour, Config::kMaxDayStartHour);
+    const int clean = qBound(Config::kMinDayStartHour, hour, Config::kMaxDayStartHour);
     if (m_dayStartHour == clean)
         return;
     m_dayStartHour = clean;

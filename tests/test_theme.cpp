@@ -16,7 +16,7 @@ void TestTheme::themeFallsBack() {
     QTemporaryDir dir;
     Theme theme(dir.path());
     QCOMPARE(theme.accent(), QString("#FFD60A"));
-    QCOMPARE(theme.accentForeground(), QString("black"));
+    QCOMPARE(theme.accentForeground(), QString("#0e0e10"));
 }
 
 void TestTheme::themeReadsAccent() {
@@ -25,7 +25,7 @@ void TestTheme::themeReadsAccent() {
     QVERIFY(writeFile(dir.path() + "/theme/colors.toml", "accent = \"#112233\"\n"));
     Theme theme(dir.path());
     QCOMPARE(theme.accent(), QString("#112233"));
-    QCOMPARE(theme.accentForeground(), QString("white"));
+    QCOMPARE(theme.accentForeground(), QString("#ffffff"));
 }
 
 void TestTheme::translatorFollowsLanguage() {
@@ -101,12 +101,12 @@ void TestTheme::themeAccentForegroundLuminance() {
     QVERIFY(writeFile(colors, "accent = \"#ffffff\"\n"));
     Theme white(dir.path());
     QCOMPARE(white.accent(), QString("#ffffff"));
-    QCOMPARE(white.accentForeground(), QString("black"));
+    QCOMPARE(white.accentForeground(), QString("#0e0e10"));
 
     QVERIFY(writeFile(colors, "accent = \"#000000\"\n"));
     Theme black(dir.path());
     QCOMPARE(black.accent(), QString("#000000"));
-    QCOMPARE(black.accentForeground(), QString("white"));
+    QCOMPARE(black.accentForeground(), QString("#ffffff"));
 }
 
 void TestTheme::themeReloadMapsPalette() {
