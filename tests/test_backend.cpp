@@ -687,6 +687,49 @@ QPoint centerInWindow(QQuickWindow *window, QQuickItem *item) {
     return window->contentItem()->mapFromScene(item->mapToScene(item->boundingRect().center())).toPoint();
 }
 
+bool waitForScreen(const MainWindowHarness &view, const QString &screen) {
+    return QTest::qWaitFor([&]() { return view.screenName() == screen; }, 1000);
+}
+
+bool waitForPopupVisible(const MainWindowHarness &view, const QString &popupName) {
+    return QTest::qWaitFor(
+        [&]() {
+            QObject *popup = pickerObject(view, popupName);
+            return popup && popup->property("visible").toBool();
+        },
+        1000);
+}
+
+bool waitForPickerOpen(const MainWindowHarness &view, const QString &triggerName, bool open) {
+    return QTest::qWaitFor(
+        [&]() {
+            QQuickItem *picker = pickerItem(view, triggerName);
+            return picker && picker->property("open").toBool() == open;
+        },
+        1000);
+}
+
+bool waitForVisible(QQuickItem *item, bool visible) {
+    return QTest::qWaitFor([&]() { return item && item->isVisible() == visible; }, 1000);
+}
+
+bool waitForContentY(QQuickItem *flickable, qreal expected) {
+    return QTest::qWaitFor(
+        [&]() { return flickable && qAbs(flickable->property("contentY").toReal() - expected) < 1.0; }, 1000);
+}
+
+bool waitForShowingAnswer(const StudyViewFixture &fixture, bool showing) {
+    return QTest::qWaitFor([&]() { return fixture.backend.showingAnswer() == showing; }, 1000);
+}
+
+bool waitForReviewed(const StudyViewFixture &fixture, int reviewed) {
+    return QTest::qWaitFor([&]() { return fixture.backend.reviewed() == reviewed; }, 1000);
+}
+
+bool waitForCardIndex(const MainWindowHarness &view, int index) {
+    return QTest::qWaitFor([&]() { return view.window && view.window->property("cardIndex").toInt() == index; }, 1000);
+}
+
 } // namespace
 
 void TestBackend::qmlDeckSelectorShowsCurrentDeckAndCounts() {
@@ -723,7 +766,7 @@ void TestBackend::qmlDeckSelectorShowsCurrentDeckAndCounts() {
     QVERIFY2(hint->property("text").toString().contains("[ / ]"), qPrintable(hint->property("text").toString()));
 
     QVERIFY(QMetaObject::invokeMethod(homeSelector, "openAtCurrent"));
-    view.settle();
+    QVERIFY(waitForPopupVisible(view, QStringLiteral("homeDeckPopup")));
     QObject *popup = pickerObject(view, QStringLiteral("homeDeckPopup"));
     QVERIFY(popup);
     QVERIFY(popup->property("visible").toBool());
@@ -760,7 +803,7 @@ void TestBackend::qmlDeckSelectorShowsCurrentDeckAndCounts() {
 
     // Study now shares this picker, with its own trigger and popup names.
     QVERIFY(QMetaObject::invokeMethod(view.window, "startStudy", Q_ARG(QVariant, QString("review"))));
-    view.settle();
+    QVERIFY(waitForScreen(view, QStringLiteral("study")));
     QQuickItem *studySelector = view.item(QStringLiteral("studyDeckSelector"));
     QVERIFY(studySelector);
     QCOMPARE(QString::fromLatin1(studySelector->metaObject()->className()), selectorClass);
@@ -789,79 +832,83 @@ void TestBackend::qmlDeckCycleKeysWrapAndAreScoped() {
     QQuickItem *picker = view.item(QStringLiteral("homeDeckSelector"));
     QVERIFY(picker);
 
-    const auto press = [&](Qt::Key key) {
+    const auto press = [&](Qt::Key key, const auto &ready) {
         QTest::keyClick(window, key);
-        view.settle();
+        return QTest::qWaitFor(ready, 1000);
     };
     const auto candidate = [&]() { return picker->property("candidateName").toString(); };
     const auto isOpen = [&]() { return picker->property("open").toBool(); };
 
     // Opening never switches. Candidates move through the same ordered list in
     // both directions and wrap at each end.
-    press(Qt::Key_BracketRight);
+    QVERIFY(press(Qt::Key_BracketRight, [&] { return isOpen() && candidate() == QString("Alpha"); }));
     QCOMPARE(backend.currentDeck(), QString("Alpha"));
     QVERIFY(isOpen());
     QCOMPARE(candidate(), QString("Alpha"));
-    press(Qt::Key_BracketRight);
+    QVERIFY(press(Qt::Key_BracketRight, [&] { return candidate() == QString("Beta"); }));
     QCOMPARE(candidate(), QString("Beta"));
     QCOMPARE(backend.currentDeck(), QString("Alpha"));
     QVERIFY(pickerItem(view, QStringLiteral("homeDeckPopupRow1"))->property("candidate").toBool());
-    press(Qt::Key_BracketRight);
+    QVERIFY(press(Qt::Key_BracketRight, [&] { return candidate() == QString("Gamma"); }));
     QCOMPARE(candidate(), QString("Gamma"));
-    press(Qt::Key_BracketRight);
+    QVERIFY(press(Qt::Key_BracketRight, [&] { return candidate() == QString("Alpha"); }));
     QCOMPARE(candidate(), QString("Alpha"));
-    press(Qt::Key_BracketLeft);
+    QVERIFY(press(Qt::Key_BracketLeft, [&] { return candidate() == QString("Gamma"); }));
     QCOMPARE(candidate(), QString("Gamma"));
 
     // Unrelated keys are swallowed while the popup is open.
-    press(Qt::Key_B);
+    QVERIFY(press(Qt::Key_B, [&] { return view.screenName() == QString("home"); }));
     QCOMPARE(view.window->property("screen").toString(), QString("home"));
-    press(Qt::Key_S);
+    QVERIFY(press(Qt::Key_S, [&] { return !view.window->property("statsVisible").toBool(); }));
     QVERIFY(!view.window->property("statsVisible").toBool());
-    press(Qt::Key_Question);
+    QVERIFY(press(Qt::Key_Question, [&] { return !view.window->property("helpVisible").toBool(); }));
     QVERIFY(!view.window->property("helpVisible").toBool());
     QCOMPARE(candidate(), QString("Gamma"));
     QVERIFY(isOpen());
 
     // Escape discards the Candidate deck.
-    press(Qt::Key_Escape);
+    QVERIFY(press(Qt::Key_Escape, [&] { return !isOpen(); }));
     QVERIFY(!isOpen());
     QCOMPARE(backend.currentDeck(), QString("Alpha"));
     QCOMPARE(candidate(), QString("Alpha"));
 
     // Enter commits the Candidate deck; committing Current only closes.
-    press(Qt::Key_BracketLeft);
+    QVERIFY(press(Qt::Key_BracketLeft, [&] { return isOpen() && candidate() == QString("Alpha"); }));
     QCOMPARE(candidate(), QString("Alpha"));
-    press(Qt::Key_BracketLeft);
+    QVERIFY(press(Qt::Key_BracketLeft, [&] { return candidate() == QString("Gamma"); }));
     QCOMPARE(candidate(), QString("Gamma"));
-    press(Qt::Key_Enter);
+    QVERIFY(press(Qt::Key_Enter, [&] { return !isOpen() && backend.currentDeck() == QString("Gamma"); }));
     QVERIFY(!isOpen());
     QCOMPARE(backend.currentDeck(), QString("Gamma"));
-    press(Qt::Key_BracketRight);
+    QVERIFY(press(Qt::Key_BracketRight, [&] { return isOpen() && candidate() == QString("Gamma"); }));
     QCOMPARE(candidate(), QString("Gamma"));
-    press(Qt::Key_Return);
+    QVERIFY(press(Qt::Key_Return, [&] { return !isOpen() && backend.currentDeck() == QString("Gamma"); }));
     QVERIFY(!isOpen());
     QCOMPARE(backend.currentDeck(), QString("Gamma"));
 
     // Brackets stay scoped to Home and never open when a dialog owns keys.
     QVERIFY(QMetaObject::invokeMethod(view.window, "openLibrary"));
-    press(Qt::Key_BracketRight);
+    QVERIFY(waitForScreen(view, QStringLiteral("library")));
+    QVERIFY(press(Qt::Key_BracketRight, [&] { return !isOpen(); }));
     QVERIFY(!isOpen());
     QCOMPARE(backend.currentDeck(), QString("Gamma"));
     QVERIFY(QMetaObject::invokeMethod(view.window, "openSettings"));
-    press(Qt::Key_BracketLeft);
+    QVERIFY(waitForScreen(view, QStringLiteral("settings")));
+    QVERIFY(press(Qt::Key_BracketLeft, [&] { return !isOpen(); }));
     QVERIFY(!isOpen());
     QCOMPARE(backend.currentDeck(), QString("Gamma"));
 
     QVERIFY(QMetaObject::invokeMethod(view.window, "goHome"));
+    QVERIFY(waitForScreen(view, QStringLiteral("home")));
     window->setProperty("helpVisible", true);
-    press(Qt::Key_BracketRight);
+    QVERIFY(press(Qt::Key_BracketRight, [&] { return !isOpen(); }));
     QVERIFY(!isOpen());
     window->setProperty("helpVisible", false);
 
     // The Library shortcut is unchanged.
     QVERIFY(QMetaObject::invokeMethod(view.window, "goHome"));
-    press(Qt::Key_B);
+    QVERIFY(waitForScreen(view, QStringLiteral("home")));
+    QVERIFY(press(Qt::Key_B, [&] { return view.screenName() == QString("library"); }));
     QCOMPARE(view.window->property("screen").toString(), QString("library"));
 }
 
@@ -888,7 +935,7 @@ void TestBackend::qmlDeckPickerClickCommitsAndLongNamesElideViaVisibleRow() {
     QQuickItem *picker = view.item(QStringLiteral("homeDeckSelector"));
     QVERIFY(picker);
     QVERIFY(QMetaObject::invokeMethod(picker, "openAtCurrent"));
-    view.settle();
+    QVERIFY(waitForPopupVisible(view, QStringLiteral("homeDeckPopup")));
 
     QQuickItem *list = pickerItem(view, QStringLiteral("homeDeckPopupList"));
     QVERIFY(list);
@@ -898,12 +945,13 @@ void TestBackend::qmlDeckPickerClickCommitsAndLongNamesElideViaVisibleRow() {
     QQuickItem *betaRow = popupRowInViewport(view, list, QStringLiteral("homeDeckPopup"), QStringLiteral("Beta"));
     QVERIFY(betaRow);
     QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centerInWindow(window, betaRow));
-    view.settle();
+    QVERIFY(QTest::qWaitFor(
+        [&]() { return backend.currentDeck() == QString("Beta") && !picker->property("open").toBool(); }, 1000));
     QCOMPARE(backend.currentDeck(), QString("Beta"));
     QVERIFY(!picker->property("open").toBool());
 
     QVERIFY(QMetaObject::invokeMethod(picker, "openAtCurrent"));
-    view.settle();
+    QVERIFY(waitForPopupVisible(view, QStringLiteral("homeDeckPopup")));
     scrollPopupListTo(list, longName);
     QQuickItem *longRow = popupRowInViewport(view, list, QStringLiteral("homeDeckPopup"), longName);
     QVERIFY(longRow);
@@ -917,10 +965,10 @@ void TestBackend::qmlDeckPickerClickCommitsAndLongNamesElideViaVisibleRow() {
     QVERIFY(selectorCandidate(view, QStringLiteral("homeDeckPopup")) != backend.currentDeck());
     QCOMPARE(backend.currentDeck(), QString("Beta"));
     QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, QPoint(5, 5));
-    view.settle();
+    QVERIFY(waitForPickerOpen(view, QStringLiteral("homeDeckSelector"), false));
     QVERIFY(!picker->property("open").toBool());
     QVERIFY(QMetaObject::invokeMethod(picker, "openAtCurrent"));
-    view.settle();
+    QVERIFY(waitForPopupVisible(view, QStringLiteral("homeDeckPopup")));
     QCOMPARE(selectorCandidate(view, QStringLiteral("homeDeckPopup")), QString("Beta"));
     QCOMPARE(backend.currentDeck(), QString("Beta"));
 }
@@ -952,7 +1000,7 @@ void TestBackend::qmlLeavingScreenCancelsDeckPickerLikeEscape() {
     const auto assertCancelMatchesEscape = [&](const QString &trigger, const QString &popup, const auto &enterScreen,
                                                const QString &method) {
         QVERIFY(enterScreen());
-        view.settle();
+        QVERIFY(waitForPickerOpen(view, trigger, false));
         QQuickItem *selector = pickerItem(view, trigger);
         QVERIFY(selector);
         QVERIFY(!selector->property("open").toBool());
@@ -960,19 +1008,24 @@ void TestBackend::qmlLeavingScreenCancelsDeckPickerLikeEscape() {
         const auto openWithCandidate = [&] {
             QVERIFY(QMetaObject::invokeMethod(selector, "openAtCurrent"));
             QVERIFY(QMetaObject::invokeMethod(selector, "moveCandidate", Q_ARG(QVariant, 1)));
-            view.settle();
+            QVERIFY(QTest::qWaitFor(
+                [&]() {
+                    return selector->property("open").toBool() &&
+                           selector->property("candidateName").toString() == QStringLiteral("Beta");
+                },
+                1000));
             QVERIFY(selector->property("open").toBool());
             QCOMPARE(selector->property("candidateName").toString(), QStringLiteral("Beta"));
         };
 
         openWithCandidate();
         QTest::keyClick(window, Qt::Key_Escape);
-        view.settle();
+        QVERIFY(waitForPickerOpen(view, trigger, false));
         const QVariantMap afterEscape = deckSelectorCancelState(view, trigger, popup, backend);
 
         openWithCandidate();
         QVERIFY(navigate(method));
-        view.settle();
+        QVERIFY(waitForPickerOpen(view, trigger, false));
         const QVariantMap afterNavigation = deckSelectorCancelState(view, trigger, popup, backend);
 
         QCOMPARE(afterNavigation, afterEscape);
@@ -1011,7 +1064,7 @@ void TestBackend::qmlHelpOverlayNamesDeckSelector() {
     QVERIFY(!row->isVisible());
 
     view.window->setProperty("helpVisible", true);
-    view.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return row->isVisible(); }, 1000));
     QVERIFY(row->isVisible());
 
     QQuickItem *line = view.visualItem(QStringLiteral("helpDeckSelectorRowText"));
@@ -1068,26 +1121,26 @@ void TestBackend::qmlStudySelectorSwitchesDeckFreshViaVisibleRow() {
     QVERIFY2(summary->property("text").toString().contains("Alpha"), qPrintable(summary->property("text").toString()));
 
     QTest::keyClick(window, Qt::Key_Space);
-    fixture.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return fixture.backend.showingAnswer(); }, 1000));
     QTest::keyClick(window, Qt::Key_2);
-    fixture.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return fixture.backend.reviewed() == 1; }, 1000));
     QCOMPARE(fixture.backend.reviewed(), 1);
     QCOMPARE(fixture.backend.property("boxDistribution").toList(), QVariantList({1, 1, 0, 0, 0}));
 
     // Reveal the long answer so a stray scroll key would move the viewport.
     QTest::keyClick(window, Qt::Key_Space);
-    fixture.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return fixture.backend.showingAnswer(); }, 1000));
     QVERIFY(fixture.backend.showingAnswer());
     auto *scroll = fixture.item(QStringLiteral("flashcardViewport"));
     QVERIFY(scroll);
     auto *flickable = scroll->property("contentItem").value<QQuickItem *>();
     QVERIFY(flickable);
     flickable->setProperty("contentY", 48.0);
-    fixture.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return qAbs(flickable->property("contentY").toReal() - 48.0) < 1.0; }, 1000));
 
     // Brackets open the shared picker; opening never switches decks.
     QTest::keyClick(window, Qt::Key_BracketRight);
-    fixture.settle();
+    QVERIFY(waitForPickerOpen(*fixture.view, QStringLiteral("studyDeckSelector"), true));
     QVERIFY(selector->property("open").toBool());
     QCOMPARE(selectorCandidate(*fixture.view, QStringLiteral("studyDeckPopup")), QString("Alpha"));
     QCOMPARE(fixture.backend.currentDeck(), QString("Alpha"));
@@ -1096,7 +1149,7 @@ void TestBackend::qmlStudySelectorSwitchesDeckFreshViaVisibleRow() {
     for (Qt::Key key : {Qt::Key_J, Qt::Key_K, Qt::Key_Down, Qt::Key_Up, Qt::Key_Space, Qt::Key_1, Qt::Key_2, Qt::Key_A,
                         Qt::Key_G, Qt::Key_S, Qt::Key_B, Qt::Key_R, Qt::Key_C, Qt::Key_Question}) {
         QTest::keyClick(window, key);
-        fixture.settle();
+        QVERIFY(waitForPickerOpen(*fixture.view, QStringLiteral("studyDeckSelector"), true));
     }
     QVERIFY(selector->property("open").toBool());
     QCOMPARE(selectorCandidate(*fixture.view, QStringLiteral("studyDeckPopup")), QString("Alpha"));
@@ -1111,14 +1164,15 @@ void TestBackend::qmlStudySelectorSwitchesDeckFreshViaVisibleRow() {
 
     // Moving the Candidate highlights a row without changing the sitting.
     QTest::keyClick(window, Qt::Key_BracketRight);
-    fixture.settle();
+    QVERIFY(QTest::qWaitFor(
+        [&]() { return selectorCandidate(*fixture.view, QStringLiteral("studyDeckPopup")) == QString("Beta"); }, 1000));
     QCOMPARE(selectorCandidate(*fixture.view, QStringLiteral("studyDeckPopup")), QString("Beta"));
     QCOMPARE(fixture.backend.currentDeck(), QString("Alpha"));
     QCOMPARE(fixture.backend.reviewed(), 1);
 
     // Escape discards the Candidate and leaves the sitting untouched.
     QTest::keyClick(window, Qt::Key_Escape);
-    fixture.settle();
+    QVERIFY(waitForPickerOpen(*fixture.view, QStringLiteral("studyDeckSelector"), false));
     QVERIFY(!selector->property("open").toBool());
     QCOMPARE(selectorCandidate(*fixture.view, QStringLiteral("studyDeckPopup")), QString("Alpha"));
     QCOMPARE(fixture.backend.currentDeck(), QString("Alpha"));
@@ -1126,15 +1180,18 @@ void TestBackend::qmlStudySelectorSwitchesDeckFreshViaVisibleRow() {
 
     // Rate Again so the sitting is dirty, then commit a different deck.
     QTest::keyClick(window, Qt::Key_1);
-    fixture.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return fixture.backend.reviewed() == 2; }, 1000));
     QCOMPARE(fixture.backend.reviewed(), 2);
     QTest::keyClick(window, Qt::Key_BracketRight);
-    fixture.settle();
+    QVERIFY(waitForPickerOpen(*fixture.view, QStringLiteral("studyDeckSelector"), true));
     QTest::keyClick(window, Qt::Key_BracketRight);
-    fixture.settle();
+    QVERIFY(QTest::qWaitFor(
+        [&]() { return selectorCandidate(*fixture.view, QStringLiteral("studyDeckPopup")) == QString("Beta"); }, 1000));
     QCOMPARE(selectorCandidate(*fixture.view, QStringLiteral("studyDeckPopup")), QString("Beta"));
     QTest::keyClick(window, Qt::Key_Return);
-    fixture.settle();
+    QVERIFY(QTest::qWaitFor(
+        [&]() { return !selector->property("open").toBool() && fixture.backend.currentDeck() == QString("Beta"); },
+        1000));
     QVERIFY(!selector->property("open").toBool());
     QCOMPARE(fixture.backend.currentDeck(), QString("Beta"));
     QCOMPARE(fixture.backend.mode(), QString("cram"));
@@ -1153,16 +1210,21 @@ void TestBackend::qmlStudySelectorSwitchesDeckFreshViaVisibleRow() {
 
     // Enter on the Current deck closes without a recency write or a rebuild.
     QTest::keyClick(window, Qt::Key_Space);
-    fixture.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return fixture.backend.showingAnswer(); }, 1000));
     QTest::keyClick(window, Qt::Key_2);
-    fixture.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return fixture.backend.reviewed() == 1; }, 1000));
     QCOMPARE(fixture.backend.reviewed(), 1);
     const QStringList order = names(fixture.backend.deckSelector());
     QTest::keyClick(window, Qt::Key_BracketRight);
-    fixture.settle();
+    QVERIFY(QTest::qWaitFor(
+        [&]() {
+            return selector->property("open").toBool() &&
+                   selectorCandidate(*fixture.view, QStringLiteral("studyDeckPopup")) == QString("Beta");
+        },
+        1000));
     QCOMPARE(selectorCandidate(*fixture.view, QStringLiteral("studyDeckPopup")), QString("Beta"));
     QTest::keyClick(window, Qt::Key_Return);
-    fixture.settle();
+    QVERIFY(waitForPickerOpen(*fixture.view, QStringLiteral("studyDeckSelector"), false));
     QVERIFY(!selector->property("open").toBool());
     QCOMPARE(names(fixture.backend.deckSelector()), order);
     QCOMPARE(fixture.backend.reviewed(), 1);
@@ -1176,7 +1238,7 @@ void TestBackend::qmlStudySelectorSwitchesDeckFreshViaVisibleRow() {
     QVERIFY(fixture.backend.createCard(longName, "Long question", "L", "basic", {}, &fixture.error));
     fixture.view->settleFileWatcher();
     QTest::keyClick(window, Qt::Key_BracketRight);
-    fixture.settle();
+    QVERIFY(waitForPopupVisible(*fixture.view, QStringLiteral("studyDeckPopup")));
     QObject *popup = window->findChild<QObject *>(QStringLiteral("studyDeckPopup"));
     QVERIFY(popup);
     QVERIFY(popup->property("visible").toBool());
@@ -1205,13 +1267,18 @@ void TestBackend::qmlStudySelectorSwitchesDeckFreshViaVisibleRow() {
 
     // Click-outside discards a moved Candidate as it does on Home.
     QTest::keyClick(window, Qt::Key_BracketRight);
-    fixture.settle();
+    QVERIFY(QTest::qWaitFor(
+        [&]() {
+            return selectorCandidate(*fixture.view, QStringLiteral("studyDeckPopup")) != fixture.backend.currentDeck();
+        },
+        1000));
     QVERIFY(selectorCandidate(*fixture.view, QStringLiteral("studyDeckPopup")) != fixture.backend.currentDeck());
     QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, QPoint(5, 5));
-    fixture.settle();
+    QVERIFY(waitForPickerOpen(*fixture.view, QStringLiteral("studyDeckSelector"), false));
     QVERIFY(!selector->property("open").toBool());
     QTest::keyClick(window, Qt::Key_BracketRight);
-    fixture.settle();
+    QVERIFY(QTest::qWaitFor(
+        [&]() { return selectorCandidate(*fixture.view, QStringLiteral("studyDeckPopup")) == longName; }, 1000));
     QCOMPARE(selectorCandidate(*fixture.view, QStringLiteral("studyDeckPopup")), longName);
     QCOMPARE(fixture.backend.currentDeck(), longName);
     QCOMPARE(fixture.backend.reviewed(), reviewedBeforeLong);
@@ -1262,14 +1329,16 @@ void TestBackend::qmlStudyFlashcardViewportClipsAndSizes() {
         places << visualRect(item);
 
     QVERIFY(fixture.revealAndResetFlashcardViewport());
-    fixture.settle();
+    QVERIFY(waitForShowingAnswer(fixture, true));
     QVERIFY(fixture.backend.showingAnswer());
+    QVERIFY(QTest::qWaitFor(
+        [&]() { return flickable->property("contentHeight").toReal() - flickable->height() > 50.0; }, 1000));
 
     const qreal maxContentY = qMax<qreal>(0.0, flickable->property("contentHeight").toReal() - flickable->height());
     QVERIFY2(maxContentY > 50.0, "long card content should overflow the viewport");
     QVERIFY(verticalBar->property("size").toDouble() < 0.99);
     flickable->setProperty("contentY", maxContentY / 2);
-    fixture.settle();
+    QVERIFY(waitForContentY(flickable, maxContentY / 2));
 
     for (int i = 0; i < fixed.size(); ++i)
         QCOMPARE(visualRect(fixed.at(i)), places.at(i));
@@ -1277,7 +1346,7 @@ void TestBackend::qmlStudyFlashcardViewportClipsAndSizes() {
     const qreal shortViewportHeight = scroll->height();
     const qreal heldPosition = flickable->property("contentY").toReal();
     window->resize(1200, 900);
-    fixture.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return scroll->height() > shortViewportHeight + 100.0; }, 1000));
     QVERIFY2(scroll->height() > shortViewportHeight + 100.0, "viewport did not grow with the window");
     const qreal grownMax = qMax<qreal>(0.0, flickable->property("contentHeight").toReal() - flickable->height());
     QVERIFY(qAbs(flickable->property("contentY").toReal() - qMin(heldPosition, grownMax)) < 1.0);
@@ -1300,57 +1369,59 @@ void TestBackend::qmlStudyScrollFirstKeysAndRevealFallbacks() {
     QVERIFY(scroll);
     auto *flickable = scroll->property("contentItem").value<QQuickItem *>();
     QVERIFY(flickable);
-    auto press = [&](Qt::Key key) {
-        QTest::keyClick(window, key);
-        fixture.settle();
-    };
     auto position = [&] { return flickable->property("contentY").toReal(); };
     auto maxPosition = [&] {
         return qMax<qreal>(0.0, flickable->property("contentHeight").toReal() - flickable->height());
     };
+    auto press = [&](Qt::Key key, const auto &ready) {
+        QTest::keyClick(window, key);
+        return QTest::qWaitFor(ready, 1000);
+    };
 
     QVERIFY(!fixture.backend.showingAnswer());
-    press(Qt::Key_Down); // the short question cannot scroll, so it reveals
+    // The short question cannot scroll, so Down reveals the long answer.
+    QVERIFY(press(Qt::Key_Down, [&] { return fixture.backend.showingAnswer() && maxPosition() > 50.0; }));
     QVERIFY(fixture.backend.showingAnswer());
     QVERIFY2(maxPosition() > 50.0, "the long answer should scroll");
 
-    press(Qt::Key_Down);
+    QVERIFY(press(Qt::Key_Down, [&] { return fixture.backend.showingAnswer() && position() > 0.0; }));
     QVERIFY(fixture.backend.showingAnswer());
     QVERIFY(position() > 0.0);
     const qreal afterDown = position();
-    press(Qt::Key_Up);
+    QVERIFY(press(Qt::Key_Up, [&] { return fixture.backend.showingAnswer() && position() < afterDown; }));
     QVERIFY(fixture.backend.showingAnswer());
     QVERIFY(position() < afterDown);
 
-    press(Qt::Key_J);
+    QVERIFY(press(Qt::Key_J, [&] { return fixture.backend.showingAnswer() && position() > 0.0; }));
     QVERIFY(fixture.backend.showingAnswer());
     QVERIFY(position() > 0.0);
     const qreal afterJ = position();
-    press(Qt::Key_K);
+    QVERIFY(press(Qt::Key_K, [&] { return fixture.backend.showingAnswer() && position() < afterJ; }));
     QVERIFY(fixture.backend.showingAnswer());
     QVERIFY(position() < afterJ);
 
     flickable->setProperty("contentY", 0.0);
-    fixture.settle();
-    press(Qt::Key_K); // K only scrolls, so it cannot reveal at the top
+    QVERIFY(waitForContentY(flickable, 0.0));
+    QVERIFY(press(Qt::Key_K, [&] { return fixture.backend.showingAnswer() && position() == qreal(0); }));
     QVERIFY(fixture.backend.showingAnswer());
     QCOMPARE(position(), qreal(0));
     flickable->setProperty("contentY", maxPosition());
-    fixture.settle();
-    press(Qt::Key_J); // J only scrolls, so it cannot reveal at the bottom
+    QVERIFY(waitForContentY(flickable, maxPosition()));
+    QVERIFY(press(Qt::Key_J, [&] { return fixture.backend.showingAnswer() && position() == maxPosition(); }));
     QVERIFY(fixture.backend.showingAnswer());
     QCOMPARE(position(), maxPosition());
-    press(Qt::Key_Down); // at the bottom, Down reveals
+    QVERIFY(press(Qt::Key_Down, [&] { return !fixture.backend.showingAnswer(); }));
     QVERIFY(!fixture.backend.showingAnswer());
-    press(Qt::Key_Up); // at the top, Up reveals
+    QVERIFY(press(Qt::Key_Up, [&] { return fixture.backend.showingAnswer(); }));
     QVERIFY(fixture.backend.showingAnswer());
 
     flickable->setProperty("contentY", 0.0);
-    press(Qt::Key_Space);
+    QVERIFY(waitForContentY(flickable, 0.0));
+    QVERIFY(press(Qt::Key_Space, [&] { return !fixture.backend.showingAnswer(); }));
     QVERIFY(!fixture.backend.showingAnswer());
-    press(Qt::Key_Return);
+    QVERIFY(press(Qt::Key_Return, [&] { return fixture.backend.showingAnswer(); }));
     QVERIFY(fixture.backend.showingAnswer());
-    press(Qt::Key_Enter);
+    QVERIFY(press(Qt::Key_Enter, [&] { return !fixture.backend.showingAnswer() && position() == qreal(0); }));
     QVERIFY(!fixture.backend.showingAnswer());
     QCOMPARE(position(), qreal(0));
 }
@@ -1379,7 +1450,12 @@ void TestBackend::qmlStudyJKScrollOnlyWithoutOverflow() {
     QVERIFY(flickable->property("contentHeight").toReal() <= flickable->height() + 1.0);
 
     auto noCues = [&] {
-        fixture.settle();
+        QVERIFY(QTest::qWaitFor(
+            [&] {
+                return verticalBar->property("size").toDouble() >= 0.99 && !topFade->property("visible").toBool() &&
+                       !bottomFade->property("visible").toBool() && !endHint->property("visible").toBool();
+            },
+            1000));
         QVERIFY(verticalBar->property("size").toDouble() >= 0.99);
         QVERIFY(!topFade->property("visible").toBool());
         QVERIFY(!bottomFade->property("visible").toBool());
@@ -1387,22 +1463,36 @@ void TestBackend::qmlStudyJKScrollOnlyWithoutOverflow() {
     };
     noCues();
 
-    auto press = [&](Qt::Key key) {
+    auto press = [&](Qt::Key key, const auto &ready) {
         QTest::keyClick(window, key);
-        fixture.settle();
+        return QTest::qWaitFor(ready, 1000);
     };
-    press(Qt::Key_J);
+    const auto noOverflow = [&] {
+        return QTest::qWaitFor(
+            [&] { return !fixture.backend.showingAnswer() && flickable->property("contentY").toReal() == qreal(0); },
+            1000);
+    };
+    QVERIFY(press(Qt::Key_J, [&] { return !fixture.backend.showingAnswer(); }));
+    QVERIFY(noOverflow());
     QVERIFY(!fixture.backend.showingAnswer());
-    press(Qt::Key_K);
+    QVERIFY(press(Qt::Key_K, [&] { return !fixture.backend.showingAnswer(); }));
+    QVERIFY(noOverflow());
     QVERIFY(!fixture.backend.showingAnswer());
     QCOMPARE(flickable->property("contentY").toReal(), qreal(0));
 
-    press(Qt::Key_Space);
+    QVERIFY(press(Qt::Key_Space, [&] { return fixture.backend.showingAnswer(); }));
     QVERIFY(fixture.backend.showingAnswer());
     noCues();
 
-    press(Qt::Key_J);
-    press(Qt::Key_K);
+    const auto stillAtTop = [&] {
+        return QTest::qWaitFor(
+            [&] { return fixture.backend.showingAnswer() && flickable->property("contentY").toReal() == qreal(0); },
+            1000);
+    };
+    QVERIFY(press(Qt::Key_J, [&] { return fixture.backend.showingAnswer(); }));
+    QVERIFY(stillAtTop());
+    QVERIFY(press(Qt::Key_K, [&] { return fixture.backend.showingAnswer(); }));
+    QVERIFY(stillAtTop());
     QVERIFY(fixture.backend.showingAnswer());
     QCOMPARE(flickable->property("contentY").toReal(), qreal(0));
 }
@@ -1437,7 +1527,14 @@ void TestBackend::qmlStudyScrollCuesFollowPosition() {
         return qMax<qreal>(0.0, flickable->property("contentHeight").toReal() - flickable->height());
     };
     auto expectCues = [&](bool topFadeVisible, bool bottomFadeVisible, bool hintVisible, bool barHasOverflow) {
-        fixture.settle();
+        QVERIFY(QTest::qWaitFor(
+            [&] {
+                return topFade->property("visible").toBool() == topFadeVisible &&
+                       bottomFade->property("visible").toBool() == bottomFadeVisible &&
+                       endHint->property("visible").toBool() == hintVisible &&
+                       (verticalBar->property("size").toDouble() < 0.99) == barHasOverflow;
+            },
+            1000));
         QCOMPARE(topFade->property("visible").toBool(), topFadeVisible);
         QCOMPARE(bottomFade->property("visible").toBool(), bottomFadeVisible);
         QCOMPARE(endHint->property("visible").toBool(), hintVisible);
@@ -1477,10 +1574,11 @@ void TestBackend::qmlStudyRatingKeysKeepTheirMeaning() {
         QVERIFY(fixture.enterStudy(QStringLiteral("review"), StudyViewFixture::Sizing::KeepWindowSize));
 
         QTest::keyClick(window, Qt::Key_Space);
-        fixture.settle();
+        QVERIFY(waitForShowingAnswer(fixture, true));
         QVERIFY(fixture.backend.showingAnswer());
         QTest::keyClick(window, entry.first);
-        fixture.settle();
+        QVERIFY(QTest::qWaitFor(
+            [&]() { return fixture.backend.reviewed() == 1 && fixture.backend.good() == entry.second; }, 1000));
         QCOMPARE(fixture.backend.reviewed(), 1);
         QCOMPARE(fixture.backend.good(), entry.second);
     }
@@ -1507,26 +1605,27 @@ void TestBackend::qmlStudyResetsScrollOnRevealAndNewCard() {
     auto position = [&] { return flickable->property("contentY").toReal(); };
     auto scrollDown = [&] {
         flickable->setProperty("contentY", 90.0);
-        fixture.settle();
+        QVERIFY(QTest::qWaitFor([&]() { return position() > 0.0; }, 1000));
         QVERIFY(position() > 0.0);
     };
 
     QTest::keyClick(window, Qt::Key_Space);
-    fixture.settle();
+    QVERIFY(waitForShowingAnswer(fixture, true));
     QVERIFY(fixture.backend.showingAnswer());
     scrollDown();
     QTest::keyClick(window, Qt::Key_Space);
-    fixture.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return !fixture.backend.showingAnswer() && position() == qreal(0); }, 1000));
     QVERIFY(!fixture.backend.showingAnswer());
     QCOMPARE(position(), qreal(0));
 
     scrollDown();
     QTest::keyClick(window, Qt::Key_Space);
-    fixture.settle();
+    QVERIFY(waitForShowingAnswer(fixture, true));
     QVERIFY(fixture.backend.showingAnswer());
     const QString firstCard = fixture.backend.currentCardId();
     QTest::keyClick(window, Qt::Key_Right);
-    fixture.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return fixture.backend.currentCardId() != firstCard && position() == qreal(0); },
+                            1000));
     QVERIFY(fixture.backend.currentCardId() != firstCard);
     QCOMPARE(position(), qreal(0));
 }
@@ -1544,7 +1643,7 @@ void TestBackend::qmlStudyPointerScrollAndClickReveal() {
     QVERIFY(window);
     QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
     QTest::keyClick(window, Qt::Key_Space);
-    fixture.settle();
+    QVERIFY(waitForShowingAnswer(fixture, true));
     QVERIFY(fixture.backend.showingAnswer());
 
     auto *scroll = fixture.item(QStringLiteral("flashcardViewport"));
@@ -1568,29 +1667,31 @@ void TestBackend::qmlStudyPointerScrollAndClickReveal() {
         const QPointF at = local + QPointF(0, -step * 16);
         QMouseEvent move(QEvent::MouseMove, at, at, at, Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
         QCoreApplication::sendEvent(flickable, &move);
-        fixture.settle();
+        // Synthetic moves need one event-loop turn for Flickable's drag
+        // handler to see the new position; the state check follows below.
+        QTest::qWait(1);
     }
     QMouseEvent release(QEvent::MouseButtonRelease, local + QPointF(0, -128), local + QPointF(0, -128),
                         local + QPointF(0, -128), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
     QCoreApplication::sendEvent(flickable, &release);
-    fixture.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return flickable->property("contentY").toReal() > 10.0; }, 1000));
     QVERIFY2(flickable->property("contentY").toReal() > 10.0, "drag should pan the answer");
     QVERIFY(fixture.backend.showingAnswer());
     QCOMPARE(cardChanges, 0);
 
     flickable->setProperty("contentY", 0.0);
-    fixture.settle();
+    QVERIFY(waitForContentY(flickable, 0.0));
 
     QWheelEvent wheel(center, center, QPoint(), QPoint(0, -240), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase,
                       false);
     QCoreApplication::sendEvent(window, &wheel);
-    fixture.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return flickable->property("contentY").toReal() > 10.0; }, 1000));
     QVERIFY2(flickable->property("contentY").toReal() > 10.0, "wheel should pan the answer");
     QVERIFY(fixture.backend.showingAnswer());
     QCOMPARE(cardChanges, 0);
 
     QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, panelCorner);
-    fixture.settle();
+    QVERIFY(waitForShowingAnswer(fixture, false));
     QVERIFY(!fixture.backend.showingAnswer());
 }
 
@@ -1598,7 +1699,7 @@ void TestBackend::qmlStudyScalesPicturesToWidth() {
     StudyViewFixture fixture;
     QVERIFY(fixture.initialize());
     QVERIFY(fixture.loadWindow());
-    fixture.settle();
+    QVERIFY(QTest::qWaitForWindowExposed(fixture.window()));
 
     auto scale = [&](const QString &html, double width, QString *out) {
         return fixture.scaleImagesToWidth(html, width, out);
@@ -1687,8 +1788,10 @@ void TestBackend::qmlStudyVisualFactsPinLayoutAtMinimumSize() {
     QVERIFY2(questionFacts.value("horizontalOverflow").toDouble() <= 1.0, "horizontal overflow in question state");
 
     QVERIFY(fixture.revealAndResetFlashcardViewport());
-    fixture.settle();
+    QVERIFY(waitForShowingAnswer(fixture, true));
     QVERIFY(fixture.backend.showingAnswer());
+    QVERIFY(QTest::qWaitFor([&]() { return fixture.visualFacts().value(QStringLiteral("textInsideContent")).toBool(); },
+                            1000));
 
     const QVariantMap answerFacts = fixture.visualFacts();
     for (const QString &name : names)
@@ -1851,12 +1954,12 @@ void TestBackend::qmlCramBoxDistributionIsCramOnlyAndHidesWhenEmpty() {
 
     auto *window = fixture.window();
     QVERIFY(QMetaObject::invokeMethod(window, "startStudy", Q_ARG(QVariant, QStringLiteral("cram"))));
-    fixture.settle();
+    QVERIFY(waitForVisible(display, true));
     QVERIFY(display->isVisible());
     QVERIFY(!status->isVisible());
 
     QVERIFY(QMetaObject::invokeMethod(window, "startStudy", Q_ARG(QVariant, QStringLiteral("review"))));
-    fixture.settle();
+    QVERIFY(waitForVisible(display, false));
     QVERIFY(!display->isVisible());
     QVERIFY(status->isVisible());
 
@@ -1956,15 +2059,12 @@ void TestBackend::qmlSettingsRowsFitTheirContent() {
     QVERIFY(window);
     QVERIFY(QTest::qWaitForWindowExposed(window));
 
-    auto settle = [] {
-        QCoreApplication::processEvents();
-        QTest::qWait(30);
-    };
-
     window->resize(window->minimumWidth(), window->minimumHeight());
-    settle();
+    QVERIFY(QTest::qWaitFor(
+        [&]() { return window->width() == window->minimumWidth() && window->height() == window->minimumHeight(); },
+        1000));
     QVERIFY(QMetaObject::invokeMethod(view.window, "openSettings"));
-    settle();
+    QVERIFY(waitForScreen(view, QStringLiteral("settings")));
     QCOMPARE(view.window->property("screen").toString(), QString("settings"));
 
     auto visualRect = [](QQuickItem *item) { return item->mapRectToScene(item->boundingRect()); };
@@ -2095,7 +2195,12 @@ void TestBackend::qmlSettingsRowsFitTheirContent() {
         QStringLiteral("A long translated description can wrap across many lines in this row. ").repeated(5);
     allowanceDescription->setProperty("text", longDescription);
     retentionDescription->setProperty("text", longDescription);
-    settle();
+    QVERIFY(QTest::qWaitFor(
+        [&]() {
+            return allowancePanel->height() > ordinaryAllowanceHeight + 1.0 &&
+                   retentionPanel->height() > ordinaryRetentionHeight + 1.0;
+        },
+        1000));
 
     QVERIFY2(allowancePanel->height() > ordinaryAllowanceHeight + 1.0,
              "New-card allowance box did not grow with its description");
@@ -2107,7 +2212,7 @@ void TestBackend::qmlSettingsRowsFitTheirContent() {
         QStringLiteral("/home/learner/decks/") +
         QStringLiteral("a-very-long-decks-directory-name-that-must-not-stretch-the-row/").repeated(6);
     deckPath->setProperty("text", longPath);
-    settle();
+    QVERIFY(QTest::qWaitFor(checkLayout, 1000));
 
     const qreal deckPanelWidth = deckPanel->width();
     const qreal deckPanelHeight = deckPanel->height();
@@ -2120,7 +2225,7 @@ void TestBackend::qmlSettingsRowsFitTheirContent() {
     const qreal maxContentY = qMax<qreal>(0.0, flickable->property("contentHeight").toReal() - flickable->height());
     QVERIFY2(maxContentY > 0.0, "Settings content should scroll after boxes grow");
     flickable->setProperty("contentY", maxContentY);
-    settle();
+    QVERIFY(QTest::qWaitFor([&]() { return isInside(flickable, back); }, 1000));
     QVERIFY2(isInside(flickable, back), "Back button is not reachable by scrolling");
 }
 
@@ -2608,10 +2713,11 @@ void TestBackend::qmlCramInjectedOrderPresentsExactNextFlashcard() {
     QCOMPARE(fixture.backend.currentCardId(), deckCards.at(0).id);
 
     const auto rateGood = [&fixture] {
+        const int reviewedBefore = fixture.backend.reviewed();
         QTest::keyClick(fixture.window(), Qt::Key_Space);
-        fixture.settle();
+        QVERIFY(waitForShowingAnswer(fixture, true));
         QTest::keyClick(fixture.window(), Qt::Key_2);
-        fixture.settle();
+        QVERIFY(waitForReviewed(fixture, reviewedBefore + 1));
     };
     rateGood();
     QCOMPARE(fixture.backend.currentCardId(), deckCards.at(1).id);
@@ -3052,8 +3158,18 @@ void TestBackend::qmlStudyShowsMathPlaceholderUntilSvgArrives() {
     QVERIFY(question);
     QVERIFY(answer);
     fixture.backend.reveal();
-    fixture.settle();
+    QVERIFY(waitForVisible(answer, true));
     QVERIFY(answer->isVisible());
+    qreal previousAnswerTop = -1.0;
+    int stableTops = 0;
+    QVERIFY(QTest::qWaitFor(
+        [&]() {
+            const qreal answerTop = answer->mapRectToScene(answer->boundingRect()).top();
+            stableTops = qAbs(answerTop - previousAnswerTop) < 1.0 ? stableTops + 1 : 0;
+            previousAnswerTop = answerTop;
+            return stableTops >= 5 && fixture.visualFacts().value(QStringLiteral("textInsideContent")).toBool();
+        },
+        1000));
 
     const QString text = question->property("text").toString();
     QVERIFY2(text.contains(QStringLiteral("<!--omacards-math:")), qPrintable(text));
@@ -3124,7 +3240,11 @@ void TestBackend::qmlStudyRecolorsCachedSvgWhenThemeChanges() {
     const int rendersBefore = toolchainRenders(argsLog);
 
     fixture.backend.setMathColors(QStringLiteral("#abcdef"), QStringLiteral("#123456"));
-    fixture.settle();
+    QVERIFY(QTest::qWaitFor(
+        [&]() {
+            return svgFromMathHtml(question->property("text").toString()).contains(QStringLiteral("fill=\"#abcdef\""));
+        },
+        1000));
     const QString after = question->property("text").toString();
     QVERIFY(after.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
     QVERIFY(!after.contains(QStringLiteral("<!--omacards-math:")));
@@ -3292,7 +3412,7 @@ void TestBackend::qmlSettingsBoundsFollowConfig() {
     QVERIFY(window);
     QVERIFY(QTest::qWaitForWindowExposed(window));
     QVERIFY(QMetaObject::invokeMethod(view.window, "openSettings"));
-    view.settle();
+    QVERIFY(waitForScreen(view, QStringLiteral("settings")));
 
     QQuickItem *allowanceMinus = view.item(QStringLiteral("settingsNewCardAllowanceMinus"));
     QQuickItem *allowancePlus = view.item(QStringLiteral("settingsNewCardAllowancePlus"));
@@ -3304,25 +3424,41 @@ void TestBackend::qmlSettingsBoundsFollowConfig() {
     QCOMPARE(slider->property("to").toDouble(), Config::kMaxRetention);
 
     backend.setNewCardAllowance(Config::kMaxNewPerDay - 1);
-    view.settle();
+    QVERIFY(QTest::qWaitFor(
+        [&]() {
+            QQuickItem *value = view.item(QStringLiteral("settingsNewCardAllowanceValue"));
+            return value && value->property("text").toInt() == backend.newCardAllowance();
+        },
+        1000));
     QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centerInWindow(window, allowancePlus));
-    view.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.newCardAllowance() == Config::kMaxNewPerDay; }, 1000));
     QCOMPARE(backend.newCardAllowance(), Config::kMaxNewPerDay);
 
     backend.setNewCardAllowance(Config::kMinNewPerDay);
-    view.settle();
+    QVERIFY(QTest::qWaitFor(
+        [&]() {
+            QQuickItem *value = view.item(QStringLiteral("settingsNewCardAllowanceValue"));
+            return value && value->property("text").toInt() == backend.newCardAllowance();
+        },
+        1000));
     QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centerInWindow(window, allowanceMinus));
-    view.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.newCardAllowance() == Config::kMinNewPerDay; }, 1000));
     QCOMPARE(backend.newCardAllowance(), Config::kMinNewPerDay);
 
     backend.setDayStartHour(Config::kMaxDayStartHour);
-    view.settle();
+    QVERIFY(QTest::qWaitFor(
+        [&]() {
+            QQuickItem *value = view.item(QStringLiteral("settingsDayStartHourValue"));
+            return value && value->property("text").toString() ==
+                                QString::number(backend.dayStartHour()).rightJustified(2, QLatin1Char('0')) + ":00";
+        },
+        1000));
     QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centerInWindow(window, dayPlus));
-    view.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.dayStartHour() == Config::kMinDayStartHour; }, 1000));
     QCOMPARE(backend.dayStartHour(), Config::kMinDayStartHour);
 
     QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centerInWindow(window, dayMinus));
-    view.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.dayStartHour() == Config::kMaxDayStartHour; }, 1000));
     QCOMPARE(backend.dayStartHour(), Config::kMaxDayStartHour);
 }
 
@@ -3343,19 +3479,23 @@ void TestBackend::qmlLibrarySelectionClampsAfterExternalRefresh() {
     QVERIFY(QTest::qWaitForWindowExposed(window));
     const auto press = [&](Qt::Key key) {
         QTest::keyClick(window, key);
-        view.settle();
+        QCoreApplication::processEvents();
+    };
+    const auto moveTo = [&](Qt::Key key, int index) {
+        QTest::keyClick(window, key);
+        return waitForCardIndex(view, index);
     };
 
     QVERIFY(QMetaObject::invokeMethod(view.window, "openLibrary"));
-    view.settle();
+    QVERIFY(waitForScreen(view, QStringLiteral("library")));
     QVERIFY(QMetaObject::invokeMethod(view.window, "moveCardSelection", Q_ARG(QVariant, 2)));
     QCOMPARE(view.window->property("cardIndex").toInt(), 2);
 
     // An outside write shrinks the Card list. The QML index must follow it.
     QVERIFY(backend.deleteCard("Test", backend.allDecks().last().cards.at(2).id, &error));
-    view.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return backend.cardList().size() == 2; }, 1000));
     backend.refresh();
-    view.settle();
+    QVERIFY(waitForCardIndex(view, 1));
     QCOMPARE(backend.cardList().size(), 2);
     QCOMPARE(view.window->property("cardIndex").toInt(), 1);
     QVariant selected;
@@ -3363,9 +3503,9 @@ void TestBackend::qmlLibrarySelectionClampsAfterExternalRefresh() {
     QCOMPARE(selected.toMap().value("question").toString(), QString("Q1"));
 
     // J, K, Enter and Delete all act on the clamped selection after the refresh.
-    press(Qt::Key_J);
+    QVERIFY(moveTo(Qt::Key_J, 0));
     QCOMPARE(view.window->property("cardIndex").toInt(), 0);
-    press(Qt::Key_K);
+    QVERIFY(moveTo(Qt::Key_K, 1));
     QCOMPARE(view.window->property("cardIndex").toInt(), 1);
 
     press(Qt::Key_Return);
@@ -3377,9 +3517,11 @@ void TestBackend::qmlLibrarySelectionClampsAfterExternalRefresh() {
     QQuickItem *keyHandler = view.item(QStringLiteral("keyHandler"));
     QVERIFY(keyHandler);
     keyHandler->forceActiveFocus();
-    view.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return keyHandler->hasActiveFocus(); }, 1000));
 
-    press(Qt::Key_Delete);
+    QTest::keyClick(window, Qt::Key_Delete);
+    QVERIFY(QTest::qWaitFor(
+        [&]() { return backend.totalCards() == 1 && view.window->property("cardIndex").toInt() == 0; }, 1000));
     QCOMPARE(backend.totalCards(), 1);
     QCOMPARE(view.window->property("cardIndex").toInt(), 0);
 }
@@ -3406,7 +3548,8 @@ void TestBackend::qmlNoticeKeepsErrorSignalMessage() {
     backend.newDeck("");
     QCOMPARE(errors.count(), 1);
     const QString message = errors.at(0).at(0).toString();
-    view.settle();
+    QVERIFY(QTest::qWaitFor(
+        [&]() { return notice->property("visible").toBool() && label->property("text").toString() == message; }, 1000));
     QVERIFY(notice->property("visible").toBool());
     QCOMPARE(label->property("text").toString(), message);
 
@@ -3414,7 +3557,8 @@ void TestBackend::qmlNoticeKeepsErrorSignalMessage() {
     // notice is still on screen.
     backend.undo();
     QVERIFY(backend.status() != message);
-    view.settle();
+    QVERIFY(QTest::qWaitFor(
+        [&]() { return notice->property("visible").toBool() && label->property("text").toString() == message; }, 1000));
     QVERIFY(notice->property("visible").toBool());
     QCOMPARE(label->property("text").toString(), message);
 }
@@ -3433,43 +3577,44 @@ void TestBackend::qmlUndoShortcutsRespectKeyboardOwners() {
     auto *window = qobject_cast<QQuickWindow *>(view.window);
     QVERIFY(window);
     QVERIFY(QTest::qWaitForWindowExposed(window));
-    const auto press = [&](Qt::Key key, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
-        QTest::keyClick(window, key, modifiers);
-        view.settle();
-    };
     const auto question = [&]() { return backend.allDecks().last().cards.first().question; };
     const auto setQuestion = [&](const QString &text) {
         QVERIFY(backend.modifyCard("Test", cardId, text, "Answer", "basic", {}, &error));
         QCOMPARE(question(), text);
     };
+    const auto press = [&](Qt::Key key, const auto &ready, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+        QTest::keyClick(window, key, modifiers);
+        return QTest::qWaitFor(ready, 1000);
+    };
 
     // A plain Ctrl+Z still edits when nothing owns the keyboard.
     setQuestion(QStringLiteral("Edited?"));
-    press(Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY(press(Qt::Key_Z, [&] { return question() == QStringLiteral("Question?"); }, Qt::ControlModifier));
     QCOMPARE(question(), QStringLiteral("Question?"));
 
     // The two overlay panels own both undo and redo; Escape hands keys back.
     setQuestion(QStringLiteral("Edited?"));
-    press(Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY(press(Qt::Key_Z, [&] { return question() == QStringLiteral("Question?"); }, Qt::ControlModifier));
     QVERIFY(backend.canRedo());
     window->setProperty("helpVisible", true);
-    press(Qt::Key_Y, Qt::ControlModifier);
+    QVERIFY(press(Qt::Key_Y, [&] { return question() == QStringLiteral("Question?"); }, Qt::ControlModifier));
     QCOMPARE(question(), QStringLiteral("Question?"));
-    press(Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+    QVERIFY(press(
+        Qt::Key_Z, [&] { return question() == QStringLiteral("Question?"); }, Qt::ControlModifier | Qt::ShiftModifier));
     QCOMPARE(question(), QStringLiteral("Question?"));
-    press(Qt::Key_Escape);
+    QVERIFY(press(Qt::Key_Escape, [&] { return !window->property("helpVisible").toBool(); }));
     QVERIFY(!window->property("helpVisible").toBool());
-    press(Qt::Key_Y, Qt::ControlModifier);
+    QVERIFY(press(Qt::Key_Y, [&] { return question() == QStringLiteral("Edited?"); }, Qt::ControlModifier));
     QCOMPARE(question(), QStringLiteral("Edited?"));
 
     setQuestion(QStringLiteral("Question?"));
     window->setProperty("statsVisible", true);
     setQuestion(QStringLiteral("Edited?"));
-    press(Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY(press(Qt::Key_Z, [&] { return question() == QStringLiteral("Edited?"); }, Qt::ControlModifier));
     QCOMPARE(question(), QStringLiteral("Edited?"));
-    press(Qt::Key_Escape);
+    QVERIFY(press(Qt::Key_Escape, [&] { return !window->property("statsVisible").toBool(); }));
     QVERIFY(!window->property("statsVisible").toBool());
-    press(Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY(press(Qt::Key_Z, [&] { return question() == QStringLiteral("Question?"); }, Qt::ControlModifier));
     QCOMPARE(question(), QStringLiteral("Question?"));
 
     // Modal dialogs own undo too, even when focus is back on the key handler.
@@ -3477,28 +3622,29 @@ void TestBackend::qmlUndoShortcutsRespectKeyboardOwners() {
     QQuickItem *keyHandler = view.item(QStringLiteral("keyHandler"));
     QVERIFY(dialog && keyHandler);
     keyHandler->forceActiveFocus();
-    view.settle();
-    press(Qt::Key_N);
-    QVERIFY(QTest::qWaitFor([&]() { return dialog->property("opened").toBool(); }, 1000));
+    QVERIFY(QTest::qWaitFor([&]() { return keyHandler->hasActiveFocus(); }, 1000));
+    QVERIFY(press(Qt::Key_N, [&] { return dialog->property("opened").toBool(); }));
     keyHandler->forceActiveFocus();
     setQuestion(QStringLiteral("Edited?"));
-    press(Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY(press(Qt::Key_Z, [&] { return question() == QStringLiteral("Edited?"); }, Qt::ControlModifier));
     QCOMPARE(question(), QStringLiteral("Edited?"));
-    press(Qt::Key_Escape);
-    QVERIFY(QTest::qWaitFor([&]() { return !dialog->property("opened").toBool(); }, 1000));
-    press(Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY(press(Qt::Key_Escape, [&] { return !dialog->property("opened").toBool(); }));
+    QVERIFY(press(Qt::Key_Z, [&] { return question() == QStringLiteral("Question?"); }, Qt::ControlModifier));
     QCOMPARE(question(), QStringLiteral("Question?"));
 
     // An open Deck selector is another keyboard owner, with its own Escape.
-    press(Qt::Key_BracketRight);
+    QVERIFY(press(Qt::Key_BracketRight, [&] {
+        QQuickItem *picker = view.item(QStringLiteral("homeDeckSelector"));
+        return picker && picker->property("open").toBool();
+    }));
     QQuickItem *picker = view.item(QStringLiteral("homeDeckSelector"));
     QVERIFY(picker && picker->property("open").toBool());
     setQuestion(QStringLiteral("Edited?"));
-    press(Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY(press(Qt::Key_Z, [&] { return question() == QStringLiteral("Edited?"); }, Qt::ControlModifier));
     QCOMPARE(question(), QStringLiteral("Edited?"));
-    press(Qt::Key_Escape);
+    QVERIFY(press(Qt::Key_Escape, [&] { return !picker->property("open").toBool(); }));
     QVERIFY(!picker->property("open").toBool());
-    press(Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY(press(Qt::Key_Z, [&] { return question() == QStringLiteral("Question?"); }, Qt::ControlModifier));
     QCOMPARE(question(), QStringLiteral("Question?"));
 }
 
@@ -3521,7 +3667,11 @@ void TestBackend::qmlScreenOrderAndRadiusHaveOneSource() {
     QVERIFY(stack);
     for (int i = 0; i < order.size(); ++i) {
         window->setProperty("screen", order.at(i).toString());
-        view.settle();
+        QVERIFY(QTest::qWaitFor(
+            [&]() {
+                return window->property("screenIndex").toInt() == i && stack->property("currentIndex").toInt() == i;
+            },
+            1000));
         QCOMPARE(window->property("screenIndex").toInt(), i);
         QCOMPARE(stack->property("currentIndex").toInt(), i);
     }
