@@ -31,7 +31,9 @@ ApplicationWindow {
     readonly property color panel: theme.panel
     readonly property color raised: theme.raised
     readonly property color border: theme.border
-    readonly property color accentInk: theme.accentForeground === "white" ? "#ffffff" : "#0e0e10"
+    readonly property color accentInk: theme.accentForeground
+    readonly property var screenOrder: ["home", "study", "library", "settings"]
+    readonly property int screenIndex: Math.max(0, screenOrder.indexOf(screen))
 
     property string screen: "home"
     property bool helpVisible: false
@@ -39,6 +41,7 @@ ApplicationWindow {
     property var statsData: ({})
     property string editCardId: ""
     property string pendingDeck: ""
+    property string noticeMessage: ""
     property int cardIndex: 0
     property string lastPresentedStudyState: ""
     readonly property bool cramDistributionVisible: backend.mode === "cram" && cramQueueHasCards()
@@ -49,6 +52,15 @@ ApplicationWindow {
 
     function withAlpha(color, alpha) {
         return Qt.rgba(color.r, color.g, color.b, alpha)
+    }
+
+    function clampedRadius(cap) {
+        return Math.min(cap, theme.radius)
+    }
+
+    function clampCardIndex() {
+        const count = backend.cardList.length
+        cardIndex = count === 0 ? 0 : Math.min(Math.max(cardIndex, 0), count - 1)
     }
 
     function cramQueueHasCards() {
@@ -86,7 +98,7 @@ ApplicationWindow {
         closeDeckPicker()
         backend.refresh()
         screen = "library"
-        cardIndex = Math.min(Math.max(cardIndex, 0), Math.max(0, backend.cardList.length - 1))
+        clampCardIndex()
         keyHandler.forceActiveFocus()
     }
 
@@ -217,6 +229,9 @@ ApplicationWindow {
                 win.resetStudyScroll()
             }
         }
+        function onCardsChanged() {
+            win.clampCardIndex()
+        }
     }
 
     function openEditor(card) {
@@ -244,9 +259,11 @@ ApplicationWindow {
         if (backend.deckDue > 0)
             return qsTr("%1 due in %2. One card at a time, Again or Good.")
                 .arg(backend.deckDue).arg(backend.currentDeck)
-        if (backend.deckNew > 0)
-            return qsTr("%1 new card%2 left today in %3.")
-                .arg(backend.deckNew).arg(backend.deckNew === 1 ? "" : "s").arg(backend.currentDeck)
+        if (backend.deckNew === 1)
+            return qsTr("One new card left today in %1.").arg(backend.currentDeck)
+        if (backend.deckNew > 1)
+            return qsTr("%1 new cards left today in %2.", "", backend.deckNew)
+                .arg(backend.deckNew).arg(backend.currentDeck)
         if (backend.dueCount > 0)
             return qsTr("%1 cards are due in other decks. Use the deck selector to switch.")
                 .arg(backend.dueCount)
@@ -282,7 +299,7 @@ ApplicationWindow {
 
         implicitWidth: buttonRow.implicitWidth + (compact ? 22 : 40)
         implicitHeight: compact ? 32 : 46
-        radius: Math.min(10, theme.radius)
+        radius: win.clampedRadius(10)
         color: primary ? theme.accent : (hover.hovered ? raised : panel)
         border.width: primary ? 0 : 1
         border.color: danger ? withAlpha(theme.red, 0.6) : win.border
@@ -357,7 +374,7 @@ ApplicationWindow {
         height: 42
         implicitHeight: 42
         Layout.preferredWidth: pickerWidth
-        radius: Math.min(7, theme.radius)
+        radius: win.clampedRadius(7)
         color: listPopup.opened ? win.raised : win.panel
         border.width: 1
         border.color: listPopup.opened ? win.withAlpha(theme.accent, 0.6) : win.border
@@ -495,7 +512,7 @@ ApplicationWindow {
             closePolicy: Popup.NoAutoClose
             background: Rectangle {
                 color: theme.background
-                radius: Math.min(10, theme.radius)
+                radius: win.clampedRadius(10)
                 border.width: 1
                 border.color: win.border
             }
@@ -527,7 +544,7 @@ ApplicationWindow {
                     property bool current: modelData.name === backend.currentDeck
                     width: deckList.width
                     height: 48
-                    radius: Math.min(7, theme.radius)
+                    radius: win.clampedRadius(7)
                     color: deckRow.candidate ? theme.accent : rowMouse.containsMouse ? win.raised : win.panel
                     border.width: deckRow.candidate ? 0 : 1
                     border.color: win.border
@@ -644,7 +661,7 @@ ApplicationWindow {
 
     component Panel: Rectangle {
         color: win.panel
-        radius: Math.min(12, theme.radius)
+        radius: win.clampedRadius(12)
         border.width: 1
         border.color: win.border
     }
@@ -659,7 +676,7 @@ ApplicationWindow {
         rightPadding: 12
         background: Rectangle {
             color: win.raised
-            radius: Math.min(7, theme.radius)
+            radius: win.clampedRadius(7)
             border.width: 1
             border.color: parent.activeFocus ? win.withAlpha(theme.accent, 0.7) : win.border
         }
@@ -678,7 +695,7 @@ ApplicationWindow {
         wrapMode: TextArea.Wrap
         background: Rectangle {
             color: win.raised
-            radius: Math.min(7, theme.radius)
+            radius: win.clampedRadius(7)
             border.width: 1
             border.color: parent.activeFocus ? win.withAlpha(theme.accent, 0.7) : win.border
         }
@@ -704,6 +721,7 @@ ApplicationWindow {
 
         Item {
             id: keyHandler
+            objectName: "keyHandler"
             anchors.fill: parent
             anchors.topMargin: 3
             focus: true
@@ -718,20 +736,9 @@ ApplicationWindow {
                     return
                 }
 
-                if (event.modifiers & Qt.ControlModifier) {
-                    if (event.key === Qt.Key_Z) {
-                        if (event.modifiers & Qt.ShiftModifier)
-                            backend.redo()
-                        else
-                            backend.undo()
-                        event.accepted = true
-                    } else if (event.key === Qt.Key_Y) {
-                        backend.redo()
-                        event.accepted = true
-                    }
-                    return
-                }
-
+                // Dialogs, the Deck selector and the overlay panels own every
+                // key while open. This guard must stay above undo/redo so a
+                // shortcut behind an owner cannot edit the Deck.
                 if (newDeckDialog.opened || newCardDialog.opened || importDialog.opened
                         || editCardDialog.opened || deleteDeckDialog.opened) {
                     if (event.key === Qt.Key_Escape) {
@@ -756,6 +763,20 @@ ApplicationWindow {
                             || event.key === Qt.Key_F1 || event.key === Qt.Key_S) {
                         helpVisible = false
                         statsVisible = false
+                        event.accepted = true
+                    }
+                    return
+                }
+
+                if (event.modifiers & Qt.ControlModifier) {
+                    if (event.key === Qt.Key_Z) {
+                        if (event.modifiers & Qt.ShiftModifier)
+                            backend.redo()
+                        else
+                            backend.undo()
+                        event.accepted = true
+                    } else if (event.key === Qt.Key_Y) {
+                        backend.redo()
                         event.accepted = true
                     }
                     return
@@ -923,11 +944,10 @@ ApplicationWindow {
                 spacing: 16
 
                 StackLayout {
+                    objectName: "screenStack"
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    currentIndex: win.screen === "study" ? 1
-                                  : win.screen === "library" ? 2
-                                  : win.screen === "settings" ? 3 : 0
+                    currentIndex: win.screenIndex
 
                     // ---------------------------------------------------- home
                     Item {
@@ -943,7 +963,7 @@ ApplicationWindow {
                                 Rectangle {
                                     width: 22
                                     height: 22
-                                    radius: Math.min(5, theme.radius)
+                                    radius: win.clampedRadius(5)
                                     color: theme.accent
                                 }
 
@@ -1487,7 +1507,7 @@ ApplicationWindow {
                                                 required property var modelData
                                                 width: ListView.view.width
                                                 height: 58
-                                                radius: Math.min(8, theme.radius)
+                                                radius: win.clampedRadius(8)
                                                 color: modelData.isCurrent
                                                        ? win.withAlpha(theme.accent, 0.14)
                                                        : hover.hovered ? win.raised : "transparent"
@@ -1630,7 +1650,6 @@ ApplicationWindow {
                                             spacing: 6
                                             model: backend.cardList
                                             currentIndex: win.cardIndex
-                                            onCurrentIndexChanged: win.cardIndex = currentIndex
 
                                             delegate: Rectangle {
                                                 id: cardRow
@@ -1638,7 +1657,7 @@ ApplicationWindow {
                                                 required property int index
                                                 width: ListView.view.width
                                                 height: 52
-                                                radius: Math.min(8, theme.radius)
+                                                radius: win.clampedRadius(8)
                                                 color: cardRow.ListView.isCurrentItem
                                                        ? win.withAlpha(theme.accent, 0.16)
                                                        : hover.hovered ? win.raised : win.withAlpha(win.raised, 0.45)
@@ -1796,7 +1815,9 @@ ApplicationWindow {
                                         implicitWidth: 38
                                         Layout.minimumWidth: 38
                                         Layout.maximumWidth: 38
-                                        onClicked: backend.setNewCardAllowance(Math.max(0, backend.newCardAllowance - 1))
+                                        onClicked: backend.setNewCardAllowance(
+                                                       Math.max(backend.minNewCardAllowance,
+                                                                backend.newCardAllowance - 1))
                                     }
 
                                     Label {
@@ -1818,7 +1839,9 @@ ApplicationWindow {
                                         implicitWidth: 38
                                         Layout.minimumWidth: 38
                                         Layout.maximumWidth: 38
-                                        onClicked: backend.setNewCardAllowance(Math.min(999, backend.newCardAllowance + 1))
+                                        onClicked: backend.setNewCardAllowance(
+                                                       Math.min(backend.maxNewCardAllowance,
+                                                                backend.newCardAllowance + 1))
                                     }
                                 }
                             }
@@ -1864,7 +1887,9 @@ ApplicationWindow {
                                         implicitWidth: 38
                                         Layout.minimumWidth: 38
                                         Layout.maximumWidth: 38
-                                        onClicked: backend.setDayStartHour((backend.dayStartHour + 23) % 24)
+                                        onClicked: backend.setDayStartHour(
+                                                       backend.dayStartHour === backend.minDayStartHour
+                                                       ? backend.maxDayStartHour : backend.dayStartHour - 1)
                                     }
 
                                     Label {
@@ -1886,7 +1911,9 @@ ApplicationWindow {
                                         implicitWidth: 38
                                         Layout.minimumWidth: 38
                                         Layout.maximumWidth: 38
-                                        onClicked: backend.setDayStartHour((backend.dayStartHour + 1) % 24)
+                                        onClicked: backend.setDayStartHour(
+                                                       backend.dayStartHour === backend.maxDayStartHour
+                                                       ? backend.minDayStartHour : backend.dayStartHour + 1)
                                     }
                                 }
                             }
@@ -1929,8 +1956,8 @@ ApplicationWindow {
                                         objectName: "settingsRetentionSlider"
                                         Layout.fillWidth: true
                                         Layout.minimumWidth: 0
-                                        from: 0.70
-                                        to: 0.99
+                                        from: backend.minDesiredRetention
+                                        to: backend.maxDesiredRetention
                                         stepSize: 0.01
                                         snapMode: Slider.SnapAlways
                                         value: backend.desiredRetention
@@ -2157,7 +2184,7 @@ ApplicationWindow {
             anchors.centerIn: parent
             width: Math.min(parent.width - 80, 540)
             implicitHeight: helpColumn.implicitHeight + 56
-            radius: Math.min(12, theme.radius)
+            radius: win.clampedRadius(12)
             color: win.panel
             border.width: 1
             border.color: win.withAlpha(theme.accent, 0.5)
@@ -2256,7 +2283,7 @@ ApplicationWindow {
             anchors.centerIn: parent
             width: Math.min(parent.width - 80, 460)
             implicitHeight: statsColumn.implicitHeight + 56
-            radius: Math.min(12, theme.radius)
+            radius: win.clampedRadius(12)
             color: win.panel
             border.width: 1
             border.color: win.withAlpha(theme.accent, 0.5)
@@ -2324,7 +2351,7 @@ ApplicationWindow {
         closePolicy: Popup.CloseOnEscape
         background: Rectangle {
             color: win.panel
-            radius: Math.min(12, theme.radius)
+            radius: win.clampedRadius(12)
             border.width: 1
             border.color: win.border
         }
@@ -2379,6 +2406,7 @@ ApplicationWindow {
 
     Dialog {
         id: newCardDialog
+        objectName: "newCardDialog"
         modal: true
         anchors.centerIn: parent
         width: Math.min(580, win.width - 40)
@@ -2386,7 +2414,7 @@ ApplicationWindow {
         closePolicy: Popup.CloseOnEscape
         background: Rectangle {
             color: win.panel
-            radius: Math.min(12, theme.radius)
+            radius: win.clampedRadius(12)
             border.width: 1
             border.color: win.border
         }
@@ -2465,6 +2493,7 @@ ApplicationWindow {
 
     Dialog {
         id: editCardDialog
+        objectName: "editCardDialog"
         modal: true
         anchors.centerIn: parent
         width: Math.min(580, win.width - 40)
@@ -2472,7 +2501,7 @@ ApplicationWindow {
         closePolicy: Popup.CloseOnEscape
         background: Rectangle {
             color: win.panel
-            radius: Math.min(12, theme.radius)
+            radius: win.clampedRadius(12)
             border.width: 1
             border.color: win.border
         }
@@ -2543,7 +2572,7 @@ ApplicationWindow {
         closePolicy: Popup.CloseOnEscape
         background: Rectangle {
             color: win.panel
-            radius: Math.min(12, theme.radius)
+            radius: win.clampedRadius(12)
             border.width: 1
             border.color: win.withAlpha(theme.red, 0.5)
         }
@@ -2597,7 +2626,7 @@ ApplicationWindow {
         closePolicy: Popup.CloseOnEscape
         background: Rectangle {
             color: win.panel
-            radius: Math.min(12, theme.radius)
+            radius: win.clampedRadius(12)
             border.width: 1
             border.color: win.border
         }
@@ -2658,6 +2687,7 @@ ApplicationWindow {
 
     Popup {
         id: noticePopup
+        objectName: "noticePopup"
         parent: win.contentItem
         x: (win.width - implicitWidth) / 2
         y: win.height - implicitHeight - 24
@@ -2665,12 +2695,13 @@ ApplicationWindow {
         padding: 12
         background: Rectangle {
             color: win.panel
-            radius: Math.min(8, theme.radius)
+            radius: win.clampedRadius(8)
             border.width: 1
             border.color: win.withAlpha(theme.red, 0.6)
         }
         Label {
-            text: backend.status
+            objectName: "noticeLabel"
+            text: noticeMessage
             color: win.text
             font.pixelSize: 12
         }
@@ -2683,7 +2714,10 @@ ApplicationWindow {
 
     Connections {
         target: backend
-        function onErrorOccurred(message) { noticeTimer.restart() }
+        function onErrorOccurred(message) {
+            noticeMessage = message
+            noticeTimer.restart()
+        }
     }
 
     Component.onCompleted: keyHandler.forceActiveFocus()

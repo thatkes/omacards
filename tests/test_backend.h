@@ -70,4 +70,9 @@ private slots:
     void cachedBackendListsFollowMutations();
     void ratingRefreshesCachedBoxCountsBeforeStats();
     void cardEditRefreshesOnceWithoutWatcherEcho();
+    void qmlSettingsBoundsFollowConfig();
+    void qmlLibrarySelectionClampsAfterExternalRefresh();
+    void qmlNoticeKeepsErrorSignalMessage();
+    void qmlUndoShortcutsRespectKeyboardOwners();
+    void qmlScreenOrderAndRadiusHaveOneSource();
 };

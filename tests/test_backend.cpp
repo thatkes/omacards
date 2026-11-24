@@ -3177,3 +3177,263 @@ void TestBackend::ratingRefreshesCachedBoxCountsBeforeStats() {
     QCOMPARE(seenDistributions.first(), QVariantList({1, 1, 0, 0, 0}));
     QCOMPARE(backend.boxDistribution(), seenDistributions.first());
 }
+
+void TestBackend::qmlSettingsBoundsFollowConfig() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+
+    // The QML-facing bounds are the Config constants, not fresh literals.
+    QCOMPARE(backend.property("minNewCardAllowance").toInt(), Config::kMinNewPerDay);
+    QCOMPARE(backend.property("maxNewCardAllowance").toInt(), Config::kMaxNewPerDay);
+    QCOMPARE(backend.property("minDayStartHour").toInt(), Config::kMinDayStartHour);
+    QCOMPARE(backend.property("maxDayStartHour").toInt(), Config::kMaxDayStartHour);
+    QCOMPARE(backend.property("minDesiredRetention").toDouble(), Config::kMinRetention);
+    QCOMPARE(backend.property("maxDesiredRetention").toDouble(), Config::kMaxRetention);
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    QVERIFY(QMetaObject::invokeMethod(view.window, "openSettings"));
+    view.settle();
+
+    QQuickItem *allowanceMinus = view.item(QStringLiteral("settingsNewCardAllowanceMinus"));
+    QQuickItem *allowancePlus = view.item(QStringLiteral("settingsNewCardAllowancePlus"));
+    QQuickItem *dayMinus = view.item(QStringLiteral("settingsDayStartHourMinus"));
+    QQuickItem *dayPlus = view.item(QStringLiteral("settingsDayStartHourPlus"));
+    QQuickItem *slider = view.item(QStringLiteral("settingsRetentionSlider"));
+    QVERIFY(allowanceMinus && allowancePlus && dayMinus && dayPlus && slider);
+    QCOMPARE(slider->property("from").toDouble(), Config::kMinRetention);
+    QCOMPARE(slider->property("to").toDouble(), Config::kMaxRetention);
+
+    backend.setNewCardAllowance(Config::kMaxNewPerDay - 1);
+    view.settle();
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centerInWindow(window, allowancePlus));
+    view.settle();
+    QCOMPARE(backend.newCardAllowance(), Config::kMaxNewPerDay);
+
+    backend.setNewCardAllowance(Config::kMinNewPerDay);
+    view.settle();
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centerInWindow(window, allowanceMinus));
+    view.settle();
+    QCOMPARE(backend.newCardAllowance(), Config::kMinNewPerDay);
+
+    backend.setDayStartHour(Config::kMaxDayStartHour);
+    view.settle();
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centerInWindow(window, dayPlus));
+    view.settle();
+    QCOMPARE(backend.dayStartHour(), Config::kMinDayStartHour);
+
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centerInWindow(window, dayMinus));
+    view.settle();
+    QCOMPARE(backend.dayStartHour(), Config::kMaxDayStartHour);
+}
+
+void TestBackend::qmlLibrarySelectionClampsAfterExternalRefresh() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Test", &error));
+    for (int i = 0; i < 3; ++i)
+        QVERIFY(backend.createCard("Test", QString("Q%1").arg(i), "A", "basic", {}, &error));
+    backend.selectDeck("Test");
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    const auto press = [&](Qt::Key key) {
+        QTest::keyClick(window, key);
+        view.settle();
+    };
+
+    QVERIFY(QMetaObject::invokeMethod(view.window, "openLibrary"));
+    view.settle();
+    QVERIFY(QMetaObject::invokeMethod(view.window, "moveCardSelection", Q_ARG(QVariant, 2)));
+    QCOMPARE(view.window->property("cardIndex").toInt(), 2);
+
+    // An outside write shrinks the Card list. The QML index must follow it.
+    QVERIFY(backend.deleteCard("Test", backend.allDecks().last().cards.at(2).id, &error));
+    view.settle();
+    backend.refresh();
+    view.settle();
+    QCOMPARE(backend.cardList().size(), 2);
+    QCOMPARE(view.window->property("cardIndex").toInt(), 1);
+    QVariant selected;
+    QVERIFY(QMetaObject::invokeMethod(view.window, "selectedCard", Q_RETURN_ARG(QVariant, selected)));
+    QCOMPARE(selected.toMap().value("question").toString(), QString("Q1"));
+
+    // J, K, Enter and Delete all act on the clamped selection after the refresh.
+    press(Qt::Key_J);
+    QCOMPARE(view.window->property("cardIndex").toInt(), 0);
+    press(Qt::Key_K);
+    QCOMPARE(view.window->property("cardIndex").toInt(), 1);
+
+    press(Qt::Key_Return);
+    QObject *editor = window->findChild<QObject *>(QStringLiteral("editCardDialog"));
+    QVERIFY(editor);
+    QVERIFY(QTest::qWaitFor([&]() { return editor->property("opened").toBool(); }, 1000));
+    press(Qt::Key_Escape);
+    QVERIFY(QTest::qWaitFor([&]() { return !editor->property("opened").toBool(); }, 1000));
+    QQuickItem *keyHandler = view.item(QStringLiteral("keyHandler"));
+    QVERIFY(keyHandler);
+    keyHandler->forceActiveFocus();
+    view.settle();
+
+    press(Qt::Key_Delete);
+    QCOMPARE(backend.totalCards(), 1);
+    QCOMPARE(view.window->property("cardIndex").toInt(), 0);
+}
+
+void TestBackend::qmlNoticeKeepsErrorSignalMessage() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Test", &error));
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+
+    QObject *notice = window->findChild<QObject *>(QStringLiteral("noticePopup"));
+    QQuickItem *label = view.item(QStringLiteral("noticeLabel"));
+    QVERIFY(notice && label);
+    QVERIFY(!notice->property("visible").toBool());
+
+    QSignalSpy errors(&backend, &Backend::errorOccurred);
+    backend.newDeck("");
+    QCOMPARE(errors.count(), 1);
+    const QString message = errors.at(0).at(0).toString();
+    view.settle();
+    QVERIFY(notice->property("visible").toBool());
+    QCOMPARE(label->property("text").toString(), message);
+
+    // A later non-error status must not replace the message while the red
+    // notice is still on screen.
+    backend.undo();
+    QVERIFY(backend.status() != message);
+    view.settle();
+    QVERIFY(notice->property("visible").toBool());
+    QCOMPARE(label->property("text").toString(), message);
+}
+
+void TestBackend::qmlUndoShortcutsRespectKeyboardOwners() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Test", &error));
+    QVERIFY(backend.createCard("Test", "Question?", "Answer", "basic", {}, &error));
+    const QString cardId = backend.allDecks().last().cards.first().id;
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    const auto press = [&](Qt::Key key, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+        QTest::keyClick(window, key, modifiers);
+        view.settle();
+    };
+    const auto question = [&]() { return backend.allDecks().last().cards.first().question; };
+    const auto setQuestion = [&](const QString &text) {
+        QVERIFY(backend.modifyCard("Test", cardId, text, "Answer", "basic", {}, &error));
+        QCOMPARE(question(), text);
+    };
+
+    // A plain Ctrl+Z still edits when nothing owns the keyboard.
+    setQuestion(QStringLiteral("Edited?"));
+    press(Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(question(), QStringLiteral("Question?"));
+
+    // The two overlay panels own both undo and redo; Escape hands keys back.
+    setQuestion(QStringLiteral("Edited?"));
+    press(Qt::Key_Z, Qt::ControlModifier);
+    QVERIFY(backend.canRedo());
+    window->setProperty("helpVisible", true);
+    press(Qt::Key_Y, Qt::ControlModifier);
+    QCOMPARE(question(), QStringLiteral("Question?"));
+    press(Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+    QCOMPARE(question(), QStringLiteral("Question?"));
+    press(Qt::Key_Escape);
+    QVERIFY(!window->property("helpVisible").toBool());
+    press(Qt::Key_Y, Qt::ControlModifier);
+    QCOMPARE(question(), QStringLiteral("Edited?"));
+
+    setQuestion(QStringLiteral("Question?"));
+    window->setProperty("statsVisible", true);
+    setQuestion(QStringLiteral("Edited?"));
+    press(Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(question(), QStringLiteral("Edited?"));
+    press(Qt::Key_Escape);
+    QVERIFY(!window->property("statsVisible").toBool());
+    press(Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(question(), QStringLiteral("Question?"));
+
+    // Modal dialogs own undo too, even when focus is back on the key handler.
+    QObject *dialog = window->findChild<QObject *>(QStringLiteral("newCardDialog"));
+    QQuickItem *keyHandler = view.item(QStringLiteral("keyHandler"));
+    QVERIFY(dialog && keyHandler);
+    keyHandler->forceActiveFocus();
+    view.settle();
+    press(Qt::Key_N);
+    QVERIFY(QTest::qWaitFor([&]() { return dialog->property("opened").toBool(); }, 1000));
+    keyHandler->forceActiveFocus();
+    setQuestion(QStringLiteral("Edited?"));
+    press(Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(question(), QStringLiteral("Edited?"));
+    press(Qt::Key_Escape);
+    QVERIFY(QTest::qWaitFor([&]() { return !dialog->property("opened").toBool(); }, 1000));
+    press(Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(question(), QStringLiteral("Question?"));
+
+    // An open Deck selector is another keyboard owner, with its own Escape.
+    press(Qt::Key_BracketRight);
+    QQuickItem *picker = view.item(QStringLiteral("homeDeckSelector"));
+    QVERIFY(picker && picker->property("open").toBool());
+    setQuestion(QStringLiteral("Edited?"));
+    press(Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(question(), QStringLiteral("Edited?"));
+    press(Qt::Key_Escape);
+    QVERIFY(!picker->property("open").toBool());
+    press(Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(question(), QStringLiteral("Question?"));
+}
+
+void TestBackend::qmlScreenOrderAndRadiusHaveOneSource() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+
+    const QVariantList order = window->property("screenOrder").toList();
+    QCOMPARE(order, QVariantList({QStringLiteral("home"), QStringLiteral("study"), QStringLiteral("library"),
+                                  QStringLiteral("settings")}));
+    QQuickItem *stack = view.item(QStringLiteral("screenStack"));
+    QVERIFY(stack);
+    for (int i = 0; i < order.size(); ++i) {
+        window->setProperty("screen", order.at(i).toString());
+        view.settle();
+        QCOMPARE(window->property("screenIndex").toInt(), i);
+        QCOMPARE(stack->property("currentIndex").toInt(), i);
+    }
+
+    QVariant capped;
+    QVERIFY(
+        QMetaObject::invokeMethod(view.window, "clampedRadius", Q_RETURN_ARG(QVariant, capped), Q_ARG(QVariant, 7)));
+    QCOMPARE(capped.toInt(), qMin(7, view.theme.radius()));
+}

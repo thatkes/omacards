@@ -51,6 +51,12 @@ class Backend : public QObject {
     Q_PROPERTY(int newCardAllowance READ newCardAllowance WRITE setNewCardAllowance NOTIFY settingsChanged)
     Q_PROPERTY(double desiredRetention READ desiredRetention WRITE setDesiredRetention NOTIFY settingsChanged)
     Q_PROPERTY(int dayStartHour READ dayStartHour WRITE setDayStartHour NOTIFY settingsChanged)
+    Q_PROPERTY(int minNewCardAllowance READ minNewCardAllowance CONSTANT)
+    Q_PROPERTY(int maxNewCardAllowance READ maxNewCardAllowance CONSTANT)
+    Q_PROPERTY(int minDayStartHour READ minDayStartHour CONSTANT)
+    Q_PROPERTY(int maxDayStartHour READ maxDayStartHour CONSTANT)
+    Q_PROPERTY(double minDesiredRetention READ minDesiredRetention CONSTANT)
+    Q_PROPERTY(double maxDesiredRetention READ maxDesiredRetention CONSTANT)
     Q_PROPERTY(QString decksDirectory READ decksDirectory CONSTANT)
 
 public:
@@ -104,6 +110,13 @@ public:
     int newCardAllowance() const { return m_newCardAllowance; }
     double desiredRetention() const { return m_desiredRetention; }
     int dayStartHour() const { return m_dayStartHour; }
+    // Settings bounds live in Config; QML reads these instead of copying them.
+    static constexpr int minNewCardAllowance() { return Config::kMinNewPerDay; }
+    static constexpr int maxNewCardAllowance() { return Config::kMaxNewPerDay; }
+    static constexpr int minDayStartHour() { return Config::kMinDayStartHour; }
+    static constexpr int maxDayStartHour() { return Config::kMaxDayStartHour; }
+    static constexpr double minDesiredRetention() { return Config::kMinRetention; }
+    static constexpr double maxDesiredRetention() { return Config::kMaxRetention; }
     int availableCount(const QString &deckName = {}) const { return m_planner.availableCount(deckName); }
     QVariantList deckSummaries() const;
     // Same summaries as deckSummaries(), ordered for the deck selector:

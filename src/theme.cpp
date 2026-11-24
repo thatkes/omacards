@@ -12,6 +12,9 @@
 #include <cmath>
 
 namespace {
+constexpr auto kDarkInk = "#0e0e10";
+constexpr auto kLightInk = "#ffffff";
+
 QString readKey(const QString &text, const QString &key) {
     const QRegularExpression expression("^\\s*" + QRegularExpression::escape(key) + "\\s*=\\s*[\"']([^\"']+)[\"']",
                                         QRegularExpression::MultilineOption);
@@ -111,12 +114,13 @@ QHash<QString, QString> Theme::readColors(const QString &path) {
     return result;
 }
 
-// Black or white, whichever reads on the accent (WCAG relative luminance).
+// The actual ink colour for the accent, not a colour name for QML to map.
+// Whichever of the two reads better on the accent (WCAG relative luminance).
 QString Theme::accentForeground() const {
     const QColor c(m_accent);
     auto linear = [](double v) { return v <= .04045 ? v / 12.92 : std::pow((v + .055) / 1.055, 2.4); };
     const double luminance = .2126 * linear(c.redF()) + .7152 * linear(c.greenF()) + .0722 * linear(c.blueF());
-    return luminance > .179 ? "black" : "white";
+    return luminance > .179 ? QString::fromLatin1(kDarkInk) : QString::fromLatin1(kLightInk);
 }
 
 void Theme::reload() {

@@ -11,9 +11,11 @@
 // cannot silently diverge from the others.
 namespace Config {
 inline constexpr int kDefaultNewPerDay = 20;
+inline constexpr int kMinNewPerDay = 0;
 inline constexpr int kMaxNewPerDay = 9999;
 
 inline constexpr int kDefaultDayStartHour = 0;
+inline constexpr int kMinDayStartHour = 0;
 inline constexpr int kMaxDayStartHour = 23;
 
 inline constexpr double kDefaultRetention = 0.9;
