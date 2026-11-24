@@ -85,6 +85,35 @@ public:
     explicit PlannerWithStore(Store &store) : PlannerAdapterOwner(store), StudyPlanner(PlannerAdapterOwner::adapter) {}
 };
 
+// Counts the planner's Store reads so a combined scheduling read cannot silently
+// fall back to the two full-table reads.
+class CountingPlannerStore : public StudyPlanner::StoreAdapter {
+public:
+    QHash<QString, SchedulingRecord> records;
+    mutable int combinedReads = 0;
+    mutable int stateReads = 0;
+    mutable int hashReads = 0;
+
+    void clearError() override { m_error.clear(); }
+    QHash<QString, FsrsState> states() const override {
+        ++stateReads;
+        return {};
+    }
+    QHash<QString, QString> hashes() const override {
+        ++hashReads;
+        return {};
+    }
+    QHash<QString, SchedulingRecord> schedulingRecords() const override {
+        ++combinedReads;
+        return records;
+    }
+    int newCardsOnStudyDay(int) const override { return 1; }
+    QString lastError() const override { return m_error; }
+
+private:
+    mutable QString m_error;
+};
+
 } // namespace
 
 void TestStudyPlanner::noDecksIsSafe() {
@@ -188,6 +217,54 @@ void TestStudyPlanner::refreshReadsStatesAndHashes() {
     QCOMPARE(planner.availability().due.size(), 1);
     QCOMPARE(planner.newCount(), 2);
     QCOMPARE(planner.availableCount(), 3);
+}
+
+void TestStudyPlanner::refreshUsesOneCombinedSchedulingRead() {
+    CountingPlannerStore store;
+    const Card card = makeCard("combined", "Combined?", "Yes", "Combined");
+    FsrsState state;
+    state.reps = 2;
+    state.lapses = 1;
+    state.stability = 4.5;
+    state.difficulty = 6.5;
+    state.lastReview = QDateTime::currentMSecsSinceEpoch() - 2 * 86400000LL;
+    state.due = QDateTime::currentMSecsSinceEpoch() - 86400000LL;
+    store.records.insert(card.id, SchedulingRecord{state, DeckIO::contentHash(card)});
+
+    Deck deck;
+    deck.name = "Combined";
+    deck.cards << card;
+    const QVector<Deck> decks{deck};
+
+    StudyPlanner planner(store);
+    planner.setDecks(decks);
+    planner.configure(5, 0);
+    QString error;
+    QVERIFY(planner.refresh(&error));
+    QVERIFY(error.isEmpty());
+    QCOMPARE(store.combinedReads, 1);
+    QCOMPARE(store.stateReads, 0);
+    QCOMPARE(store.hashReads, 0);
+
+    const FsrsState found = planner.stateFor(card);
+    QCOMPARE(found.reps, state.reps);
+    QCOMPARE(found.lapses, state.lapses);
+    QCOMPARE(found.stability, state.stability);
+    QCOMPARE(found.difficulty, state.difficulty);
+    QCOMPARE(found.lastReview, state.lastReview);
+    QCOMPARE(found.due, state.due);
+
+    Card edited = card;
+    edited.answer = QStringLiteral("Changed");
+    verifyEmptyState(planner.stateFor(edited));
+    QCOMPARE(planner.availability().due.size(), 1);
+    QCOMPARE(planner.newCount(), 0);
+    QCOMPARE(planner.availableCount(), 1);
+
+    QVERIFY(planner.refresh(&error));
+    QCOMPARE(store.combinedReads, 2);
+    QCOMPARE(store.stateReads, 0);
+    QCOMPARE(store.hashReads, 0);
 }
 
 void TestStudyPlanner::refreshReadFailureCanBeInjectedAtStoreAdapter() {

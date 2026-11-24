@@ -21,8 +21,11 @@ const QVector<Deck> &StudyPlanner::decks() const {
 bool StudyPlanner::refresh(QString *storeError) {
     m_store.clearError();
     StudySnapshot next;
-    next.states = m_store.states();
-    next.hashes = m_store.hashes();
+    const QHash<QString, SchedulingRecord> records = m_store.schedulingRecords();
+    for (auto it = records.cbegin(); it != records.cend(); ++it) {
+        next.states.insert(it.key(), it.value().state);
+        next.hashes.insert(it.key(), it.value().hash);
+    }
     next.newBudget = qMax(0, m_newCardAllowance - m_store.newCardsOnStudyDay(m_dayStartHour));
     if (!m_store.lastError().isEmpty()) {
         // Never present a card with scheduling data we could not verify.
@@ -237,6 +240,10 @@ QHash<QString, FsrsState> StorePlannerAdapter::states() const {
 
 QHash<QString, QString> StorePlannerAdapter::hashes() const {
     return m_store.hashes();
+}
+
+QHash<QString, SchedulingRecord> StorePlannerAdapter::schedulingRecords() const {
+    return m_store.schedulingRecords();
 }
 
 int StorePlannerAdapter::newCardsOnStudyDay(int dayStartHour) const {

@@ -5,6 +5,7 @@
 #include <QHash>
 #include <QSet>
 #include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QString>
 
 struct ReviewSummary {
@@ -13,6 +14,13 @@ struct ReviewSummary {
     int studyDayGood = 0;
     int streak = 0;
     int newCardsOnStudyDay = 0;
+};
+
+// One row of the scheduling read: a Card's Scheduling state plus the content
+// hash that guards it. Both come from the same cards row.
+struct SchedulingRecord {
+    FsrsState state;
+    QString hash;
 };
 
 // The SQLite sidecar. Deck files own card content; this database owns only
@@ -25,6 +33,7 @@ public:
     bool open(QString *error = nullptr);
     QHash<QString, FsrsState> states() const;
     QHash<QString, QString> hashes() const;
+    QHash<QString, SchedulingRecord> schedulingRecords() const;
     void save(const QString &cardId, const QString &hash, const FsrsState &state);
     void recordRating(const QString &cardId, int rating, qint64 at, const FsrsState &state, int intervalDays,
                       bool wasNew = false);
@@ -58,5 +67,7 @@ private:
     QString m_path;
     QString m_connection;
     QSqlDatabase m_db;
+    mutable QSqlQuery m_schedulingQuery;
+    mutable bool m_schedulingPrepared = false;
     mutable QString m_lastError;
 };

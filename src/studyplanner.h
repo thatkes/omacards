@@ -24,6 +24,16 @@ public:
         virtual void clearError() = 0;
         virtual QHash<QString, FsrsState> states() const = 0;
         virtual QHash<QString, QString> hashes() const = 0;
+        // Older stubs still answer the two reads separately; the real adapter
+        // overrides this with one cards query.
+        virtual QHash<QString, SchedulingRecord> schedulingRecords() const {
+            QHash<QString, SchedulingRecord> combined;
+            const QHash<QString, FsrsState> allStates = states();
+            const QHash<QString, QString> allHashes = hashes();
+            for (auto it = allStates.cbegin(); it != allStates.cend(); ++it)
+                combined.insert(it.key(), SchedulingRecord{it.value(), allHashes.value(it.key())});
+            return combined;
+        }
         virtual int newCardsOnStudyDay(int dayStartHour) const = 0;
         virtual QString lastError() const = 0;
     };
@@ -95,6 +105,7 @@ public:
     void clearError() override;
     QHash<QString, FsrsState> states() const override;
     QHash<QString, QString> hashes() const override;
+    QHash<QString, SchedulingRecord> schedulingRecords() const override;
     int newCardsOnStudyDay(int dayStartHour) const override;
     QString lastError() const override;
 
