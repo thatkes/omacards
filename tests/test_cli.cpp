@@ -2199,6 +2199,27 @@ void TestCli::importJsonAndCsvContracts() {
     QCOMPARE(objectDeck.cards.size(), 1);
 }
 
+void TestCli::importJsonKeepsExactContractKeys() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+
+    const QString input = dir.filePath("Contract.json");
+    QVERIFY(writeFile(input, R"([{"question":"q","answer":"a"},{"question":"q2","answer":"a2"}])"));
+
+    int code = -1;
+    const QJsonObject imported = runCli({"import", input, "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QStringList keys = imported.keys();
+    keys.sort();
+    QCOMPARE(keys, QStringList({"cards", "deck", "file", "ok"}));
+    QVERIFY(imported.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(imported.value(QStringLiteral("file")).toString(), input);
+    QCOMPARE(imported.value(QStringLiteral("deck")).toString(), QString("Contract"));
+    QCOMPARE(imported.value(QStringLiteral("cards")).toInt(), 2);
+}
+
 void TestCli::previewJsonContracts() {
     QTemporaryDir dir;
     const QString decks = dir.filePath("decks");

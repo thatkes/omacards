@@ -5,6 +5,7 @@
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTemporaryDir>
+#include <QUrl>
 #include <QVector>
 
 #include "test_importer.h"
@@ -397,4 +398,138 @@ void TestImporter::apkgImportsWithoutMedia() {
     QCOMPARE(result.cards.first().question, QString("Question"));
     QCOMPARE(result.cards.first().answer, QString("back with <img src=\"0\">"));
     QVERIFY(!QFile::exists(dir.filePath("decks/media")));
+}
+
+void TestImporter::apkgImportsMultipleMediaWithMixedNoteTypes() {
+    if (!hasTool(QStringLiteral("unzip")) || !hasTool(QStringLiteral("zip")))
+        QSKIP("zip and unzip are required for .apkg tests");
+
+    QTemporaryDir dir;
+    const QString package = dir.filePath("mixed.apkg");
+    const QString sep(1, QChar(0x1f));
+    const QVector<AnkiNote> notes{
+        {QStringLiteral("Basic &amp; <b>bold</b><img src=\"0\">") + sep +
+             QStringLiteral("back <img src=\"1\"> with &#39;quote&#39;"),
+         QStringLiteral(" tag1 tag2 "), 1},
+        {QStringLiteral("The {{c1::cat::animal}} sleeps <img src=\"2\">"), QStringLiteral("cloze"), 2},
+        {QStringLiteral("Quote &#39;x&#39; &quot;y&quot; and &#x41;") + sep + QStringLiteral("tail"),
+         QStringLiteral(" misc "), 1},
+    };
+    QVERIFY(createAnkiDatabase(dir.filePath("collection.anki2"), notes));
+    QVERIFY(writeFile(dir.filePath("media"), R"({"0":"alpha.png","1":"beta.jpg","2":"nested/gamma.svg"})"));
+    QVERIFY(writeFile(dir.filePath("0"), "alpha-bytes"));
+    QVERIFY(writeFile(dir.filePath("1"), "beta-bytes"));
+    QVERIFY(writeFile(dir.filePath("2"), "gamma-bytes"));
+    QVERIFY(zipPackage(package, dir.path(), {"collection.anki2", "media", "0", "1", "2"}));
+
+    const QString decks = dir.filePath("decks");
+    DeckImport::Result result;
+    QString error;
+    QVERIFY2(DeckImport::apkg(package, "Anki Deck", decks, &result, &error), qPrintable(error));
+    QVERIFY(error.isEmpty());
+    QCOMPARE(result.deckName, QString("Anki Deck"));
+    QCOMPARE(result.cards.size(), 3);
+
+    const CardDraft *basic = nullptr;
+    const CardDraft *cloze = nullptr;
+    const CardDraft *entities = nullptr;
+    for (const CardDraft &draft : result.cards) {
+        if (draft.question.startsWith(QStringLiteral("Basic")))
+            basic = &draft;
+        else if (draft.question.startsWith(QStringLiteral("The {{c1")))
+            cloze = &draft;
+        else if (draft.question.startsWith(QStringLiteral("Quote")))
+            entities = &draft;
+    }
+    QVERIFY(basic && cloze && entities);
+
+    const QString mediaDir = decks + "/media/Anki-Deck";
+    const QString alpha = QUrl::fromLocalFile(mediaDir + "/alpha.png").toString();
+    const QString beta = QUrl::fromLocalFile(mediaDir + "/beta.jpg").toString();
+    const QString gamma = QUrl::fromLocalFile(mediaDir + "/gamma.svg").toString();
+    QCOMPARE(basic->question, QString("Basic & bold<img src=\"%1\">").arg(alpha));
+    QCOMPARE(basic->answer, QString("back <img src=\"%1\"> with 'quote'").arg(beta));
+    QCOMPARE(basic->type, QString("basic"));
+    QCOMPARE(basic->tags, QStringList({"tag1", "tag2"}));
+
+    QCOMPARE(cloze->question, QString("The {{c1::cat}} sleeps <img src=\"%1\">").arg(gamma));
+    QCOMPARE(cloze->type, QString("cloze"));
+    QVERIFY(cloze->answer.isEmpty());
+    QCOMPARE(cloze->tags, QStringList({"cloze"}));
+
+    QCOMPARE(entities->question, QString("Quote 'x' \"y\" and A"));
+    QCOMPARE(entities->answer, QString("tail"));
+    QCOMPARE(entities->tags, QStringList({"misc"}));
+
+    QFile content(mediaDir + "/alpha.png");
+    QVERIFY(content.open(QIODevice::ReadOnly));
+    QCOMPARE(content.readAll(), QByteArray("alpha-bytes"));
+    QVERIFY(QFile::exists(mediaDir + "/beta.jpg"));
+    QVERIFY(QFile::exists(mediaDir + "/gamma.svg"));
+    QCOMPARE(QDir(mediaDir).entryList(QDir::Files).size(), 3);
+}
+
+void TestImporter::apkgUsesOneUnzipForCollectionAndMedia() {
+    if (!hasTool(QStringLiteral("unzip")) || !hasTool(QStringLiteral("zip")) || !hasPosixShell())
+        QSKIP("zip, a POSIX shell and unzip are required for .apkg tests");
+
+    QTemporaryDir dir;
+    const QString package = dir.filePath("once.apkg");
+    const QString sep(1, QChar(0x1f));
+    QVERIFY(createAnkiDatabase(
+        dir.filePath("collection.anki2"),
+        {{QStringLiteral("Question <img src=\"0\">") + sep + QStringLiteral("Answer"), QStringLiteral("tag"), 1}}));
+    QVERIFY(writeFile(dir.filePath("media"), R"({"0":"pic.png"})"));
+    QVERIFY(writeFile(dir.filePath("0"), "pic-bytes"));
+    QVERIFY(zipPackage(package, dir.path(), {"collection.anki2", "media", "0"}));
+
+    const QString realUnzip = QStandardPaths::findExecutable(QStringLiteral("unzip"));
+    QVERIFY(!realUnzip.isEmpty());
+    const QString binDir = dir.filePath("bin");
+    QVERIFY(QDir().mkpath(binDir));
+    QVERIFY(writeFakeTool(binDir, QStringLiteral("unzip"), QStringLiteral("exec '%1' \"$@\"\n").arg(realUnzip)));
+    const QString log = dir.filePath("unzip-args.log");
+    ScopedEnv args("OMACARDS_TEST_ARGS", log);
+    PathGuard guard(binDir, PathGuard::Mode::Prepend);
+
+    DeckImport::Result result;
+    QString error;
+    QVERIFY2(DeckImport::apkg(package, "Once", dir.filePath("decks"), &result, &error), qPrintable(error));
+    QCOMPARE(result.cards.size(), 1);
+    QVERIFY(QFile::exists(dir.filePath("decks/media/Once/pic.png")));
+
+    QFile argsLog(log);
+    QVERIFY(argsLog.open(QIODevice::ReadOnly));
+    const QStringList invocations = QString::fromUtf8(argsLog.readAll()).split('\n', Qt::SkipEmptyParts);
+    QCOMPARE(invocations.size(), 1);
+    QVERIFY(invocations.first().contains(QStringLiteral(" -d ")));
+}
+
+void TestImporter::apkgMediaFailureLeavesNoPartialFile() {
+    if (!hasTool(QStringLiteral("unzip")) || !hasTool(QStringLiteral("zip")))
+        QSKIP("zip and unzip are required for .apkg tests");
+
+    QTemporaryDir dir;
+    const QString package = dir.filePath("partial.apkg");
+    const QString sep(1, QChar(0x1f));
+    QVERIFY(createAnkiDatabase(
+        dir.filePath("collection.anki2"),
+        {{QStringLiteral("Question <img src=\"0\">") + sep + QStringLiteral("Answer"), QStringLiteral("tag"), 1}}));
+    QVERIFY(writeFile(dir.filePath("media"), R"({"0":"present.png","9":"missing.png"})"));
+    QVERIFY(writeFile(dir.filePath("0"), "present-bytes"));
+    QVERIFY(zipPackage(package, dir.path(), {"collection.anki2", "media", "0"}));
+
+    const QString decks = dir.filePath("decks");
+    DeckImport::Result result;
+    QString error;
+    QVERIFY2(DeckImport::apkg(package, "Partial", decks, &result, &error), qPrintable(error));
+    QCOMPARE(error, QString("Could not extract media missing.png"));
+    QCOMPARE(result.cards.size(), 1);
+
+    const QString mediaDir = decks + "/media/Partial";
+    const QString present = QUrl::fromLocalFile(mediaDir + "/present.png").toString();
+    QCOMPARE(result.cards.first().question, QString("Question <img src=\"%1\">").arg(present));
+    QVERIFY(QFile::exists(mediaDir + "/present.png"));
+    QVERIFY(!QFile::exists(mediaDir + "/missing.png"));
+    QCOMPARE(QDir(mediaDir).entryList(QDir::Files).size(), 1);
 }
