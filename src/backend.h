@@ -87,12 +87,7 @@ public:
     int reviewed() const { return m_session.reviewed(); }
     int good() const { return m_session.good(); }
     int currentLeitnerBox() const { return m_session.currentLeitnerBox(); }
-    QVariantList boxDistribution() const {
-        QVariantList counts;
-        for (int count : m_session.boxDistribution())
-            counts << count;
-        return counts;
-    }
+    QVariantList boxDistribution() const;
     int cramNextInCards() const { return m_session.cramNextInCards(); }
     QString status() const { return m_session.status(); }
     QString mathEngine() const;
@@ -110,11 +105,11 @@ public:
     double desiredRetention() const { return m_desiredRetention; }
     int dayStartHour() const { return m_dayStartHour; }
     int availableCount(const QString &deckName = {}) const { return m_planner.availableCount(deckName); }
-    QVariantList deckSummaries() const { return m_planner.deckSummaries(m_currentDeck); }
+    QVariantList deckSummaries() const;
     // Same summaries as deckSummaries(), ordered for the deck selector:
     // Current deck first, then last-studied order, then file order.
     QVariantList deckSelector() const;
-    QVariantList cardList() const { return m_planner.cardList(m_currentDeck, m_cardFilter, tr("new"), tr("due now")); }
+    QVariantList cardList() const;
     ReviewSummary reviewSummary() const { return m_store.summary(m_dayStartHour); }
 
     QVector<Deck> allDecks() const { return m_deckRepo.decks(); }
@@ -193,6 +188,8 @@ signals:
 
 private:
     void recordDeckSelection(const QString &name);
+    void invalidateDerivedLists();
+    void refreshBoxDistributionCache() const;
 
     Store m_store;
     FileHistory m_history;
@@ -210,4 +207,12 @@ private:
     QHash<QString, qint64> m_lastStudied;
     StudyMode m_mode = StudyMode::Review;
     QString m_cardFilter;
+    mutable QVariantList m_cardListCache;
+    mutable QVariantList m_deckSummariesCache;
+    mutable QVariantList m_deckSelectorCache;
+    mutable QVariantList m_boxDistributionCache;
+    mutable bool m_cardListCacheValid = false;
+    mutable bool m_deckSummariesCacheValid = false;
+    mutable bool m_deckSelectorCacheValid = false;
+    mutable bool m_boxDistributionCacheValid = false;
 };

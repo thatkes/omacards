@@ -47,6 +47,9 @@ Backend::Backend(const QString &decksDirectory, const QString &databasePath, Cra
     connect(&m_session, &StudySession::modeChanged, this, &Backend::modeChanged);
     connect(&m_session, &StudySession::cardChanged, this, &Backend::cardChanged);
     connect(&m_session, &StudySession::dueCountChanged, this, &Backend::dueCountChanged);
+    // Direct connections run in connection order, so subscribers to the
+    // forwarded signal see box counts refreshed from the settled session.
+    connect(&m_session, &StudySession::statsChanged, this, &Backend::refreshBoxDistributionCache);
     connect(&m_session, &StudySession::statsChanged, this, &Backend::statsChanged);
     connect(&m_session, &StudySession::statusChanged, this, &Backend::statusChanged);
     connect(&m_session, &StudySession::errorOccurred, this, &Backend::errorOccurred);
@@ -85,6 +88,7 @@ bool Backend::initialize(QString *error) {
 }
 
 void Backend::refresh() {
+    invalidateDerivedLists();
     m_deckRepo.load(&m_currentDeck);
     // A stored Deck can vanish between launches. load() picks a usable one;
     // remember that fallback so the selector and the next launch agree.
@@ -101,6 +105,7 @@ void Backend::refresh() {
     emit cardsChanged();
     m_session.updateDueCount();
     m_session.rebuild(m_currentDeck);
+    refreshBoxDistributionCache();
 }
 
 void Backend::undo() {
@@ -133,6 +138,7 @@ void Backend::setCardFilter(const QString &filter) {
     if (m_cardFilter == filter)
         return;
     m_cardFilter = filter;
+    invalidateDerivedLists();
     emit cardFilterChanged();
     emit cardsChanged();
 }
@@ -142,6 +148,7 @@ void Backend::setNewCardAllowance(int count) {
     if (m_newCardAllowance == clean)
         return;
     m_newCardAllowance = clean;
+    invalidateDerivedLists();
     m_store.setSetting(QStringLiteral("new_card_allowance"), QString::number(clean));
     // Mirror the old key until every consumer reads the canonical one.
     m_store.setSetting(QStringLiteral("new_per_day"), QString::number(clean));
@@ -214,6 +221,7 @@ void Backend::selectDeck(const QString &name) {
     if (name.isEmpty() || name == m_currentDeck || !m_deckRepo.deckByName(name))
         return;
     m_currentDeck = name;
+    invalidateDerivedLists();
     recordDeckSelection(name);
     emit currentDeckChanged();
     emit cardsChanged();
@@ -221,29 +229,70 @@ void Backend::selectDeck(const QString &name) {
     m_session.startFresh(m_currentDeck);
 }
 
+QVariantList Backend::boxDistribution() const {
+    if (!m_boxDistributionCacheValid)
+        refreshBoxDistributionCache();
+    return m_boxDistributionCache;
+}
+
+QVariantList Backend::deckSummaries() const {
+    if (!m_deckSummariesCacheValid) {
+        m_deckSummariesCache = m_planner.deckSummaries(m_currentDeck);
+        m_deckSummariesCacheValid = true;
+    }
+    return m_deckSummariesCache;
+}
+
+QVariantList Backend::cardList() const {
+    if (!m_cardListCacheValid) {
+        m_cardListCache = m_planner.cardList(m_currentDeck, m_cardFilter, tr("new"), tr("due now"));
+        m_cardListCacheValid = true;
+    }
+    return m_cardListCache;
+}
+
 QVariantList Backend::deckSelector() const {
-    const QVariantList summaries = deckSummaries();
-    QVariantList result;
-    for (const QVariant &entry : summaries) {
-        if (entry.toMap().value("name").toString() == m_currentDeck)
-            result << entry;
+    if (!m_deckSelectorCacheValid) {
+        const QVariantList summaries = deckSummaries();
+        QVariantList result;
+        for (const QVariant &entry : summaries) {
+            if (entry.toMap().value("name").toString() == m_currentDeck)
+                result << entry;
+        }
+        QVector<QPair<qint64, int>> studied;
+        for (int i = 0; i < summaries.size(); ++i) {
+            const QString name = summaries.at(i).toMap().value("name").toString();
+            if (name != m_currentDeck && m_lastStudied.contains(name))
+                studied << qMakePair(m_lastStudied.value(name), i);
+        }
+        std::stable_sort(studied.begin(), studied.end(),
+                         [](const QPair<qint64, int> &a, const QPair<qint64, int> &b) { return a.first > b.first; });
+        for (const auto &entry : studied)
+            result << summaries.at(entry.second);
+        for (int i = 0; i < summaries.size(); ++i) {
+            const QString name = summaries.at(i).toMap().value("name").toString();
+            if (name != m_currentDeck && !m_lastStudied.contains(name))
+                result << summaries.at(i);
+        }
+        m_deckSelectorCache = result;
+        m_deckSelectorCacheValid = true;
     }
-    QVector<QPair<qint64, int>> studied;
-    for (int i = 0; i < summaries.size(); ++i) {
-        const QString name = summaries.at(i).toMap().value("name").toString();
-        if (name != m_currentDeck && m_lastStudied.contains(name))
-            studied << qMakePair(m_lastStudied.value(name), i);
-    }
-    std::stable_sort(studied.begin(), studied.end(),
-                     [](const QPair<qint64, int> &a, const QPair<qint64, int> &b) { return a.first > b.first; });
-    for (const auto &entry : studied)
-        result << summaries.at(entry.second);
-    for (int i = 0; i < summaries.size(); ++i) {
-        const QString name = summaries.at(i).toMap().value("name").toString();
-        if (name != m_currentDeck && !m_lastStudied.contains(name))
-            result << summaries.at(i);
-    }
-    return result;
+    return m_deckSelectorCache;
+}
+
+void Backend::invalidateDerivedLists() {
+    m_cardListCacheValid = false;
+    m_deckSummariesCacheValid = false;
+    m_deckSelectorCacheValid = false;
+    m_boxDistributionCacheValid = false;
+}
+
+void Backend::refreshBoxDistributionCache() const {
+    QVariantList counts;
+    for (int count : m_session.boxDistribution())
+        counts << count;
+    m_boxDistributionCache = counts;
+    m_boxDistributionCacheValid = true;
 }
 
 void Backend::setMode(const QString &mode) {
@@ -265,6 +314,7 @@ void Backend::rate(int rating) {
         return;
     if (!m_session.rate(parsed, m_desiredRetention))
         return;
+    invalidateDerivedLists();
     emit cardsChanged();
     emit decksChanged();
 }
