@@ -104,6 +104,10 @@ _Avoid_: study view, study pane
 One continuous stretch of study with a queue of cards, a currently shown card, and ratings.
 _Avoid_: sitting, run
 
+**All-decks session**:
+A Study session whose Study queue is drawn from every Deck. The Current Deck stays unchanged.
+_Avoid_: global session, cross-deck session
+
 **Study queue**:
 The Cards still to be presented in a Study session, in the order the session will show them.
 _Avoid_: card queue, pending cards
