@@ -1,0 +1,44 @@
+#!/bin/sh
+set -eu
+
+# Guard the lint runner's wiring: every bin/check-* script and tests/test_*.sh
+# self-test must have a call in bin/lint unless another owner runs it. An
+# optional root argument exists for the fixture self-test.
+ROOT="${1:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}"
+ROOT=$(CDPATH= cd -- "$ROOT" && pwd)
+cd "$ROOT"
+
+lint=bin/lint
+if [ ! -f "$lint" ]; then
+    printf 'Missing lint runner: %s\n' "$lint" >&2
+    exit 1
+fi
+
+# These guards belong to the commit-msg hook and CI, bin/test, and the
+# wave/wiki boundary commands. Keep the exceptions explicit: a newly added
+# checker must appear in lint or here with a reason.
+run_elsewhere() {
+    case "$1" in
+        bin/check-commit-scope|bin/check-commit-subject) return 0 ;;
+        bin/check-test-summary) return 0 ;;
+        bin/check-ledger-open-ids|bin/check-wiki-index-bullets) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+status=0
+for path in bin/check-* tests/test_*.sh; do
+    [ -e "$path" ] || continue
+    if run_elsewhere "$path"; then
+        continue
+    fi
+    if ! awk -v call="./$path" '
+        $1 == call { found = 1 }
+        END { exit !found }
+    ' "$lint"; then
+        printf 'bin/lint does not call %s\n' "$path" >&2
+        status=1
+    fi
+done
+
+exit "$status"

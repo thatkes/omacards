@@ -29,3 +29,6 @@ cd "$ROOT"
 ./bin/check-doc-paths
 ./tests/test_check_doc_paths.sh
 ./tests/test_wave_ready.sh
+./tests/test_check_cli_contract.sh
+./bin/check-lint-coverage
+./tests/test_check_lint_coverage.sh

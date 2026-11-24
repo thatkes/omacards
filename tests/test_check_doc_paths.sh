@@ -142,6 +142,16 @@ mv "$tmp/glob-token.md" "$matched_glob/README.md"
 expect_result concrete_path_instead_of_glob_passes 0 'Doc references OK' \
     "$matched_glob" 'FAIL'
 
+# A Layout path token after prose is still a path and must exist.
+stale_after_prose="$tmp/stale-after-prose"
+make_root "$stale_after_prose"
+awk '{ print; if ($1 == "tests/") print "notes src/stale.cpp" }' \
+    "$stale_after_prose/README.md" > "$tmp/stale-layout.md"
+mv "$tmp/stale-layout.md" "$stale_after_prose/README.md"
+expect_result stale_layout_path_after_prose_reported 1 \
+    'README.md:21: missing Layout path: src/stale.cpp' \
+    "$stale_after_prose" 'Doc references OK'
+
 # Help metadata is parsed from src/command-help.txt as text. A valid file must
 # stay clean, and a malformed block must fail even when the docs are correct.
 valid_help_metadata="$tmp/valid-help-metadata"

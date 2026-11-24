@@ -49,8 +49,13 @@ comment_only_source() {
     '
 }
 
-# Gather staged files (added/copied/modified/renamed)
-staged="$(git diff --cached --name-only --diff-filter=ACMR || true)"
+# Gather staged files (added/copied/modified/renamed/deleted). --name-status
+# gives the change first; renames and copies carry the new path as a third
+# field, which is the path the allowlist applies to. Deletions must be listed
+# too, or a docs: subject could remove a source file without a single added
+# or modified line.
+tab="$(printf '\t')"
+staged="$(git diff --cached --name-status --diff-filter=ACMRD || true)"
 if [ -z "$staged" ]; then
     exit 0
 fi
@@ -58,8 +63,11 @@ fi
 newline='
 '
 bad=""
-while IFS= read -r f; do
+while IFS="$tab" read -r change f renamed_to; do
     [ -z "$f" ] && continue
+    if [ -n "${renamed_to:-}" ]; then
+        f=$renamed_to
+    fi
     case "$f" in
         docs/*) ;;
         GLOSSARY.md) ;;
@@ -67,7 +75,10 @@ while IFS= read -r f; do
         README*|CHANGELOG*) ;;
         LICENSE) ;;
         src/*.h|src/*.cpp)
-            if ! comment_only_source "$f"; then
+            if [ "$change" = D ]; then
+                printf 'commit-msg: %s deletes a source file\n' "$f" >&2
+                bad="${bad}${bad:+$newline}$f"
+            elif ! comment_only_source "$f"; then
                 printf 'commit-msg: %s has non-comment source changes\n' \
                     "$f" >&2
                 bad="${bad}${bad:+$newline}$f"
@@ -86,7 +97,8 @@ EOF
 if [ -n "$bad" ]; then
     printf 'commit-msg: docs: commit must only include docs files, LICENSE,\n' >&2
     printf 'root markdown and comment-only src/*.h or src/*.cpp edits.\n' >&2
-    printf 'Staged files outside the allowlist or with non-comment source lines:\n' >&2
+    printf 'Staged files outside the allowlist, with non-comment source lines,\n' >&2
+    printf 'or deleting source:\n' >&2
     printf '%s\n' "$bad" >&2
     exit 1
 fi

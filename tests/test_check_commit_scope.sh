@@ -194,6 +194,27 @@ git -C "$operators" add docs/guide.md src/cli.cpp
 check_hook operator_src_rejected 1 \
     'docs: commit must only include docs files' "$operators"
 
+# Deleting a source file is a source change even when every deleted line is
+# only a comment, so a docs: commit cannot quietly remove code documentation.
+deleted_comments="$tmp/deleted-comments-docs"
+make_repo "$deleted_comments"
+printf '// Old entry point header.\n' > "$deleted_comments/src/theme.h"
+git -C "$deleted_comments" add src/theme.h
+git -C "$deleted_comments" -c user.name=Tester \
+    -c user.email=tester@example.invalid commit -qm baseline
+git -C "$deleted_comments" rm -q src/theme.h
+git -C "$deleted_comments" add docs/guide.md
+check_hook deleted_comment_src_rejected 1 \
+    'docs: commit must only include docs files' "$deleted_comments"
+
+# Deleting a source file with code lines is rejected as well.
+deleted_src="$tmp/deleted-src-docs"
+make_baseline_repo "$deleted_src"
+git -C "$deleted_src" rm -q src/cli.cpp
+git -C "$deleted_src" add docs/guide.md
+check_hook deleted_src_rejected 1 \
+    'docs: commit must only include docs files' "$deleted_src"
+
 # Documentation outside the allowlist is still rejected.
 outside="$tmp/outside-docs"
 make_repo "$outside"

@@ -6,7 +6,8 @@ set -eu
 # commandHelp(), and check the README Layout block's path tokens against the
 # filesystem. Parsing stays shallow: first fenced block after a heading,
 # command paths followed by bracketed/angled arguments, and one layout-token
-# matcher. An optional root argument exists for the self-test.
+# matcher that also checks paths appearing after prose. An optional root
+# argument exists for the self-test.
 
 if [ "$#" -gt 1 ]; then
     printf 'Usage: %s [root]\n' "$0" >&2
@@ -311,7 +312,7 @@ while IFS= read -r raw; do
     for token in $text; do
         case "$token" in
             src/*|tests/*|pkgbuild/*) ;;
-            *) break ;;
+            *) continue ;; # layout descriptions are prose, not paths
         esac
         layout_tokens=$((layout_tokens + 1))
         if ! layout_token_matches "$token"; then

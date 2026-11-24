@@ -59,8 +59,35 @@ if [ "$merge_status" -ne 0 ]; then
     exit 1
 fi
 
+# A docs-only merge defers the compiled suite to the next code merge or the
+# wave-end backstop. Use the allowlist owned by wave-merge-policy.md: README*,
+# LICENSE, GLOSSARY.md, CHANGELOG*, docs/** and root-level *.md only.
+changed=$(git -C "$ROOT" diff --name-only HEAD^1 HEAD)
+docs_only=1
+if [ -z "$changed" ]; then
+    docs_only=0
+fi
+while IFS= read -r path; do
+    [ -z "$path" ] && continue
+    case "$path" in
+        README*|LICENSE|GLOSSARY.md|CHANGELOG*|docs/*) ;;
+        */*) docs_only=0 ;;
+        *.md) ;;
+        *) docs_only=0 ;;
+    esac
+done <<EOF
+$changed
+EOF
+
+if [ "$docs_only" -eq 1 ]; then
+    printf 'DOCS_ONLY_TEST_DEFERRED %s\n' "$ticket"
+fi
+
 mkdir -p "$ROOT/build"
 for check in lint build test; do
+    if [ "$docs_only" -eq 1 ] && [ "$check" = test ]; then
+        continue
+    fi
     log="build/merge-$n-$check.log"
     set +e
     (cd "$ROOT" && "./bin/$check") > "$ROOT/$log" 2>&1
