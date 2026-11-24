@@ -5,6 +5,7 @@
 #include "store.h"
 
 #include <QHash>
+#include <QSet>
 #include <QStringList>
 #include <QVariantList>
 #include <QVariantMap>
@@ -48,7 +49,10 @@ public:
 
     explicit StudyPlanner(StoreAdapter &store);
 
-    void setDecks(const QVector<Deck> &decks) { m_decks = &decks; }
+    void setDecks(const QVector<Deck> &decks) {
+        m_decks = &decks;
+        ++m_decksGeneration;
+    }
     void configure(int newCardAllowance, int dayStartHour);
 
     bool refresh(QString *storeError = nullptr);
@@ -83,8 +87,18 @@ private:
     struct StudySnapshot {
         QHash<QString, FsrsState> states;
         QHash<QString, QString> hashes;
+        // Content hashes are computed once at refresh(); cards are kept so an
+        // edited Card with the same id still fails the stale-hash guard.
+        QHash<QString, Card> hashedCards;
+        QSet<QString> validIds;
         int newBudget = 0;
         qint64 now = 0;
+    };
+
+    struct CachedAvailability {
+        quint64 snapshotGeneration = 0;
+        quint64 decksGeneration = 0;
+        QHash<QString, Availability> byDeckName;
     };
 
     const QVector<Deck> &decks() const;
@@ -95,6 +109,9 @@ private:
     bool m_snapshotValid = false;
     int m_newCardAllowance = 0;
     int m_dayStartHour = 0;
+    quint64 m_snapshotGeneration = 0;
+    quint64 m_decksGeneration = 0;
+    mutable CachedAvailability m_availabilityCache;
 };
 
 // Binds the planner to the existing Store API without changing that API.

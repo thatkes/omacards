@@ -6,11 +6,23 @@
 #include <QVariantMap>
 #include <algorithm>
 
+namespace {
+
+// DeckIO::contentHash() hashes Question, Answer and Card type. A card with
+// those fields unchanged can reuse the hash computed at refresh; anything
+// else goes through the stored-hash guard in stateFor().
+bool sameContent(const Card &card, const Card &hashed) {
+    return card.question == hashed.question && card.answer == hashed.answer && card.type.text == hashed.type.text;
+}
+
+} // namespace
+
 StudyPlanner::StudyPlanner(StoreAdapter &store) : m_store(store) {}
 
 void StudyPlanner::configure(int newCardAllowance, int dayStartHour) {
     m_newCardAllowance = newCardAllowance;
     m_dayStartHour = dayStartHour;
+    ++m_snapshotGeneration;
 }
 
 const QVector<Deck> &StudyPlanner::decks() const {
@@ -19,12 +31,22 @@ const QVector<Deck> &StudyPlanner::decks() const {
 }
 
 bool StudyPlanner::refresh(QString *storeError) {
+    ++m_snapshotGeneration;
     m_store.clearError();
     StudySnapshot next;
     const QHash<QString, SchedulingRecord> records = m_store.schedulingRecords();
     for (auto it = records.cbegin(); it != records.cend(); ++it) {
         next.states.insert(it.key(), it.value().state);
         next.hashes.insert(it.key(), it.value().hash);
+    }
+    // One hash per Deck card per snapshot generation; stateFor() and the
+    // availability scan reuse that decision instead of rehashing every card.
+    for (const Deck &deck : decks()) {
+        for (const Card &card : deck.cards) {
+            next.hashedCards.insert(card.id, card);
+            if (next.hashes.value(card.id) == DeckIO::contentHash(card))
+                next.validIds.insert(card.id);
+        }
     }
     next.newBudget = qMax(0, m_newCardAllowance - m_store.newCardsOnStudyDay(m_dayStartHour));
     if (!m_store.lastError().isEmpty()) {
@@ -44,6 +66,7 @@ bool StudyPlanner::refresh(QString *storeError) {
 void StudyPlanner::updateNewBudget(QString *storeError) {
     if (!m_snapshotValid)
         return;
+    ++m_snapshotGeneration; // the New-card allowance is part of the memo key
     m_store.clearError();
     m_snapshot.newBudget = qMax(0, m_newCardAllowance - m_store.newCardsOnStudyDay(m_dayStartHour));
     if (!m_store.lastError().isEmpty() && storeError)
@@ -51,19 +74,43 @@ void StudyPlanner::updateNewBudget(QString *storeError) {
 }
 
 FsrsState StudyPlanner::stateFor(const Card &card) const {
-    if (!m_snapshotValid || m_snapshot.hashes.value(card.id) != DeckIO::contentHash(card))
+    if (!m_snapshotValid)
         return FsrsState{};
-    return m_snapshot.states.value(card.id);
+    const auto stored = m_snapshot.hashes.constFind(card.id);
+    if (stored == m_snapshot.hashes.cend() || stored->isEmpty())
+        return FsrsState{}; // no stored hash: no need to hash the Card either
+    const auto hashed = m_snapshot.hashedCards.constFind(card.id);
+    if (hashed != m_snapshot.hashedCards.cend() && sameContent(card, hashed.value()))
+        return m_snapshot.validIds.contains(card.id) ? m_snapshot.states.value(card.id) : FsrsState{};
+    return DeckIO::contentHash(card) == *stored ? m_snapshot.states.value(card.id) : FsrsState{};
 }
 
 StudyPlanner::Availability StudyPlanner::availability(const QString &deckName) const {
+    if (m_availabilityCache.snapshotGeneration == m_snapshotGeneration &&
+        m_availabilityCache.decksGeneration == m_decksGeneration) {
+        const auto cached = m_availabilityCache.byDeckName.constFind(deckName);
+        if (cached != m_availabilityCache.byDeckName.cend())
+            return *cached;
+    }
+
+    auto remember = [this, &deckName](const Availability &value) -> Availability {
+        if (m_availabilityCache.snapshotGeneration != m_snapshotGeneration ||
+            m_availabilityCache.decksGeneration != m_decksGeneration) {
+            m_availabilityCache.byDeckName.clear();
+            m_availabilityCache.snapshotGeneration = m_snapshotGeneration;
+            m_availabilityCache.decksGeneration = m_decksGeneration;
+        }
+        m_availabilityCache.byDeckName.insert(deckName, value);
+        return value;
+    };
+
     Availability result;
     const QVector<Deck> &allDecks = decks();
     result.duePerDeck.resize(allDecks.size());
     result.newPerDeck.resize(allDecks.size());
     result.dueIncludingNewPerDeck.resize(allDecks.size());
     if (!m_snapshotValid)
-        return result;
+        return remember(result);
 
     struct DueEntry {
         qint64 due;
@@ -102,7 +149,7 @@ StudyPlanner::Availability StudyPlanner::availability(const QString &deckName) c
         result.due << entry.card;
         ++result.duePerDeck[entry.deck];
     }
-    return result;
+    return remember(result);
 }
 
 int StudyPlanner::countDue(const QString &deckName) const {

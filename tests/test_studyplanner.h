@@ -19,4 +19,6 @@ private slots:
     void cardListFiltersAndFormats();
     void deckSummariesReportCounts();
     void statsSummaryNumericContract();
+    void availabilityMemoisesPerDeckNameAndGeneration();
+    void stateForKeepsStaleHashGuardWithCachedHashes();
 };
