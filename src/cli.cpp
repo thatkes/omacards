@@ -735,6 +735,72 @@ int run(const QStringList &arguments) {
         return 0;
     }
 
+    // `preview` reads Deck files only. Like `warm`, it skips initialize() so
+    // the study session does not present a card and claim its math renders
+    // while this command renders the same expressions for the preview.
+    if (options.command == "preview") {
+        const bool json = options.json;
+        if (options.deck.isEmpty())
+            return fail(QObject::tr("Use --deck / -d"), json);
+        if (options.format != QLatin1String("text") && options.format != QLatin1String("html") &&
+            options.format != QLatin1String("markdown"))
+            return fail(QObject::tr("--format must be text, html or markdown"), json);
+        const QVector<Deck> previewDecks = DeckIO::loadAll(backend.decksDirectory());
+        QVector<Card> cards = allCards(previewDecks, options.deck);
+        const bool deckHasNoCards = cards.isEmpty();
+        if (!options.card.isEmpty()) {
+            QVector<Card> filtered;
+            for (const Card &card : cards)
+                if (card.id == options.card)
+                    filtered << card;
+            cards = filtered;
+        }
+        if (cards.isEmpty()) {
+            // An existing Deck file that yields no Cards gets the empty-Deck
+            // diagnostic; other misses name a stale --card id when supplied.
+            if (deckHasNoCards) {
+                const QString targetPath = resolveDeckPath(previewDecks, backend.decksDirectory(), options.deck);
+                if (!targetPath.isEmpty() && QFileInfo::exists(targetPath))
+                    return failEmptyDeck(options.deck, deckIssueReportForFile(targetPath), json);
+            }
+            if (!options.card.isEmpty())
+                return fail(QObject::tr("No such card: %1").arg(options.card), json);
+            return fail(QObject::tr("No cards to preview"), json);
+        }
+
+        constexpr double previewMathScale = 1.6;              // Match the review answer label size.
+        const QString previewInk = QStringLiteral("#000000"); // HTML stays readable on light backgrounds.
+        const bool html = options.format == QLatin1String("html");
+        const bool markdown = options.format == QLatin1String("markdown");
+        MathRenderer renderer;
+        const auto renderPreviewField = [&](const QString &text) {
+            if (html)
+                return renderer.render(text, previewInk, previewMathScale);
+            if (markdown)
+                return text;
+            return renderer.renderPlain(text);
+        };
+        QJsonArray items;
+        QStringList lines;
+        for (const Card &card : cards) {
+            const QString question = renderPreviewField(card.question);
+            const QString answer = renderPreviewField(card.answer);
+            QJsonObject item;
+            item.insert("id", card.id);
+            item.insert(html ? QStringLiteral("questionHtml") : QStringLiteral("question"), question);
+            item.insert(html ? QStringLiteral("answerHtml") : QStringLiteral("answer"), answer);
+            items << item;
+            lines << QStringLiteral("[%1]\nQ: %2\nA: %3").arg(card.id, question, answer);
+        }
+        QJsonObject object;
+        object.insert("ok", true);
+        object.insert("deck", options.deck);
+        object.insert("format", options.format);
+        object.insert("items", items);
+        write(object, json, lines.join(QStringLiteral("\n\n")));
+        return 0;
+    }
+
     QString error;
     if (!backend.initialize(&error))
         return fail(error, options.json);
@@ -850,67 +916,6 @@ int run(const QStringList &arguments) {
         }
         write(object, json, human);
         return strictPassed ? 0 : 1;
-    }
-
-    if (options.command == "preview") {
-        if (options.deck.isEmpty())
-            return fail(QObject::tr("Use --deck / -d"), json);
-        if (options.format != QLatin1String("text") && options.format != QLatin1String("html") &&
-            options.format != QLatin1String("markdown"))
-            return fail(QObject::tr("--format must be text, html or markdown"), json);
-        QVector<Card> cards = allCards(decks, options.deck);
-        const bool deckHasNoCards = cards.isEmpty();
-        if (!options.card.isEmpty()) {
-            QVector<Card> filtered;
-            for (const Card &card : cards)
-                if (card.id == options.card)
-                    filtered << card;
-            cards = filtered;
-        }
-        if (cards.isEmpty()) {
-            // An existing Deck file that yields no Cards gets the empty-Deck
-            // diagnostic; other misses name a stale --card id when supplied.
-            if (deckHasNoCards) {
-                const QString targetPath = resolveDeckPath(decks, backend.decksDirectory(), options.deck);
-                if (!targetPath.isEmpty() && QFileInfo::exists(targetPath))
-                    return failEmptyDeck(options.deck, deckIssueReportForFile(targetPath), json);
-            }
-            if (!options.card.isEmpty())
-                return fail(QObject::tr("No such card: %1").arg(options.card), json);
-            return fail(QObject::tr("No cards to preview"), json);
-        }
-
-        constexpr double previewMathScale = 1.6;              // Match the review answer label size.
-        const QString previewInk = QStringLiteral("#000000"); // HTML stays readable on light backgrounds.
-        const bool html = options.format == QLatin1String("html");
-        const bool markdown = options.format == QLatin1String("markdown");
-        MathRenderer renderer;
-        const auto renderPreviewField = [&](const QString &text) {
-            if (html)
-                return renderer.render(text, previewInk, previewMathScale);
-            if (markdown)
-                return text;
-            return renderer.renderPlain(text);
-        };
-        QJsonArray items;
-        QStringList lines;
-        for (const Card &card : cards) {
-            const QString question = renderPreviewField(card.question);
-            const QString answer = renderPreviewField(card.answer);
-            QJsonObject item;
-            item.insert("id", card.id);
-            item.insert(html ? QStringLiteral("questionHtml") : QStringLiteral("question"), question);
-            item.insert(html ? QStringLiteral("answerHtml") : QStringLiteral("answer"), answer);
-            items << item;
-            lines << QStringLiteral("[%1]\nQ: %2\nA: %3").arg(card.id, question, answer);
-        }
-        QJsonObject object;
-        object.insert("ok", true);
-        object.insert("deck", options.deck);
-        object.insert("format", options.format);
-        object.insert("items", items);
-        write(object, json, lines.join(QStringLiteral("\n\n")));
-        return 0;
     }
 
     if (options.command == "config") {

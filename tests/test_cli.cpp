@@ -2232,6 +2232,12 @@ void TestCli::previewJsonContracts() {
     }
     QVERIFY(!firstId.isEmpty());
 
+    // Preview reads Deck files only. A state database that cannot open must not
+    // block it or start a study session that claims the preview's math renders.
+    const QJsonObject brokenState = runCli({"preview", "--deck", "P", "--json"}, decks, decks, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(brokenState.value(QStringLiteral("items")).toArray().size(), 2);
+
     const QJsonObject all = runCli({"preview", "--deck", "P", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
     QCOMPARE(sortedKeys(all), QStringList({"deck", "format", "items", "ok"}));
@@ -2256,7 +2262,9 @@ void TestCli::previewJsonContracts() {
     // HTML preview has no theme, so math must be emitted in black regardless
     // of the colors the app happens to use.
     const QString bin = dir.filePath("bin");
-    QVERIFY(writeFakePdfToolchain(bin, kCliTinySvg));
+    // A slow toolchain keeps any validation Backend's async math claim active
+    // while preview renders, so a preview that competes for that claim fails.
+    QVERIFY(writeFakePdfToolchain(bin, kCliTinySvg, QStringLiteral("sleep 0.2\n")));
     TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
     TestSupport::ScopedEnv argsEnv("OMACARDS_TEST_ARGS", dir.filePath("args.log"));
     PathGuard pathGuard(bin);
