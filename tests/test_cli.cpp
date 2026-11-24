@@ -100,7 +100,7 @@ void TestCli::helpIsHeadless() {
         for (const QString &flag : {QStringLiteral("--help"), QStringLiteral("-h")}) {
             int code = -1;
             QByteArray errors;
-            const QByteArray output = runCliRaw({token, flag}, decks, database, &code, &errors);
+            const QByteArray output = runCliProcessRaw({token, flag}, decks, database, &code, &errors);
             const QString text = QString::fromUtf8(output);
             QVERIFY2(code == 0, qPrintable(token + " " + flag + " exited " + QString::number(code)));
             QVERIFY2(text.contains(token), qPrintable(token));
@@ -113,7 +113,8 @@ void TestCli::helpIsHeadless() {
 
     // rename-deck has its own wording rather than the generic fallback.
     int renameCode = -1;
-    const QString renameHelp = QString::fromUtf8(runCliRaw({"rename-deck", "--help"}, decks, database, &renameCode));
+    const QString renameHelp =
+        QString::fromUtf8(runCliProcessRaw({"rename-deck", "--help"}, decks, database, &renameCode));
     QCOMPARE(renameCode, 0);
     QVERIFY2(renameHelp.contains(QStringLiteral("Purpose: Rename a Deck.")), qPrintable(renameHelp));
     QVERIFY2(renameHelp.contains(QStringLiteral("Flags: OLD, NEW, [--json], --help, -h")), qPrintable(renameHelp));
@@ -123,7 +124,8 @@ void TestCli::helpIsHeadless() {
 
     // add-cards help shows the minimal JSON input shape without the full schema.
     int addCardsCode = -1;
-    const QString addCardsHelp = QString::fromUtf8(runCliRaw({"add-cards", "--help"}, decks, database, &addCardsCode));
+    const QString addCardsHelp =
+        QString::fromUtf8(runCliProcessRaw({"add-cards", "--help"}, decks, database, &addCardsCode));
     QCOMPARE(addCardsCode, 0);
     QVERIFY2(addCardsHelp.contains(QStringLiteral("[{\"question\":\"...\",\"answer\":\"...\"}]")),
              qPrintable(addCardsHelp));
@@ -131,7 +133,8 @@ void TestCli::helpIsHeadless() {
     // Preview help names the supported math delimiters before a user guesses
     // Markdown-style single-dollar math.
     int previewCode = -1;
-    const QString previewHelp = QString::fromUtf8(runCliRaw({"preview", "--help"}, decks, database, &previewCode));
+    const QString previewHelp =
+        QString::fromUtf8(runCliProcessRaw({"preview", "--help"}, decks, database, &previewCode));
     QCOMPARE(previewCode, 0);
     QVERIFY2(previewHelp.contains(QStringLiteral("Math: supported $$...$$ and \\(...\\); $...$ stays literal.")),
              qPrintable(previewHelp));
@@ -151,7 +154,7 @@ void TestCli::helpIsHeadless() {
     // Bare `skill` is a probe: it reports status and help, and installs nothing.
     int skillCode = -1;
     QByteArray skillErrors;
-    const QByteArray bareSkill = runCliRaw({"skill"}, decks, database, &skillCode, &skillErrors);
+    const QByteArray bareSkill = runCliProcessRaw({"skill"}, decks, database, &skillCode, &skillErrors);
     QCOMPARE(skillCode, 0);
     QVERIFY2(skillErrors.isEmpty(), qPrintable(skillErrors));
     const QString bareText = QString::fromUtf8(bareSkill);
@@ -163,7 +166,7 @@ void TestCli::helpIsHeadless() {
     QVERIFY2(!QFileInfo::exists(skillPath), "Bare skill must not install the skill");
 
     // JSON status stays parseable and names the same target.
-    const QJsonObject status = runCli({"skill", "--json"}, decks, database, &skillCode, &skillErrors);
+    const QJsonObject status = runCliProcess({"skill", "--json"}, decks, database, &skillCode, &skillErrors);
     QCOMPARE(skillCode, 0);
     QCOMPARE(sortedKeys(status), QStringList({"installed", "matches", "ok", "path"}));
     QVERIFY(status.value(QStringLiteral("ok")).toBool());
@@ -180,7 +183,7 @@ void TestCli::helpIsHeadless() {
             arguments << flag;
             int code = -1;
             QByteArray errors;
-            const QString text = QString::fromUtf8(runCliRaw(arguments, decks, database, &code, &errors));
+            const QString text = QString::fromUtf8(runCliProcessRaw(arguments, decks, database, &code, &errors));
             QCOMPARE(code, 0);
             QVERIFY2(errors.isEmpty(), qPrintable(errors));
             QVERIFY2(text.contains(skillPath), qPrintable(text));
@@ -198,7 +201,8 @@ void TestCli::helpIsHeadless() {
     // A blocked target keeps the two-key failure shape from issue #107.
     const QString agentsDir = homeDir.filePath(QStringLiteral(".agents"));
     QVERIFY(writeFile(agentsDir, "not a directory"));
-    const QJsonObject failure = runCli({"skill", "install", "--json"}, decks, database, &skillCode, &skillErrors);
+    const QJsonObject failure =
+        runCliProcess({"skill", "install", "--json"}, decks, database, &skillCode, &skillErrors);
     QCOMPARE(skillCode, 1);
     QCOMPARE(sortedKeys(failure), QStringList({"error", "ok"}));
     QVERIFY(!failure.value(QStringLiteral("ok")).toBool());
@@ -208,7 +212,8 @@ void TestCli::helpIsHeadless() {
     QVERIFY2(!QFileInfo::exists(skillPath), "A failed install must not create the skill");
 
     QVERIFY(QFile::remove(agentsDir));
-    const QJsonObject installed = runCli({"skill", "install", "--json"}, decks, database, &skillCode, &skillErrors);
+    const QJsonObject installed =
+        runCliProcess({"skill", "install", "--json"}, decks, database, &skillCode, &skillErrors);
     QCOMPARE(skillCode, 0);
     QCOMPARE(sortedKeys(installed), QStringList({"changed", "installed", "ok", "path"}));
     QVERIFY(installed.value(QStringLiteral("ok")).toBool());
@@ -223,7 +228,8 @@ void TestCli::helpIsHeadless() {
     QCOMPARE(installedSkill.readAll(), bundledSkill.readAll());
 
     // Reinstalling a matching copy reports it as installed but not changed.
-    const QJsonObject unchanged = runCli({"skill", "install", "--json"}, decks, database, &skillCode, &skillErrors);
+    const QJsonObject unchanged =
+        runCliProcess({"skill", "install", "--json"}, decks, database, &skillCode, &skillErrors);
     QCOMPARE(skillCode, 0);
     QCOMPARE(sortedKeys(unchanged), QStringList({"changed", "installed", "ok", "path"}));
     QVERIFY(unchanged.value(QStringLiteral("ok")).toBool());
@@ -233,14 +239,14 @@ void TestCli::helpIsHeadless() {
 
     // A help flag is never a positional name and never runs the command.
     int code = -1;
-    const QByteArray checkHelp = runCliRaw({"check", "--help", "--json"}, decks, database, &code);
+    const QByteArray checkHelp = runCliProcessRaw({"check", "--help", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
     QVERIFY(checkHelp.contains("Purpose:"));
     QVERIFY(!checkHelp.contains("\"decks\""));
 
-    const QByteArray topLevel = runCliRaw({"help"}, decks, database, &code);
+    const QByteArray topLevel = runCliProcessRaw({"help"}, decks, database, &code);
     QCOMPARE(code, 0);
-    const QByteArray topLevelWithFlag = runCliRaw({"help", "--help"}, decks, database, &code);
+    const QByteArray topLevelWithFlag = runCliProcessRaw({"help", "--help"}, decks, database, &code);
     QCOMPARE(code, 0);
     QCOMPARE(topLevelWithFlag, topLevel);
 }
@@ -292,12 +298,12 @@ void TestCli::skillUnknownActionMentionsBothPaths() {
 
     int code = -1;
     QByteArray errors;
-    runCliRaw({"skill", "bogus"}, decks, database, &code, &errors);
+    runCliProcessRaw({"skill", "bogus"}, decks, database, &code, &errors);
     QCOMPARE(code, 1);
     QVERIFY2(errors.contains("Usage: omacards skill install"), qPrintable(errors));
     QVERIFY2(errors.contains("omacards skill status"), qPrintable(errors));
 
-    const QJsonObject failure = runCli({"skill", "bogus", "--json"}, decks, database, &code, &errors);
+    const QJsonObject failure = runCliProcess({"skill", "bogus", "--json"}, decks, database, &code, &errors);
     QCOMPARE(code, 1);
     const QString message = failure.value(QStringLiteral("error")).toString();
     QVERIFY2(message.contains("skill install"), qPrintable(message));
@@ -321,7 +327,7 @@ void TestCli::missingSkillNudge() {
     // `omacards help` advertises the skill and nudges on stderr while missing.
     int code = -1;
     QByteArray errors;
-    const QByteArray help = runCliRaw({"help"}, decks, database, &code, &errors);
+    const QByteArray help = runCliProcessRaw({"help"}, decks, database, &code, &errors);
     QCOMPARE(code, 0);
     const QString helpText = QString::fromUtf8(help);
     QVERIFY2(helpText.contains(QStringLiteral("Agent integration")), qPrintable(helpText));
@@ -338,27 +344,28 @@ void TestCli::missingSkillNudge() {
     for (const QString &flag : {QStringLiteral("--help"), QStringLiteral("-h")}) {
         int flagCode = -1;
         QByteArray flagErrors;
-        runCliRaw({flag}, decks, database, &flagCode, &flagErrors);
+        runCliProcessRaw({flag}, decks, database, &flagCode, &flagErrors);
         QCOMPARE(flagCode, 0);
         QVERIFY2(flagErrors.isEmpty(), qPrintable(flagErrors));
     }
     int jsonCode = -1;
     QByteArray jsonErrors;
-    runCliRaw({"help", "--json"}, decks, database, &jsonCode, &jsonErrors);
+    runCliProcessRaw({"help", "--json"}, decks, database, &jsonCode, &jsonErrors);
     QCOMPARE(jsonCode, 0);
     QVERIFY2(jsonErrors.isEmpty(), qPrintable(jsonErrors));
 
     // Once installed, the same help invocation stays quiet but keeps the pointer.
     int installCode = -1;
     QByteArray installErrors;
-    const QJsonObject installed = runCli({"skill", "install", "--json"}, decks, database, &installCode, &installErrors);
+    const QJsonObject installed =
+        runCliProcess({"skill", "install", "--json"}, decks, database, &installCode, &installErrors);
     QCOMPARE(installCode, 0);
     QVERIFY(installed.value(QStringLiteral("ok")).toBool());
     QVERIFY(QFileInfo::exists(skillPath));
 
     int afterCode = -1;
     QByteArray afterErrors;
-    const QByteArray helpAfter = runCliRaw({"help"}, decks, database, &afterCode, &afterErrors);
+    const QByteArray helpAfter = runCliProcessRaw({"help"}, decks, database, &afterCode, &afterErrors);
     QCOMPARE(afterCode, 0);
     QCOMPARE(QString::fromUtf8(helpAfter), helpText);
     QVERIFY2(afterErrors.isEmpty(), qPrintable(afterErrors));
@@ -499,8 +506,8 @@ void TestCli::addCardsJsonMetadataContract() {
     QCOMPARE(counts.value(QStringLiteral("warning")).toInt(), 0);
 
     const QByteArray piped = R"([{"question":"Piped Q?","answer":"Piped A"}])";
-    const QJsonObject throughStdin = runCli({"add-cards", "--deck", "Piped Series", "--input", "-", "--json"}, decks,
-                                            database, &code, nullptr, &piped);
+    const QJsonObject throughStdin = runCliProcess({"add-cards", "--deck", "Piped Series", "--input", "-", "--json"},
+                                                   decks, database, &code, nullptr, &piped);
     QCOMPARE(code, 0);
     QCOMPARE(sortedKeys(throughStdin), successKeys);
     QCOMPARE(throughStdin.value(QStringLiteral("deck")).toString(), QString("Piped Series"));
