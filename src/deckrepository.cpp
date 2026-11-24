@@ -112,6 +112,7 @@ void DeckRepository::load(QString *currentDeck) {
     if (!error.isEmpty())
         emit errorOccurred(error);
     m_decks = decks;
+    rebuildCardIndex();
     m_deckNames.clear();
     for (const Deck &deck : m_decks)
         m_deckNames << deck.name;
@@ -159,11 +160,30 @@ int DeckRepository::deckIndex(const QString &name) const {
 }
 
 Card *DeckRepository::cardById(const QString &id) {
-    for (Deck &deck : m_decks)
-        for (Card &card : deck.cards)
-            if (card.id == id)
-                return &card;
-    return nullptr;
+    const auto it = m_cardIndex.constFind(id);
+    if (it == m_cardIndex.constEnd())
+        return nullptr;
+    const CardLocation location = *it;
+    if (location.deck < 0 || location.deck >= m_decks.size())
+        return nullptr;
+    QVector<Card> &cards = m_decks[location.deck].cards;
+    if (location.card < 0 || location.card >= cards.size() || cards.at(location.card).id != id)
+        return nullptr;
+    return &cards[location.card];
+}
+
+void DeckRepository::rebuildCardIndex() {
+    m_cardIndex.clear();
+    for (int deck = 0; deck < m_decks.size(); ++deck) {
+        const QVector<Card> &cards = m_decks.at(deck).cards;
+        for (int card = 0; card < cards.size(); ++card) {
+            const QString &id = cards.at(card).id;
+            // Keep the first occurrence: duplicate explicit ids resolve to
+            // the card nearest the start of the deck file, as before.
+            if (!m_cardIndex.contains(id))
+                m_cardIndex.insert(id, CardLocation{deck, card});
+        }
+    }
 }
 
 int DeckRepository::totalCards() const {
@@ -205,6 +225,7 @@ bool DeckRepository::commitDeckEdit(Deck *deck, const Deck &original, const QByt
     const QSet<QString> baseline = baselineErrors(deck->path);
     if (!DeckIO::save(*deck, error)) {
         *deck = original;
+        rebuildCardIndex();
         return false;
     }
 
@@ -214,14 +235,17 @@ bool DeckRepository::commitDeckEdit(Deck *deck, const Deck &original, const QByt
         if (!FileHistory::restore(deck->path, before, true, &restoreError)) {
             setError(error, trBackend("Deck write failed validation and could not be restored: %1").arg(restoreError));
             *deck = original;
+            rebuildCardIndex();
             return false;
         }
         *deck = original;
         setError(error, validationError(*invalid));
+        rebuildCardIndex();
         return false;
     }
 
     recordHistory(deck->path, before, true, description);
+    rebuildCardIndex();
     return true;
 }
 
@@ -377,6 +401,7 @@ bool DeckRepository::renameDeck(const QString &oldName, const QString &newName, 
         return rollback(trBackend("Cannot remove deck file: %1").arg(oldPath));
 
     *deck = updated;
+    rebuildCardIndex();
     const int nameIndex = m_deckNames.indexOf(from);
     if (nameIndex >= 0)
         m_deckNames[nameIndex] = to;
@@ -607,6 +632,9 @@ bool DeckRepository::removeDeck(const QString &name, QString *currentDeck, QStri
         return false;
     }
     recordHistory(path, before, true, trBackend("deleting deck %1").arg(name));
+    // The in-memory decks stay until the caller's load(); keep the index
+    // aligned with them in the meantime.
+    rebuildCardIndex();
     if (currentDeck && *currentDeck == name)
         currentDeck->clear();
     // An intentional deletion may remove the last deck; load() deliberately

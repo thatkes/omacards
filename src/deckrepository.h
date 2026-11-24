@@ -6,6 +6,7 @@
 
 #include <QByteArray>
 #include <QFileSystemWatcher>
+#include <QHash>
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -78,6 +79,12 @@ signals:
     void errorOccurred(const QString &message);
 
 private:
+    struct CardLocation {
+        int deck = -1;
+        int card = -1;
+    };
+
+    void rebuildCardIndex();
     void recordHistory(const QString &path, const QByteArray &before, bool existedBefore, const QString &description);
     void recordRename(const QString &from, const QByteArray &before, const QString &to, const QByteArray &after,
                       const QString &description);
@@ -88,6 +95,9 @@ private:
     QString m_decksDir;
     QStringList m_deckNames;
     QVector<Deck> m_decks;
+    // Card id -> position in m_decks. Rebuilt whenever the deck data changes;
+    // positions, not pointers, survive QVector reallocation during edits.
+    QHash<QString, CardLocation> m_cardIndex;
     Store &m_store;
     FileHistory &m_history;
     QFileSystemWatcher m_watcher;
