@@ -40,6 +40,9 @@ private slots:
     void qmlGoodLabelUsesGoodCount();
     void qmlSettingsRowsFitTheirContent();
     void backendAppliesNewCardLimit();
+    void perDeckAllowanceSpendsOnlyRatedDeck();
+    void qmlReviewActionAddsSessionOnlyNewCards();
+    void qmlReviewActionPresentsPendingRepeatFirst();
     void backendKeepsPendingRepeatInSameSession();
     void unreadableDeckKeepsSchedulingState();
     void failedCardWriteDoesNotMutateBackend();

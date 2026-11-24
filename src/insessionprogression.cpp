@@ -27,6 +27,30 @@ void InSessionProgression::buildReview(const QStringList &dueIds, const QStringL
     }
 }
 
+void InSessionProgression::appendReview(const QStringList &ids) {
+    for (const QString &id : ids) {
+        if (m_reviewQueueIds.contains(id))
+            continue;
+        m_reviewQueue << id;
+        m_reviewQueueIds.insert(id);
+    }
+}
+
+bool InSessionProgression::contains(const QString &id) const {
+    return m_reviewQueueIds.contains(id) || m_cramById.contains(id);
+}
+
+bool InSessionProgression::presentPendingNow(qint64 now) {
+    for (const QString &id : m_reviewQueue) {
+        auto pending = m_reviewAgainNotBefore.find(id);
+        if (pending == m_reviewAgainNotBefore.cend())
+            continue;
+        pending.value() = now;
+        return true;
+    }
+    return false;
+}
+
 void InSessionProgression::buildCram(const QVector<Card> &orderedCards) {
     clear();
     for (int i = 0; i < orderedCards.size(); ++i) {

@@ -107,7 +107,7 @@ public:
         ++combinedReads;
         return records;
     }
-    int newCardsOnStudyDay(int) const override { return 1; }
+    int newCardsOnStudyDay(int, const QString & = {}) const override { return 1; }
     QString lastError() const override { return m_error; }
 
 private:
@@ -370,35 +370,34 @@ void TestStudyPlanner::configureLimitsAndCounts() {
 
     const StudyPlanner::Availability all = planner.availability();
     QCOMPARE(idsOf(all.due), QStringList({"due-c", "due-a", "due-b"}));
-    QCOMPARE(idsOf(all.newCards), QStringList({"new-a1", "new-a2", "new-b1"}));
+    QCOMPARE(idsOf(all.newCards), QStringList({"new-a1", "new-a2", "new-b1", "new-b2"}));
     QCOMPARE(all.duePerDeck.size(), 2);
     QCOMPARE(all.duePerDeck.at(0), 2);
     QCOMPARE(all.duePerDeck.at(1), 1);
     QCOMPARE(all.newPerDeck.size(), 2);
     QCOMPARE(all.newPerDeck.at(0), 2);
-    QCOMPARE(all.newPerDeck.at(1), 1);
+    QCOMPARE(all.newPerDeck.at(1), 2);
     QCOMPARE(all.dueIncludingNewPerDeck.size(), 2);
     QCOMPARE(all.dueIncludingNewPerDeck.at(0), 4); // new cards count as due=0 too
     QCOMPARE(all.dueIncludingNewPerDeck.at(1), 3);
 
-    // countDue() counts new cards and is not clamped by the new budget.
+    // countDue() counts New cards up to each Deck's own allowance.
     QCOMPARE(planner.countDue(), 7);
-    QCOMPARE(planner.availableCount(), 6);
-    QCOMPARE(planner.newCount(), 3);
+    QCOMPARE(planner.availableCount(), 7);
+    QCOMPARE(planner.newCount(), 4);
 
     QCOMPARE(planner.deckDue(0), 4);
-    QCOMPARE(planner.deckDue(1), 2);
+    QCOMPARE(planner.deckDue(1), 3);
     QCOMPARE(planner.deckNew(0), 2);
-    QCOMPARE(planner.deckNew(1), 1);
+    QCOMPARE(planner.deckNew(1), 2);
     QCOMPARE(planner.deckDue(-1), 0);
     QCOMPARE(planner.deckNew(-1), 0);
     QCOMPARE(planner.deckDue(2), 0);
     QCOMPARE(planner.deckNew(99), 0);
 
     // A filter still reports one entry per deck, with only the selected deck
-    // filled in. The new-card budget restarts per availability() call, so both
-    // Beta new cards are available even though the unfiltered view spent its
-    // budget on Alpha's new cards first.
+    // filled in. Every Deck has its own budget, so the filtered and unfiltered
+    // views agree on Beta's New cards.
     const StudyPlanner::Availability betaOnly = planner.availability("Beta");
     QCOMPARE(idsOf(betaOnly.due), QStringList({"due-c"}));
     QCOMPARE(idsOf(betaOnly.newCards), QStringList({"new-b1", "new-b2"}));
@@ -414,7 +413,8 @@ void TestStudyPlanner::configureLimitsAndCounts() {
     QCOMPARE(planner.countDue("Beta"), 3);
     QCOMPARE(planner.availableCount("Beta"), 3);
 
-    QCOMPARE(idsOf(planner.dueCards()), QStringList({"due-c", "due-a", "due-b", "new-a1", "new-a2", "new-b1"}));
+    QCOMPARE(idsOf(planner.dueCards()),
+             QStringList({"due-c", "due-a", "due-b", "new-a1", "new-a2", "new-b1", "new-b2"}));
 }
 
 void TestStudyPlanner::futureReviewsAreNotAvailable() {
@@ -489,16 +489,16 @@ void TestStudyPlanner::refreshRecomputesNewAllowanceFromReviewHistory() {
 
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const FsrsState reviewed = Fsrs::review(Fsrs::initial(), 3, now).state;
-    store.recordRating(first.id, 3, now, reviewed, 3, true);
+    store.recordRating(first.id, 3, now, reviewed, 3, true, deck.name);
     QVERIFY(planner.refresh(&error));
     QCOMPARE(planner.newCount(), 2);
 
-    store.recordRating(second.id, 3, now, reviewed, 3, true);
+    store.recordRating(second.id, 3, now, reviewed, 3, true, deck.name);
     QVERIFY(planner.refresh(&error));
     QCOMPARE(planner.newCount(), 1);
 
     // A later review of an already rated Card does not spend the allowance.
-    store.recordRating(first.id, 3, now + 1000, reviewed, 3, false);
+    store.recordRating(first.id, 3, now + 1000, reviewed, 3, false, deck.name);
     QVERIFY(planner.refresh(&error));
     QCOMPARE(planner.newCount(), 1);
 }
@@ -524,13 +524,13 @@ void TestStudyPlanner::updateNewBudgetTracksRecordedRatings() {
 
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const FsrsState state = Fsrs::review(Fsrs::initial(), 3, now).state;
-    store.recordRating("new-a", 3, now, state, 1, true);
-    store.recordRating("new-a", 3, now + 1, state, 1, true); // DISTINCT: same card twice
+    store.recordRating("new-a", 3, now, state, 1, true, deck.name);
+    store.recordRating("new-a", 3, now + 1, state, 1, true, deck.name); // DISTINCT: same card twice
     planner.updateNewBudget(&error);
     QVERIFY(error.isEmpty());
     QCOMPARE(planner.newCount(), 2);
 
-    store.recordRating("new-b", 3, now, state, 1, true);
+    store.recordRating("new-b", 3, now, state, 1, true, deck.name);
     planner.updateNewBudget(&error);
     QVERIFY(error.isEmpty());
     QCOMPARE(planner.newCount(), 1);
@@ -702,7 +702,7 @@ void TestStudyPlanner::deckSummariesReportCounts() {
     QCOMPARE(second.value("description").toString(), QString("Second deck"));
     QCOMPARE(second.value("cards").toInt(), 1);
     QCOMPARE(second.value("due").toInt(), 0);
-    QCOMPARE(second.value("new").toInt(), 0);
+    QCOMPARE(second.value("new").toInt(), 1); // Beta has its own allowance
     QVERIFY(!second.value("isCurrent").toBool());
 
     QStringList expectedKeys{"cards", "description", "due", "isCurrent", "name", "new"};
@@ -733,10 +733,10 @@ void TestStudyPlanner::statsSummaryNumericContract() {
 
     const qint64 todayStart = QDateTime(QDate::currentDate(), QTime(0, 0)).toMSecsSinceEpoch() + 3600000;
     const FsrsState state = Fsrs::review(Fsrs::initial(), 3, todayStart).state;
-    store.recordRating("today-good", 3, todayStart, state, 3);
-    store.recordRating("today-wrong", 1, todayStart + 1000, state, 1);
-    store.recordRating("yesterday", 3, todayStart - 86400000LL, state, 3);
-    store.recordRating("logged-new", 3, todayStart + 2000, state, 1, true);
+    store.recordRating("today-good", 3, todayStart, state, 3, false, deck.name);
+    store.recordRating("today-wrong", 1, todayStart + 1000, state, 1, false, deck.name);
+    store.recordRating("yesterday", 3, todayStart - 86400000LL, state, 3, false, deck.name);
+    store.recordRating("logged-new", 3, todayStart + 2000, state, 1, true, deck.name);
 
     PlannerWithStore planner(store);
     planner.setDecks(decks);
@@ -799,10 +799,10 @@ void TestStudyPlanner::availabilityMemoisesPerDeckNameAndGeneration() {
     QString error;
     QVERIFY(store.open(&error));
 
-    const Card alpha1 = makeCard("alpha-1", "First", "a", "Memo");
-    const Card alpha2 = makeCard("alpha-2", "Second", "a", "Memo");
-    const Card beta1 = makeCard("beta-1", "Third", "b", "Memo");
-    const Card beta2 = makeCard("beta-2", "Fourth", "b", "Memo");
+    const Card alpha1 = makeCard("alpha-1", "First", "a", "Alpha");
+    const Card alpha2 = makeCard("alpha-2", "Second", "a", "Alpha");
+    const Card beta1 = makeCard("beta-1", "Third", "b", "Beta");
+    const Card beta2 = makeCard("beta-2", "Fourth", "b", "Beta");
     Deck alpha;
     alpha.name = "Alpha";
     alpha.cards << alpha1 << alpha2;
@@ -816,14 +816,14 @@ void TestStudyPlanner::availabilityMemoisesPerDeckNameAndGeneration() {
     planner.configure(2, 0);
     QVERIFY(planner.refresh(&error));
 
-    // The filtered key keeps its own New-card budget: alternating it with
-    // the unfiltered key must not carry over the allowance spent on Alpha.
-    QCOMPARE(idsOf(planner.availability().newCards), QStringList({"alpha-1", "alpha-2"}));
+    // Each Deck has its own budget, so alternating the filtered and unfiltered
+    // keys cannot spend another Deck's allowance.
+    QCOMPARE(idsOf(planner.availability().newCards), QStringList({"alpha-1", "alpha-2", "beta-1", "beta-2"}));
     QCOMPARE(idsOf(planner.availability("Beta").newCards), QStringList({"beta-1", "beta-2"}));
-    QCOMPARE(idsOf(planner.availability().newCards), QStringList({"alpha-1", "alpha-2"}));
-    QCOMPARE(planner.newCount(), 2);
+    QCOMPARE(idsOf(planner.availability().newCards), QStringList({"alpha-1", "alpha-2", "beta-1", "beta-2"}));
+    QCOMPARE(planner.newCount(), 4);
     QCOMPARE(planner.deckNew(0), 2);
-    QCOMPARE(planner.deckNew(1), 0);
+    QCOMPARE(planner.deckNew(1), 2);
     QCOMPARE(planner.countDue("Beta"), 2);
     QCOMPARE(planner.availableCount("Beta"), 2);
 
@@ -831,7 +831,7 @@ void TestStudyPlanner::availabilityMemoisesPerDeckNameAndGeneration() {
     // until the decks generation changes.
     decks[0].cards.clear();
     decks[1].cards.clear();
-    QCOMPARE(planner.newCount(), 2);
+    QCOMPARE(planner.newCount(), 4);
     QCOMPARE(planner.availableCount("Beta"), 2);
 
     planner.setDecks(decks);
@@ -840,7 +840,7 @@ void TestStudyPlanner::availabilityMemoisesPerDeckNameAndGeneration() {
 
     decks = QVector<Deck>{alpha, beta};
     planner.setDecks(decks);
-    QCOMPARE(planner.newCount(), 2);
+    QCOMPARE(planner.newCount(), 4); // two New cards in each Deck
 
     // configure() changes the interpretation of the snapshot and
     // updateNewBudget() recomputes the allowance; both drop the memo.
@@ -849,12 +849,19 @@ void TestStudyPlanner::availabilityMemoisesPerDeckNameAndGeneration() {
     QVERIFY(error.isEmpty());
     QCOMPARE(planner.newCount(), 4);
 
-    const qint64 now = QDateTime::currentMSecsSinceEpoch();
-    const FsrsState state = Fsrs::review(Fsrs::initial(), 3, now).state;
-    store.recordRating(alpha1.id, 3, now, state, 1, true);
+    // Return to two per Deck: one New rating in Alpha must leave Beta's two
+    // cards available while Alpha drops to a single New card.
+    planner.configure(2, 0);
     planner.updateNewBudget(&error);
     QVERIFY(error.isEmpty());
-    QCOMPARE(planner.newCount(), 3);
+    QCOMPARE(planner.newCount(), 4);
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const FsrsState state = Fsrs::review(Fsrs::initial(), 3, now).state;
+    store.recordRating(alpha1.id, 3, now, state, 1, true, alpha.name);
+    planner.updateNewBudget(&error);
+    QVERIFY(error.isEmpty());
+    QCOMPARE(planner.newCount(), 3); // Alpha has one left, Beta still has two
     QCOMPARE(planner.availableCount("Beta"), 2);
 
     QVERIFY(planner.refresh(&error));

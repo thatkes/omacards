@@ -1298,11 +1298,13 @@ void TestCli::summaryContractAcrossThreeStudyDays() {
         QString error;
         QVERIFY(store.open(&error));
         const FsrsState state = Fsrs::review(Fsrs::initial(), 3, atOnDay(0)).state;
-        store.recordRating(QStringLiteral("today-good"), 3, atOnDay(0), state, 1, true);
-        store.recordRating(QStringLiteral("today-again"), 1, atOnDay(0) + 1000, state, 1);
-        store.recordRating(QStringLiteral("today-easy"), 4, atOnDay(0) + 2000, state, 1);
-        store.recordRating(QStringLiteral("yesterday-good"), 3, atOnDay(-1), state, 1, true);
-        store.recordRating(QStringLiteral("older-again"), 1, atOnDay(-2), state, 1);
+        store.recordRating(QStringLiteral("today-good"), 3, atOnDay(0), state, 1, true, QStringLiteral("Summary"));
+        store.recordRating(QStringLiteral("today-again"), 1, atOnDay(0) + 1000, state, 1, false,
+                           QStringLiteral("Summary"));
+        store.recordRating(QStringLiteral("today-easy"), 4, atOnDay(0) + 2000, state, 1, false,
+                           QStringLiteral("Summary"));
+        store.recordRating(QStringLiteral("yesterday-good"), 3, atOnDay(-1), state, 1, true, QStringLiteral("Summary"));
+        store.recordRating(QStringLiteral("older-again"), 1, atOnDay(-2), state, 1, false, QStringLiteral("Summary"));
         QVERIFY(store.lastError().isEmpty());
     }
 
@@ -1588,6 +1590,8 @@ void TestCli::readCommandJsonContracts() {
     QVERIFY(!cardId.isEmpty());
 
     int code = -1;
+    runCli({"use-deck", "Alpha", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
     const QJsonObject decksJson = runCli({"decks", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
     QCOMPARE(sortedKeys(decksJson), QStringList({"decks", "ok"}));
@@ -1657,6 +1661,20 @@ void TestCli::readCommandJsonContracts() {
     QVERIFY2(!statsHuman.contains(QStringLiteral("correct")), qPrintable(statsHuman));
     QCOMPARE(stats.value(QStringLiteral("cards")).toInt(), 3);
     QCOMPARE(stats.value(QStringLiteral("decks")).toInt(), 2);
+
+    // The daily keys stay frozen while their values follow --deck. Alpha spent
+    // its one New card; Beta has never started one today.
+    const QJsonObject statsAlpha = runCli({"stats", "--deck", "Alpha", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(sortedKeys(statsAlpha), expectedStats);
+    QCOMPARE(statsAlpha.value(QStringLiteral("newCardsOnStudyDay")).toInt(), 1);
+    const QJsonObject statsBeta = runCli({"stats", "--deck", "Beta", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(sortedKeys(statsBeta), expectedStats);
+    QCOMPARE(statsBeta.value(QStringLiteral("newCardsOnStudyDay")).toInt(), 0);
+    const QJsonObject checkBeta = runCli({"check", "--deck", "Beta", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(checkBeta.value(QStringLiteral("newCardsOnStudyDay")).toInt(), 0);
 
     const QJsonObject config = runCli({"config", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);

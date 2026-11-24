@@ -30,6 +30,8 @@ class Backend : public QObject {
     Q_PROPERTY(bool waitingForRepeat READ waitingForRepeat NOTIFY cardChanged)
     Q_PROPERTY(int dueCount READ dueCount NOTIFY dueCountChanged)
     Q_PROPERTY(int newCount READ newCount NOTIFY dueCountChanged)
+    Q_PROPERTY(bool canAddNew READ canAddNew NOTIFY reviewActionChanged)
+    Q_PROPERTY(QString reviewButtonLabel READ reviewButtonLabel NOTIFY reviewActionChanged)
     Q_PROPERTY(int deckDue READ deckDue NOTIFY dueCountChanged)
     Q_PROPERTY(int deckNew READ deckNew NOTIFY dueCountChanged)
     Q_PROPERTY(int streak READ streak NOTIFY dueCountChanged)
@@ -88,7 +90,14 @@ public:
     bool hasCard() const { return m_session.hasCard(); }
     bool waitingForRepeat() const { return m_session.waitingForRepeat(); }
     int dueCount() const { return m_session.dueCount(); }
-    int newCount() const { return m_planner.newCount(); }
+    int newCount() const { return m_planner.newCount(m_currentDeck); }
+    // Empty deck names mean the Current Deck, matching the Home and CLI views.
+    int newCardsOnStudyDay(const QString &deckName = {}) const;
+    int newRemaining(const QString &deckName = {}) const;
+    bool canAddNew() const {
+        return m_mode == StudyMode::Review && !m_session.hasCard() && m_session.canAddAdditionalNew();
+    }
+    QString reviewButtonLabel() const;
     int deckDue() const { return m_planner.deckDue(m_deckRepo.deckIndex(m_currentDeck)); }
     int deckNew() const { return m_planner.deckNew(m_deckRepo.deckIndex(m_currentDeck)); }
     int streak() const { return m_store.summary(m_dayStartHour).streak; }
@@ -160,6 +169,7 @@ public slots:
     // holding the revealed answer text; QML resolves the property first.
     Q_INVOKABLE void rate(int rating);
     Q_INVOKABLE void showNext();
+    Q_INVOKABLE void reviewWhenEmpty(int count);
     Q_INVOKABLE void newDeck(const QString &name);
     Q_INVOKABLE void addCard(const QString &question, const QString &answer);
     Q_INVOKABLE void addCardDetails(const QString &question, const QString &answer, const QString &type,
@@ -183,7 +193,8 @@ public slots:
     Q_INVOKABLE QVariantMap statsSummary() const {
         return m_planner.statsSummary({m_store.summary(m_dayStartHour), dueCount(), totalCards(),
                                        static_cast<int>(m_deckRepo.deckNames().size()), reviewed(), good(),
-                                       m_desiredRetention});
+                                       m_desiredRetention},
+                                      m_currentDeck);
     }
 
 signals:
@@ -192,6 +203,7 @@ signals:
     void modeChanged();
     void cardChanged();
     void dueCountChanged();
+    void reviewActionChanged();
     void statsChanged();
     void statusChanged();
     void cardsChanged();

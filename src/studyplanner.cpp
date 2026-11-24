@@ -15,6 +15,18 @@ bool sameContent(const Card &card, const Card &hashed) {
     return card.question == hashed.question && card.answer == hashed.answer && card.type.text == hashed.type.text;
 }
 
+// The configured number is the allowance for each Deck. Keeping the result keyed
+// by name leaves a seam for a future per-Deck value without changing callers.
+QHash<QString, int> newBudgetsFor(StudyPlanner::StoreAdapter &store, int allowance, int dayStartHour,
+                                  const QVector<Deck> &decks) {
+    QHash<QString, int> budgets;
+    for (const Deck &deck : decks) {
+        const int used = store.newCardsOnStudyDay(dayStartHour, deck.name);
+        budgets.insert(deck.name, qMax(0, allowance - used));
+    }
+    return budgets;
+}
+
 } // namespace
 
 StudyPlanner::StudyPlanner(StoreAdapter &store) : m_store(store) {}
@@ -48,7 +60,7 @@ bool StudyPlanner::refresh(QString *storeError) {
                 next.validIds.insert(card.id);
         }
     }
-    next.newBudget = qMax(0, m_newCardAllowance - m_store.newCardsOnStudyDay(m_dayStartHour));
+    next.newBudgetByDeck = newBudgetsFor(m_store, m_newCardAllowance, m_dayStartHour, decks());
     if (!m_store.lastError().isEmpty()) {
         // Never present a card with scheduling data we could not verify.
         m_snapshot = StudySnapshot{};
@@ -68,7 +80,7 @@ void StudyPlanner::updateNewBudget(QString *storeError) {
         return;
     ++m_snapshotGeneration; // the New-card allowance is part of the memo key
     m_store.clearError();
-    m_snapshot.newBudget = qMax(0, m_newCardAllowance - m_store.newCardsOnStudyDay(m_dayStartHour));
+    m_snapshot.newBudgetByDeck = newBudgetsFor(m_store, m_newCardAllowance, m_dayStartHour, decks());
     if (!m_store.lastError().isEmpty() && storeError)
         *storeError = m_store.lastError();
 }
@@ -118,7 +130,7 @@ StudyPlanner::Availability StudyPlanner::availability(const QString &deckName) c
         Card card;
     };
     QVector<DueEntry> dueEntries;
-    int remainingNew = m_snapshot.newBudget;
+    QHash<QString, int> remainingNew = m_snapshot.newBudgetByDeck;
     for (int deckIndex = 0; deckIndex < allDecks.size(); ++deckIndex) {
         const Deck &deck = allDecks.at(deckIndex);
         if (!deckName.isEmpty() && deck.name != deckName)
@@ -132,10 +144,11 @@ StudyPlanner::Availability StudyPlanner::availability(const QString &deckName) c
             if (due)
                 ++result.dueIncludingNewPerDeck[deckIndex];
             if (state.reps == 0) {
-                if (remainingNew > 0) {
+                int &deckRemaining = remainingNew[deck.name];
+                if (deckRemaining > 0) {
                     result.newCards << card;
                     ++result.newPerDeck[deckIndex];
-                    --remainingNew;
+                    --deckRemaining;
                 }
             } else if (due) {
                 dueEntries.append({state.due, deckIndex, card});
@@ -165,8 +178,8 @@ int StudyPlanner::availableCount(const QString &deckName) const {
     return available.due.size() + available.newCards.size();
 }
 
-int StudyPlanner::newCount() const {
-    return availability().newCards.size();
+int StudyPlanner::newCount(const QString &deckName) const {
+    return availability(deckName).newCards.size();
 }
 
 int StudyPlanner::deckDue(int deckIndex) const {
@@ -253,7 +266,7 @@ QVariantList StudyPlanner::cardList(const QString &currentDeck, const QString &f
     return list;
 }
 
-QVariantMap StudyPlanner::statsSummary(const StatsSummaryInputs &inputs) const {
+QVariantMap StudyPlanner::statsSummary(const StatsSummaryInputs &inputs, const QString &deckName) const {
     QVariantMap result;
     result.insert("totalRatings", inputs.summary.total);
     result.insert("studyDayRatings", inputs.summary.studyDayRatings);
@@ -265,8 +278,10 @@ QVariantMap StudyPlanner::statsSummary(const StatsSummaryInputs &inputs) const {
     result.insert("due", inputs.dueCount);
     result.insert("cards", inputs.totalCards);
     result.insert("decks", inputs.deckCount);
-    result.insert("newCardsOnStudyDay", inputs.summary.newCardsOnStudyDay);
-    result.insert("newAvailable", newCount());
+    // Daily New numbers follow the Deck, like the Home view and CLI do. The
+    // other summary fields keep their whole-collection meaning.
+    result.insert("newCardsOnStudyDay", m_store.newCardsOnStudyDay(m_dayStartHour, deckName));
+    result.insert("newAvailable", newCount(deckName));
     result.insert("newCardAllowance", m_newCardAllowance);
     result.insert("retention", qRound(inputs.desiredRetention * 100));
     result.insert("dayStartHour", m_dayStartHour);
@@ -293,8 +308,8 @@ QHash<QString, SchedulingRecord> StorePlannerAdapter::schedulingRecords() const 
     return m_store.schedulingRecords();
 }
 
-int StorePlannerAdapter::newCardsOnStudyDay(int dayStartHour) const {
-    return m_store.newCardsOnStudyDay(dayStartHour);
+int StorePlannerAdapter::newCardsOnStudyDay(int dayStartHour, const QString &deckId) const {
+    return m_store.newCardsOnStudyDay(dayStartHour, deckId);
 }
 
 QString StorePlannerAdapter::lastError() const {

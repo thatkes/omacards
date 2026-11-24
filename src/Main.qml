@@ -86,6 +86,19 @@ ApplicationWindow {
         keyHandler.forceActiveFocus()
     }
 
+    // R and the Study Review button share this path. With an empty Review
+    // queue the session adds session-only New cards (or presents a waiting
+    // repeat); everywhere else it keeps the old start-study behaviour.
+    function reviewAction() {
+        closeDeckPicker()
+        if (backend.mode === "review" && !backend.hasCard) {
+            backend.reviewWhenEmpty(5)
+            keyHandler.forceActiveFocus()
+            return
+        }
+        startStudy("review")
+    }
+
     function goHome() {
         closeDeckPicker()
         screen = "home"
@@ -893,7 +906,7 @@ ApplicationWindow {
                         event.accepted = true
                         break
                     case Qt.Key_R:
-                        startStudy("review")
+                        reviewAction()
                         event.accepted = true
                         break
                     case Qt.Key_C:
@@ -1135,10 +1148,10 @@ ApplicationWindow {
                                 ActionButton {
                                     objectName: "studyReviewButton"
                                     compact: true
-                                    label: qsTr("Review")
+                                    label: backend.reviewButtonLabel
                                     hint: "R"
                                     primary: backend.mode === "review"
-                                    onClicked: win.startStudy("review")
+                                    onClicked: win.reviewAction()
                                 }
                                 ActionButton {
                                     objectName: "studyCramButton"

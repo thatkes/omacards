@@ -37,7 +37,12 @@ public:
 
     void buildReview(const QStringList &dueIds, const QStringList &newIds = {},
                      const QHash<QString, qint64> &pending = {});
+    // Session-only cards join the live Review queue without a deadline.
+    void appendReview(const QStringList &ids);
     void buildCram(const QVector<Card> &orderedCards);
+    bool contains(const QString &id) const;
+    // A learner asking R during a Pending repeat wants that card now.
+    bool presentPendingNow(qint64 now);
 
     NextResult next(qint64 now);
     // Read-only look at the next cards; used for prefetching only. It never
