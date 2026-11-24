@@ -191,15 +191,6 @@ QVector<DeckIssue> lintFile(const QString &path) {
     static const QRegularExpression keyLine(R"re(^(Q|A|Answer|tags|type|id)\s*:\s*(.*)$)re",
                                             QRegularExpression::CaseInsensitiveOption);
     MathRenderer math;
-    const auto questionLine = [](const QStringList &lines, const QString &question, int occurrence = 1) {
-        const QString expected = QStringLiteral("Q: ") + question.trimmed();
-        int seen = 0;
-        for (int i = 0; i < lines.size(); ++i) {
-            if (lines.at(i).trimmed() == expected && ++seen == occurrence)
-                return i + 1;
-        }
-        return 0;
-    };
 
     QString error;
     const Deck deck = load(path, &error);
@@ -214,21 +205,25 @@ QVector<DeckIssue> lintFile(const QString &path) {
         return issues;
     }
     const QStringList lines = QString::fromUtf8(file.readAll()).split('\n');
+    QHash<QString, QVector<int>> questionLines;
 
     bool inBlock = false;
     QString currentKey;
     for (int i = 0; i < lines.size(); ++i) {
         const QString raw = lines.at(i);
+        const QString trimmed = raw.trimmed();
+        if (trimmed.startsWith(QLatin1String("Q: ")))
+            questionLines[trimmed].append(i + 1);
         if (!inBlock) {
-            if (raw.trimmed() == QLatin1String("---"))
+            if (trimmed == QLatin1String("---"))
                 inBlock = true;
             continue;
         }
-        if (raw.trimmed() == QLatin1String("---")) {
+        if (trimmed == QLatin1String("---")) {
             currentKey.clear();
             continue;
         }
-        if (raw.trimmed().isEmpty())
+        if (trimmed.isEmpty())
             continue;
         if (keyLine.match(raw).hasMatch()) {
             currentKey = keyLine.match(raw).captured(1).toLower();
@@ -245,7 +240,7 @@ QVector<DeckIssue> lintFile(const QString &path) {
             }
             continue;
         }
-        if (raw.trimmed().startsWith('#'))
+        if (trimmed.startsWith('#'))
             continue;
         DeckIssue issue;
         issue.path = path;
@@ -264,13 +259,18 @@ QVector<DeckIssue> lintFile(const QString &path) {
         issues << issue;
     }
 
+    const auto questionLine = [&questionLines](const QString &question, int occurrence) {
+        const QString expected = QStringLiteral("Q: ") + question.trimmed();
+        return questionLines.value(expected).value(occurrence - 1, 0);
+    };
+
     QHash<QString, int> seenQuestions;
     for (const Card &card : deck.cards) {
         const QString key = card.question.trimmed().toCaseFolded();
         const int occurrence = key.isEmpty() ? 1 : seenQuestions.value(key, 0) + 1;
         if (!key.isEmpty())
             seenQuestions.insert(key, occurrence);
-        const int line = questionLine(lines, card.question, occurrence);
+        const int line = questionLine(card.question, occurrence);
         if (occurrence > 1) {
             DeckIssue issue;
             issue.path = path;
@@ -278,7 +278,7 @@ QVector<DeckIssue> lintFile(const QString &path) {
             issue.line = line;
             issue.message = QStringLiteral("Duplicate question in deck");
             issue.hint = QStringLiteral("Question already used on line %1; make it distinct.")
-                             .arg(questionLine(lines, card.question, 1));
+                             .arg(questionLine(card.question, 1));
             issues << issue;
         }
         const auto addMathWarnings = [&](const QString &field, const QString &text) {

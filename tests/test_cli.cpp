@@ -950,6 +950,77 @@ oops: not a key
     QCOMPARE(code, 1);
 }
 
+void TestCli::checkDuplicateQuestionLinesStayPinned() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    const QString path = QDir(decks).filePath("Pinned.txt");
+    QVERIFY(writeFile(path, R"deck(# Deck: Pinned
+---
+id: alpha-first
+Q: alpha
+A: one
+---
+id: beta-first
+Q: beta \(\foo{x}\)
+A: two
+---
+id: alpha-second
+Q: alpha
+A: three
+---
+id: beta-second
+Q: beta
+A: four \(\foo{y}\)
+---
+id: beta-third
+Q: beta
+A: five
+)deck"));
+
+    int code = -1;
+    const QJsonObject result = runCli({"check", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY(result.value(QStringLiteral("ok")).toBool());
+
+    const QString mathHint = QStringLiteral("Use supported macros, or install tectonic for LaTeX rendering.");
+    const auto issue = [&path, &mathHint](const QString &card, int line, const QString &message, const QString &hint) {
+        QJsonObject object;
+        object.insert(QStringLiteral("path"), path);
+        object.insert(QStringLiteral("card"), card);
+        object.insert(QStringLiteral("line"), line);
+        object.insert(QStringLiteral("severity"), QStringLiteral("warning"));
+        object.insert(QStringLiteral("message"), message);
+        object.insert(QStringLiteral("hint"), hint);
+        return object;
+    };
+    QJsonArray expected;
+    expected << issue(QStringLiteral("beta-first"), 8,
+                      QStringLiteral("Math warning in question: Unsupported math command: \\foo"), mathHint);
+    expected << issue(QStringLiteral("alpha-second"), 12, QStringLiteral("Duplicate question in deck"),
+                      QStringLiteral("Question already used on line 4; make it distinct."));
+    expected << issue(QStringLiteral("beta-second"), 16,
+                      QStringLiteral("Math warning in answer: Unsupported math command: \\foo"), mathHint);
+    expected << issue(QStringLiteral("beta-third"), 20, QStringLiteral("Duplicate question in deck"),
+                      QStringLiteral("Question already used on line 16; make it distinct."));
+
+    const QJsonArray issues = result.value(QStringLiteral("issues")).toArray();
+    QCOMPARE(QJsonDocument(issues).toJson(QJsonDocument::Compact),
+             QJsonDocument(expected).toJson(QJsonDocument::Compact));
+    const QJsonObject counts = result.value(QStringLiteral("issueCounts")).toObject();
+    QCOMPARE(sortedKeys(counts), QStringList({"error", "warning"}));
+    QCOMPARE(counts.value(QStringLiteral("error")).toInt(), 0);
+    QCOMPARE(counts.value(QStringLiteral("warning")).toInt(), 4);
+
+    const QByteArray human = runCliRaw({"check"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    for (const QJsonValue &value : expected) {
+        const QByteArray line = checkDeckIssueLine(value.toObject()).toUtf8();
+        QVERIFY2(human.contains(line), line.constData());
+    }
+}
+
 void TestCli::headlessCommandDetectionIsComplete() {
     const QStringList commands = Cli::headlessCommands();
     QVERIFY2(!commands.isEmpty(), "The command-path registry must be available");
