@@ -10,6 +10,23 @@
 #include <QStandardPaths>
 #include <QUuid>
 
+namespace {
+
+// Column 1 in states(), column 2 in the combined read: the six Fsrs fields
+// always follow the id and (where present) the content hash.
+FsrsState stateFromQuery(const QSqlQuery &query, int firstColumn) {
+    FsrsState state;
+    state.stability = query.value(firstColumn).toDouble();
+    state.difficulty = query.value(firstColumn + 1).toDouble();
+    state.due = query.value(firstColumn + 2).toLongLong();
+    state.lastReview = query.value(firstColumn + 3).toLongLong();
+    state.reps = query.value(firstColumn + 4).toInt();
+    state.lapses = query.value(firstColumn + 5).toInt();
+    return state;
+}
+
+} // namespace
+
 Store::Store(const QString &path)
     : m_path(path.isEmpty()
                  ? QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + "/omacards/state.db"
@@ -18,6 +35,9 @@ Store::Store(const QString &path)
 
 Store::~Store() {
     if (m_db.isValid()) {
+        // Drop the cached query before removing its connection.
+        m_schedulingQuery = QSqlQuery();
+        m_schedulingPrepared = false;
         m_db.close();
         m_db = QSqlDatabase();
         QSqlDatabase::removeDatabase(m_connection);
@@ -98,16 +118,8 @@ QHash<QString, FsrsState> Store::states() const {
         m_lastError = query.lastError().text();
         return result;
     }
-    while (query.next()) {
-        FsrsState state;
-        state.stability = query.value(1).toDouble();
-        state.difficulty = query.value(2).toDouble();
-        state.due = query.value(3).toLongLong();
-        state.lastReview = query.value(4).toLongLong();
-        state.reps = query.value(5).toInt();
-        state.lapses = query.value(6).toInt();
-        result.insert(query.value(0).toString(), state);
-    }
+    while (query.next())
+        result.insert(query.value(0).toString(), stateFromQuery(query, 1));
     return result;
 }
 
@@ -122,6 +134,37 @@ QHash<QString, QString> Store::hashes() const {
     }
     while (query.next())
         result.insert(query.value(0).toString(), query.value(1).toString());
+    return result;
+}
+
+QHash<QString, SchedulingRecord> Store::schedulingRecords() const {
+    QHash<QString, SchedulingRecord> result;
+    if (!m_db.isOpen())
+        return result;
+
+    // Prepared once per Store; repeated refreshes reuse the same statement.
+    if (!m_schedulingPrepared) {
+        m_schedulingQuery = QSqlQuery(m_db);
+        if (!m_schedulingQuery.prepare(
+                "SELECT id, hash, stability, difficulty, due, last_review, reps, lapses FROM cards")) {
+            m_lastError = m_schedulingQuery.lastError().text();
+            return result;
+        }
+        m_schedulingPrepared = true;
+    }
+    if (!m_schedulingQuery.exec()) {
+        m_lastError = m_schedulingQuery.lastError().text();
+        // A schema change can invalidate a prepared statement; reprepare on the
+        // next read instead of serving an empty snapshot forever.
+        m_schedulingQuery = QSqlQuery();
+        m_schedulingPrepared = false;
+        return result;
+    }
+    while (m_schedulingQuery.next()) {
+        result.insert(m_schedulingQuery.value(0).toString(),
+                      SchedulingRecord{stateFromQuery(m_schedulingQuery, 2), m_schedulingQuery.value(1).toString()});
+    }
+    m_schedulingQuery.finish();
     return result;
 }
 
