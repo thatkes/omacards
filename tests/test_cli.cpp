@@ -1250,6 +1250,96 @@ A: two
     QVERIFY(strictWarned.value(QStringLiteral("ok")).toBool());
 }
 
+void TestCli::summaryContractAcrossThreeStudyDays() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    EnvGuard env(decks, database);
+
+    const int dayStart = 4;
+    {
+        auto owned = Backend::fromEnvironment();
+        QString error;
+        QVERIFY(owned->initialize(&error));
+        QVERIFY(owned->createDeck("Summary", &error));
+        QVERIFY(owned->createCard("Summary", "Q", "A", "basic", {}, &error));
+        owned->setDayStartHour(dayStart);
+    }
+
+    const QDate today = Config::studyDay(QDateTime::currentMSecsSinceEpoch(), dayStart);
+    const auto atOnDay = [&today](int offset) {
+        return QDateTime(today.addDays(offset), QTime(12, 0)).toMSecsSinceEpoch();
+    };
+    {
+        Store store(database);
+        QString error;
+        QVERIFY(store.open(&error));
+        const FsrsState state = Fsrs::review(Fsrs::initial(), 3, atOnDay(0)).state;
+        store.recordRating(QStringLiteral("today-good"), 3, atOnDay(0), state, 1, true);
+        store.recordRating(QStringLiteral("today-again"), 1, atOnDay(0) + 1000, state, 1);
+        store.recordRating(QStringLiteral("today-easy"), 4, atOnDay(0) + 2000, state, 1);
+        store.recordRating(QStringLiteral("yesterday-good"), 3, atOnDay(-1), state, 1, true);
+        store.recordRating(QStringLiteral("older-again"), 1, atOnDay(-2), state, 1);
+        QVERIFY(store.lastError().isEmpty());
+    }
+
+    auto backend = Backend::fromEnvironment();
+    QString error;
+    QVERIFY(backend->initialize(&error));
+    QCOMPARE(backend->dayStartHour(), dayStart);
+    const ReviewSummary summary = backend->reviewSummary();
+    QCOMPARE(summary.total, 5);
+    QCOMPARE(summary.studyDayRatings, 3);
+    QCOMPARE(summary.studyDayGood, 1);
+    QCOMPARE(summary.streak, 3);
+    QCOMPARE(summary.newCardsOnStudyDay, 1);
+    QCOMPARE(backend->streak(), summary.streak);
+    const QVariantMap qmlStats = backend->statsSummary();
+    QCOMPARE(qmlStats.value(QStringLiteral("totalRatings")).toInt(), summary.total);
+    QCOMPARE(qmlStats.value(QStringLiteral("studyDayRatings")).toInt(), summary.studyDayRatings);
+    QCOMPARE(qmlStats.value(QStringLiteral("streak")).toInt(), summary.streak);
+    QCOMPARE(qmlStats.value(QStringLiteral("newCardsOnStudyDay")).toInt(), summary.newCardsOnStudyDay);
+    QCOMPARE(qmlStats.value(QStringLiteral("dayStartHour")).toInt(), dayStart);
+    backend.reset();
+
+    int code = -1;
+    const QJsonObject stats = runCli({"stats", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QStringList expectedStats{
+        "ok",  "totalRatings", "studyDayRatings", "studyDayGood", "streak", "newCardsOnStudyDay", "newCardAllowance",
+        "due", "totalDue",     "cards",           "decks"};
+    expectedStats.sort();
+    QCOMPARE(sortedKeys(stats), expectedStats);
+    QCOMPARE(stats.value(QStringLiteral("totalRatings")).toInt(), summary.total);
+    QCOMPARE(stats.value(QStringLiteral("studyDayRatings")).toInt(), summary.studyDayRatings);
+    QCOMPARE(stats.value(QStringLiteral("studyDayGood")).toInt(), summary.studyDayGood);
+    QCOMPARE(stats.value(QStringLiteral("streak")).toInt(), summary.streak);
+    QCOMPARE(stats.value(QStringLiteral("newCardsOnStudyDay")).toInt(), summary.newCardsOnStudyDay);
+
+    const QJsonObject check = runCli({"check", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QStringList expectedCheck{"ok",
+                              "version",
+                              "decks",
+                              "cards",
+                              "due",
+                              "totalDue",
+                              "newCardsOnStudyDay",
+                              "newCardAllowance",
+                              "retention",
+                              "dayStartHour",
+                              "math",
+                              "decksDir",
+                              "database",
+                              "issues",
+                              "issueCounts"};
+    expectedCheck.sort();
+    QCOMPARE(sortedKeys(check), expectedCheck);
+    QCOMPARE(check.value(QStringLiteral("newCardsOnStudyDay")).toInt(), summary.newCardsOnStudyDay);
+    QCOMPARE(check.value(QStringLiteral("dayStartHour")).toInt(), dayStart);
+}
+
 void TestCli::checkDeckScoping() {
     QTemporaryDir dir;
     const QString decks = dir.filePath("decks");

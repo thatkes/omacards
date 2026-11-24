@@ -16,12 +16,14 @@ private slots:
     void unopenedStoreIsInert();
     void saveUpsertsByCardId();
     void removeExceptKeepsReviewsLog();
+    void removeExceptPruneIsAtomicOnDeleteFailure();
     void migratesLegacyReviewsSchema();
     void migratesLegacyNewCardAllowanceKey();
     void summaryStreakBreaksOnMissingDay();
     void summaryStreakSurvivesDayWithoutReviews();
     void summaryCountsOnlyGood();
     void summaryUsesStudyDayForReviewDates();
+    void summaryKeepsThreeStudyDaysWithNonDefaultStart();
     void settingFallbackAndUpsert();
     void renameMovesCurrentAndLastStudiedSettings();
     void schedulingRecordFindsOnlyOneCard();

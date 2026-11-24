@@ -273,6 +273,52 @@ void TestStore::removeExceptKeepsReviewsLog() {
     QCOMPARE(summary.studyDayGood, 2);
 }
 
+void TestStore::removeExceptPruneIsAtomicOnDeleteFailure() {
+    QTemporaryDir dir;
+    const QString path = dir.filePath("state.db");
+    Store store(path);
+    QString error;
+    QVERIFY(store.open(&error));
+
+    const FsrsState state = Fsrs::initial();
+    store.save(QStringLiteral("keep"), QStringLiteral("h-keep"), state);
+    store.save(QStringLiteral("stale-a"), QStringLiteral("h-a"), state);
+    store.save(QStringLiteral("stale-b"), QStringLiteral("h-b"), state);
+
+    // Fail the second DELETE of a prune. A per-id loop leaves the first stale
+    // Card gone; one set-based statement rolls every stale Card back.
+    const QString connection = QStringLiteral("omacards-store-prune-trigger");
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
+        db.setDatabaseName(path);
+        QVERIFY(db.open());
+        {
+            QSqlQuery query(db);
+            QVERIFY(query.exec(QStringLiteral("CREATE TABLE delete_count (n INTEGER NOT NULL)")));
+            QVERIFY(query.exec(QStringLiteral("INSERT INTO delete_count (n) VALUES (0)")));
+            QVERIFY(query.exec(QStringLiteral("CREATE TRIGGER count_card_deletes AFTER DELETE ON cards BEGIN "
+                                              "UPDATE delete_count SET n = n + 1; END")));
+            QVERIFY(query.exec(QStringLiteral("CREATE TRIGGER abort_second_card_delete BEFORE DELETE ON cards "
+                                              "WHEN (SELECT n FROM delete_count) >= 1 BEGIN "
+                                              "SELECT RAISE(ABORT, 'second delete blocked'); END")));
+        }
+        db.close();
+        db = QSqlDatabase();
+    }
+    QSqlDatabase::removeDatabase(connection);
+    store.clearError();
+
+    store.removeExcept({QStringLiteral("keep")});
+    QVERIFY2(!store.lastError().isEmpty(), "A failed prune must set the sticky error");
+    QVERIFY2(store.lastError().contains(QStringLiteral("second delete blocked")), qPrintable(store.lastError()));
+
+    const QHash<QString, FsrsState> states = store.states();
+    QCOMPARE(states.size(), 3);
+    QVERIFY(states.contains(QStringLiteral("keep")));
+    QVERIFY(states.contains(QStringLiteral("stale-a")));
+    QVERIFY(states.contains(QStringLiteral("stale-b")));
+}
+
 void TestStore::migratesLegacyReviewsSchema() {
     QTemporaryDir dir;
     const QString path = dir.filePath("legacy.db");
@@ -412,6 +458,35 @@ void TestStore::summaryUsesStudyDayForReviewDates() {
     QCOMPARE(summary.studyDayRatings, 1);
     QCOMPARE(summary.studyDayGood, 1);
     QCOMPARE(summary.streak, 2);
+}
+
+void TestStore::summaryKeepsThreeStudyDaysWithNonDefaultStart() {
+    QTemporaryDir dir;
+    Store store(dir.filePath("state.db"));
+    QString error;
+    QVERIFY(store.open(&error));
+
+    const int dayStart = 4;
+    const QDate today = Config::studyDay(QDateTime::currentMSecsSinceEpoch(), dayStart);
+    const auto atOnDay = [&today](int offset) {
+        return QDateTime(today.addDays(offset), QTime(12, 0)).toMSecsSinceEpoch();
+    };
+    const FsrsState state = Fsrs::review(Fsrs::initial(), 3, atOnDay(0)).state;
+
+    store.recordRating(QStringLiteral("today-good"), 3, atOnDay(0), state, 1, true);
+    store.recordRating(QStringLiteral("today-again"), 1, atOnDay(0) + 1000, state, 1);
+    store.recordRating(QStringLiteral("today-easy"), 4, atOnDay(0) + 2000, state, 1);
+    store.recordRating(QStringLiteral("yesterday-good"), 3, atOnDay(-1), state, 1, true);
+    store.recordRating(QStringLiteral("older-again"), 1, atOnDay(-2), state, 1);
+    QVERIFY(store.lastError().isEmpty());
+
+    const ReviewSummary summary = store.summary(dayStart);
+    QVERIFY(store.lastError().isEmpty());
+    QCOMPARE(summary.total, 5);
+    QCOMPARE(summary.studyDayRatings, 3);
+    QCOMPARE(summary.studyDayGood, 1);
+    QCOMPARE(summary.streak, 3);
+    QCOMPARE(summary.newCardsOnStudyDay, 1);
 }
 
 void TestStore::settingFallbackAndUpsert() {

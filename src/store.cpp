@@ -69,7 +69,6 @@ bool Store::open(QString *error) {
         "id INTEGER PRIMARY KEY AUTOINCREMENT, card_id TEXT NOT NULL, rating INTEGER NOT NULL, "
         "at INTEGER NOT NULL, stability REAL NOT NULL, difficulty REAL NOT NULL, "
         "interval INTEGER NOT NULL, new_card INTEGER NOT NULL DEFAULT 0)",
-        "CREATE INDEX IF NOT EXISTS reviews_card ON reviews(card_id)",
         "CREATE TABLE IF NOT EXISTS settings ("
         "key TEXT PRIMARY KEY, value TEXT NOT NULL)",
     };
@@ -97,12 +96,30 @@ bool Store::open(QString *error) {
     // Older databases predate the new_card column. Keep them readable instead
     // of dropping the review history.
     bool hasNewCard = false;
+    bool hasAt = false;
     if (query.exec("PRAGMA table_info(reviews)")) {
-        while (query.next())
-            if (query.value(1).toString() == "new_card")
+        while (query.next()) {
+            const QString column = query.value(1).toString();
+            if (column == "new_card")
                 hasNewCard = true;
+            else if (column == "at")
+                hasAt = true;
+        }
     }
     if (!hasNewCard && !query.exec("ALTER TABLE reviews ADD COLUMN new_card INTEGER NOT NULL DEFAULT 0")) {
+        m_lastError = query.lastError().text();
+        if (error)
+            *error = m_lastError;
+        return false;
+    }
+
+    // No production query filters reviews by card id. The new-card count
+    // filters new_card and at, so that pair gets the covering index. Skip the
+    // index for a damaged reviews table; opening it must stay as forgiving as
+    // the legacy migration above.
+    if (hasNewCard && hasAt &&
+        (!query.exec("DROP INDEX IF EXISTS reviews_card") ||
+         !query.exec("CREATE INDEX IF NOT EXISTS reviews_new_card_at ON reviews(new_card, at)"))) {
         m_lastError = query.lastError().text();
         if (error)
             *error = m_lastError;
@@ -275,25 +292,33 @@ bool Store::finishRatingWrite() {
 void Store::removeExcept(const QSet<QString> &ids) {
     if (!m_db.isOpen())
         return;
+    if (!m_db.transaction()) {
+        m_lastError = m_db.lastError().text();
+        return;
+    }
+
+    // One statement for the whole prune: a failure cannot leave part of the
+    // stale set deleted. Empty sets still prune every sidecar row.
+    const QStringList kept = ids.values();
+    QString sql = QStringLiteral("DELETE FROM cards");
+    if (!kept.isEmpty())
+        sql += QStringLiteral(" WHERE id NOT IN (%1)")
+                   .arg(QStringList(kept.size(), QStringLiteral("?")).join(QStringLiteral(",")));
     QSqlQuery query(m_db);
-    if (!query.exec("SELECT id FROM cards")) {
+    bool ok = query.prepare(sql);
+    if (ok) {
+        for (int i = 0; i < kept.size(); ++i)
+            query.bindValue(i, kept.at(i));
+        ok = query.exec();
+    }
+    if (!ok) {
         m_lastError = query.lastError().text();
+        m_db.rollback();
         return;
     }
-    QStringList stale;
-    while (query.next()) {
-        const QString id = query.value(0).toString();
-        if (!ids.contains(id))
-            stale << id;
-    }
-    if (!query.prepare("DELETE FROM cards WHERE id = ?")) {
-        m_lastError = query.lastError().text();
-        return;
-    }
-    for (const QString &id : stale) {
-        query.bindValue(0, id);
-        if (!query.exec())
-            m_lastError = query.lastError().text();
+    if (!m_db.commit()) {
+        m_lastError = m_db.lastError().text();
+        m_db.rollback();
     }
 }
 
@@ -302,7 +327,9 @@ ReviewSummary Store::summary(int dayStartHour) const {
     if (!m_db.isOpen())
         return result;
     QSqlQuery query(m_db);
-    if (!query.exec("SELECT at, rating FROM reviews ORDER BY at")) {
+    // Only the per-day QSet and counters need these rows; their order is
+    // never observed, so avoid SQLite's sort entirely.
+    if (!query.exec("SELECT at, rating FROM reviews")) {
         m_lastError = query.lastError().text();
         return result;
     }
