@@ -962,6 +962,49 @@ oops: not a key
     QCOMPARE(code, 1);
 }
 
+void TestCli::checkMalformedContinuationFails() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    EnvGuard env(decks, database);
+
+    // One leading space makes load() reject the line, so the Deck disappears
+    // from decks --json. check must call that out as an Error, not a Warning.
+    const QString path = QDir(decks).filePath("Hidden.txt");
+    QVERIFY(writeFile(path, R"deck(# Deck: Hidden
+---
+Q: First line
+ second line
+A: answer
+)deck"));
+
+    int code = -1;
+    const QJsonObject result = runCli({"check", "--json"}, decks, database, &code);
+    QVERIFY(!result.value(QStringLiteral("ok")).toBool());
+    const QJsonObject counts = result.value(QStringLiteral("issueCounts")).toObject();
+    QCOMPARE(counts.value(QStringLiteral("error")).toInt(), 1);
+    QCOMPARE(counts.value(QStringLiteral("warning")).toInt(), 0);
+
+    const QJsonArray issues = result.value(QStringLiteral("issues")).toArray();
+    QCOMPARE(issues.size(), 1);
+    const QJsonObject issue = issues.first().toObject();
+    QCOMPARE(issue.value(QStringLiteral("path")).toString(), path);
+    QCOMPARE(issue.value(QStringLiteral("line")).toInt(), 4);
+    QCOMPARE(issue.value(QStringLiteral("severity")).toString(), QStringLiteral("error"));
+    QCOMPARE(issue.value(QStringLiteral("message")).toString(),
+             QStringLiteral("Continuation line has one leading space"));
+
+    const QJsonObject strict = runCli({"check", "--strict", "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QVERIFY(!strict.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(strict.value(QStringLiteral("strictPassed")), QJsonValue(false));
+
+    const QJsonObject listed = runCli({"decks", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(listed.value(QStringLiteral("decks")).toArray().size(), 0);
+}
+
 void TestCli::checkDuplicateQuestionLinesStayPinned() {
     QTemporaryDir dir;
     const QString decks = dir.filePath("decks");

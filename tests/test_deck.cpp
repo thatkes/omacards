@@ -414,6 +414,43 @@ void TestDeck::deckLintFileMatchesDirectoryLint() {
     QCOMPARE(directory.first().hint, single.first().hint);
 }
 
+void TestDeck::deckLintFlagsMalformedContinuationAsError() {
+    QTemporaryDir dir;
+    const QString path = dir.filePath("Hidden.txt");
+    // One leading space is not a continuation, so load() rejects the line and
+    // loadAll() drops the whole Deck. Lint has to treat that as an Error.
+    QVERIFY(writeFile(path, "# Deck: Hidden\n"
+                            "---\n"
+                            "Q: First line\n"
+                            " second line\n"
+                            "A: answer\n"));
+
+    const QVector<DeckIssue> issues = DeckIO::lintFile(path);
+    QCOMPARE(issues.size(), 1);
+    QCOMPARE(issues.first().path, path);
+    QCOMPARE(issues.first().line, 4);
+    QCOMPARE(issues.first().severity, QStringLiteral("error"));
+    QCOMPARE(issues.first().message, QStringLiteral("Continuation line has one leading space"));
+    QCOMPARE(issues.first().hint, QStringLiteral("Start multiline Q: or A: with exactly two spaces."));
+
+    const QVector<DeckIssue> directory = DeckIO::lint(dir.path());
+    QCOMPARE(directory.size(), issues.size());
+    QCOMPARE(directory.first().severity, issues.first().severity);
+    QCOMPARE(directory.first().message, issues.first().message);
+
+    QString error;
+    QVERIFY(DeckIO::loadAll(dir.path(), &error).isEmpty());
+    QVERIFY(error.contains(QStringLiteral("Unexpected line")));
+
+    // A one-space comment is still a comment to load(), so it stays clean.
+    const QString commented = dir.filePath("Commented.txt");
+    QVERIFY(writeFile(commented, "# Deck: Commented\n---\nQ: First\n # note\nA: ok\n"));
+    QVERIFY2(DeckIO::lintFile(commented).isEmpty(), "one-space comment must stay lint-clean");
+    QString commentError;
+    QVERIFY(!DeckIO::load(commented, &commentError).cards.isEmpty());
+    QVERIFY2(commentError.isEmpty(), qPrintable(commentError));
+}
+
 void TestDeck::deckClozeEdgeCases() {
     Card card;
     card.type = Domain::parseCardType("cloze");

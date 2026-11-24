@@ -19,5 +19,6 @@ private slots:
     void deckSaveRoundTripsAndRejectsEmptyPath();
     void deckLintReportsDeckIssues();
     void deckLintFileMatchesDirectoryLint();
+    void deckLintFlagsMalformedContinuationAsError();
     void deckClozeEdgeCases();
 };
