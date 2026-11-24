@@ -525,7 +525,10 @@ void TestBackend::backendReportsNewCountAndDeckSummaries() {
     QVERIFY(backend.createCard("Beta", "B0", "b", "basic", {}, &error));
 
     QCOMPARE(backend.totalCards(), 5);
-    QCOMPARE(backend.newCount(), 5);
+    // Each Deck starts with the configured allowance; the Current Deck is Beta.
+    QCOMPARE(backend.newCount(), 1);
+    backend.selectDeck("Alpha");
+    QCOMPARE(backend.newCount(), 4);
 
     const QVariantList summaries = backend.deckSummaries();
     QCOMPARE(summaries.size(), 2);
@@ -533,12 +536,15 @@ void TestBackend::backendReportsNewCountAndDeckSummaries() {
     QCOMPARE(summaries.at(0).toMap().value("cards").toInt(), 4);
     QCOMPARE(summaries.at(0).toMap().value("new").toInt(), 4);
     QCOMPARE(summaries.at(1).toMap().value("name").toString(), QString("Beta"));
+    QCOMPARE(summaries.at(1).toMap().value("new").toInt(), 1);
 
     backend.setNewCardAllowance(3);
     QCOMPARE(backend.newCount(), 3);
     const QVariantList capped = backend.deckSummaries();
     QCOMPARE(capped.at(0).toMap().value("new").toInt(), 3);
-    QCOMPARE(capped.at(1).toMap().value("new").toInt(), 0);
+    QCOMPARE(capped.at(1).toMap().value("new").toInt(), 1);
+    backend.selectDeck("Beta");
+    QCOMPARE(backend.newCount(), 1);
 }
 
 void TestBackend::qmlCanNavigateLibraryCards() {
@@ -680,6 +686,25 @@ QVariantMap deckSelectorCancelState(const MainWindowHarness &view, const QString
 
 QPoint centerInWindow(QQuickWindow *window, QQuickItem *item) {
     return window->contentItem()->mapFromScene(item->mapToScene(item->boundingRect().center())).toPoint();
+}
+
+QString homeStatValue(const MainWindowHarness &view, const QString &label) {
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    if (!window)
+        return QString();
+    QList<QQuickItem *> pending{window->contentItem()};
+    while (!pending.isEmpty()) {
+        QQuickItem *item = pending.takeLast();
+        if (item->property("label").toString() == label)
+            return item->property("value").toString();
+        pending.append(item->childItems());
+    }
+    return QString();
+}
+
+QString reviewButtonLabel(const StudyViewFixture &fixture) {
+    QQuickItem *button = fixture.item(QStringLiteral("studyReviewButton"));
+    return button ? button->property("label").toString() : QString();
 }
 
 } // namespace
@@ -2157,6 +2182,183 @@ void TestBackend::backendAppliesNewCardLimit() {
     QCOMPARE(reopened.desiredRetention(), 0.85);
 }
 
+void TestBackend::perDeckAllowanceSpendsOnlyRatedDeck() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Alpha", &error));
+    for (int i = 0; i < 3; ++i)
+        QVERIFY(backend.createCard("Alpha", QString("A%1").arg(i), "a", "basic", {}, &error));
+    QVERIFY(backend.createDeck("Beta", &error));
+    for (int i = 0; i < 3; ++i)
+        QVERIFY(backend.createCard("Beta", QString("B%1").arg(i), "b", "basic", {}, &error));
+
+    backend.setNewCardAllowance(2);
+    backend.selectDeck("Alpha");
+    backend.setMode("review");
+    QVERIFY(backend.hasCard());
+    backend.reveal();
+    backend.rate(3);
+    backend.selectDeck("Beta");
+    QVERIFY(backend.hasCard());
+    backend.reveal();
+    backend.rate(3);
+    backend.selectDeck("Beta");
+
+    // Each Deck spent one of its own two cards; the current Deck drives Home.
+    QCOMPARE(backend.newCardsOnStudyDay("Alpha"), 1);
+    QCOMPARE(backend.newCardsOnStudyDay("Beta"), 1);
+    QCOMPARE(backend.newCardsOnStudyDay(), 1);
+    QCOMPARE(backend.newRemaining("Alpha"), 1);
+    QCOMPARE(backend.newRemaining("Beta"), 1);
+    QCOMPARE(backend.reviewSummary().newCardsOnStudyDay, 2);
+    QCOMPARE(backend.newCount(), 1);
+
+    const QVariantList summaries = backend.deckSummaries();
+    QCOMPARE(summaries.at(0).toMap().value("new").toInt(), 1);
+    QCOMPARE(summaries.at(1).toMap().value("new").toInt(), 1);
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    QCOMPARE(homeStatValue(view, QStringLiteral("New left today")), QStringLiteral("1"));
+}
+
+void TestBackend::qmlReviewActionAddsSessionOnlyNewCards() {
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    for (int i = 1; i <= 7; ++i)
+        QVERIFY(fixture.createCard(QString("Q%1").arg(i), "A", "basic", {}));
+    fixture.selectDeck();
+    fixture.backend.setNewCardAllowance(1);
+    fixture.view->settleFileWatcher();
+    QVERIFY(fixture.loadWindow());
+    auto *window = fixture.window();
+    QVERIFY(window);
+    QVERIFY(fixture.enterStudy(QStringLiteral("review")));
+    QVERIFY(fixture.backend.question().contains(QStringLiteral("Q1")));
+
+    QTest::keyClick(window, Qt::Key_Space);
+    fixture.settle();
+    QTest::keyClick(window, Qt::Key_2);
+    fixture.settle();
+    QVERIFY(!fixture.backend.hasCard());
+    QCOMPARE(reviewButtonLabel(fixture), QStringLiteral("Add 5"));
+
+    const QVariantMap statsBefore = fixture.backend.statsSummary();
+    const int ratingsBefore = fixture.backend.reviewSummary().total;
+    const int newUsedBefore = fixture.backend.newCardsOnStudyDay(QStringLiteral("Study"));
+    const int dueBefore = fixture.backend.dueCount();
+
+    QQuickItem *reviewButton = fixture.item(QStringLiteral("studyReviewButton"));
+    QVERIFY(reviewButton);
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centerInWindow(window, reviewButton));
+    fixture.settle();
+
+    // The first eligible New card is shown without leaving Study, and moving
+    // cards into the queue is not a rating, a due card or a daily-count write.
+    QVERIFY(fixture.backend.hasCard());
+    QVERIFY(fixture.backend.question().contains(QStringLiteral("Q2")));
+    QCOMPARE(fixture.backend.reviewSummary().total, ratingsBefore);
+    QCOMPARE(fixture.backend.newCardsOnStudyDay(QStringLiteral("Study")), newUsedBefore);
+    QCOMPARE(fixture.backend.newCount(), 0);
+    QCOMPARE(fixture.backend.dueCount(), dueBefore);
+    QCOMPARE(fixture.backend.reviewed(), statsBefore.value(QStringLiteral("sessionReviewed")).toInt());
+    QCOMPARE(fixture.backend.statsSummary().value(QStringLiteral("studyDayRatings")).toInt(),
+             statsBefore.value(QStringLiteral("studyDayRatings")).toInt());
+
+    // A fresh Backend sees only the one rating and no Scheduling debt.
+    {
+        Backend reopened(fixture.dir.path(), fixture.dir.filePath("state.db"));
+        QString error;
+        QVERIFY(reopened.initialize(&error));
+        QCOMPARE(reopened.reviewSummary().total, ratingsBefore);
+        QCOMPARE(reopened.newCardsOnStudyDay(QStringLiteral("Study")), newUsedBefore);
+        QCOMPARE(reopened.availableCount(QStringLiteral("Study")), 0);
+        QVariantMap queuedCard;
+        for (const QVariant &entry : reopened.cardList()) {
+            const QVariantMap map = entry.toMap();
+            if (map.value(QStringLiteral("question")).toString() == QStringLiteral("Q2"))
+                queuedCard = map;
+        }
+        QVERIFY(queuedCard.value(QStringLiteral("new")).toBool());
+        QCOMPARE(queuedCard.value(QStringLiteral("reps")).toInt(), 0);
+        QCOMPARE(queuedCard.value(QStringLiteral("dueText")).toString(), QStringLiteral("new"));
+    }
+
+    // A press adds at most five: Q2..Q6 exhaust the first batch, and the next
+    // empty-queue press is the only way to reach Q7.
+    for (int i = 2; i <= 6; ++i) {
+        QVERIFY(fixture.backend.question().contains(QString("Q%1").arg(i)));
+        QTest::keyClick(window, Qt::Key_Space);
+        fixture.settle();
+        QTest::keyClick(window, Qt::Key_2);
+        fixture.settle();
+    }
+    QVERIFY(!fixture.backend.hasCard());
+    QCOMPARE(reviewButtonLabel(fixture), QStringLiteral("Add 5"));
+    QTest::keyClick(window, Qt::Key_R);
+    fixture.settle();
+    QVERIFY(fixture.backend.question().contains(QStringLiteral("Q7")));
+
+    QTest::keyClick(window, Qt::Key_Space);
+    fixture.settle();
+    QTest::keyClick(window, Qt::Key_2);
+    fixture.settle();
+    QVERIFY(!fixture.backend.hasCard());
+    QCOMPARE(reviewButtonLabel(fixture), QStringLiteral("Review"));
+    QTest::keyClick(window, Qt::Key_R);
+    fixture.settle();
+    QVERIFY(!fixture.backend.hasCard());
+}
+
+void TestBackend::qmlReviewActionPresentsPendingRepeatFirst() {
+    ScopedEnv delay("OMACARDS_AGAIN_DELAY_MS", "2000");
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    for (int i = 1; i <= 3; ++i)
+        QVERIFY(fixture.createCard(QString("Q%1").arg(i), "A", "basic", {}));
+    fixture.selectDeck();
+    fixture.backend.setNewCardAllowance(1);
+    fixture.view->settleFileWatcher();
+    QVERIFY(fixture.loadWindow());
+    auto *window = fixture.window();
+    QVERIFY(window);
+    QVERIFY(fixture.enterStudy(QStringLiteral("review")));
+    QVERIFY(fixture.backend.question().contains(QStringLiteral("Q1")));
+
+    QTest::keyClick(window, Qt::Key_Space);
+    fixture.settle();
+    QTest::keyClick(window, Qt::Key_1);
+    fixture.settle();
+    QVERIFY(!fixture.backend.hasCard());
+    QVERIFY(fixture.backend.waitingForRepeat());
+    // The visible queue is empty even though a repeat is earning its delay.
+    QCOMPARE(reviewButtonLabel(fixture), QStringLiteral("Add 5"));
+    const int reviewedBefore = fixture.backend.reviewed();
+
+    QTest::keyClick(window, Qt::Key_R);
+    fixture.settle();
+    QVERIFY(fixture.backend.question().contains(QStringLiteral("Q1")));
+    QVERIFY(!fixture.backend.waitingForRepeat());
+    QCOMPARE(fixture.backend.reviewed(), reviewedBefore);
+
+    QTest::keyClick(window, Qt::Key_Space);
+    fixture.settle();
+    QTest::keyClick(window, Qt::Key_2);
+    fixture.settle();
+    QVERIFY(!fixture.backend.hasCard());
+    QCOMPARE(reviewButtonLabel(fixture), QStringLiteral("Add 5"));
+    QTest::keyClick(window, Qt::Key_R);
+    fixture.settle();
+    QVERIFY(fixture.backend.question().contains(QStringLiteral("Q2")));
+}
+
 void TestBackend::backendKeepsPendingRepeatInSameSession() {
     QTemporaryDir dir;
     ScopedEnv delay("OMACARDS_AGAIN_DELAY_MS", "20");
@@ -2296,11 +2498,11 @@ void TestBackend::deckCountsMatchLibrarySummaries() {
     backend.selectDeck("Second");
     const QVariantList summaries = backend.deckSummaries();
     QCOMPARE(summaries.at(0).toMap().value("new").toInt(), 2);
-    QCOMPARE(summaries.at(1).toMap().value("new").toInt(), 1);
-    QCOMPARE(backend.deckNew(), 1);
-    QCOMPARE(backend.deckDue(), 1);
-    QCOMPARE(backend.newCount(), 3);
-    QCOMPARE(backend.availableCount(), 3);
+    QCOMPARE(summaries.at(1).toMap().value("new").toInt(), 2);
+    QCOMPARE(backend.deckNew(), 2);
+    QCOMPARE(backend.deckDue(), 2);
+    QCOMPARE(backend.newCount(), 2);
+    QCOMPARE(backend.availableCount(), 4); // two New cards left in each Deck
 }
 
 void TestBackend::deckCreationRejectsSanitizedPathCollision() {

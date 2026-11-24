@@ -18,7 +18,7 @@ RatingRecording::Result RatingRecording::record(const Card &card, Rating rating,
     if (!m_store.beginRatingWrite())
         return Result{false, state, 0, m_store.lastError(), FailurePhase::StoreWrite};
     m_store.save(card.id, hash, reviewed.state);
-    m_store.recordRating(card.id, Domain::toInt(rating), now, reviewed.state, reviewed.intervalDays, wasNew);
+    m_store.recordRating(card.id, Domain::toInt(rating), now, reviewed.state, reviewed.intervalDays, wasNew, card.deck);
     if (!m_store.finishRatingWrite() || !m_store.lastError().isEmpty())
         return Result{false, state, 0, m_store.lastError(), FailurePhase::StoreWrite};
 
@@ -40,8 +40,8 @@ void StoreRatingAdapter::save(const QString &cardId, const QString &hash, const 
 }
 
 void StoreRatingAdapter::recordRating(const QString &cardId, int rating, qint64 at, const FsrsState &state,
-                                      int intervalDays, bool wasNew) {
-    m_store.recordRating(cardId, rating, at, state, intervalDays, wasNew);
+                                      int intervalDays, bool wasNew, const QString &deckId) {
+    m_store.recordRating(cardId, rating, at, state, intervalDays, wasNew, deckId);
 }
 
 bool StoreRatingAdapter::beginRatingWrite() {

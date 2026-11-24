@@ -67,14 +67,18 @@ void TestStore::storeCountsNewCardsToday() {
     QVERIFY(store.open(&error));
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const FsrsState state = Fsrs::review(Fsrs::initial(), 3, now).state;
-    store.recordRating("new-1", 3, now, state, 1, true);
-    store.recordRating("new-1", 3, now, state, 1, true); // same card twice
-    store.recordRating("old-1", 3, now, state, 1, false);
+    store.recordRating("new-1", 3, now, state, 1, true, QStringLiteral("Alpha"));
+    store.recordRating("new-1", 3, now, state, 1, true, QStringLiteral("Alpha")); // same card twice
+    store.recordRating("old-1", 3, now, state, 1, false, QStringLiteral("Alpha"));
     QCOMPARE(store.newCardsOnStudyDay(), 1);
     QCOMPARE(store.summary().newCardsOnStudyDay, 1);
+    QCOMPARE(store.newCardsOnStudyDay(0, QStringLiteral("Alpha")), 1);
+    QCOMPARE(store.newCardsOnStudyDay(0, QStringLiteral("Beta")), 0);
 
-    store.recordRating("new-2", 1, now, state, 1, true);
+    store.recordRating("new-2", 1, now, state, 1, true, QStringLiteral("Beta"));
     QCOMPARE(store.newCardsOnStudyDay(), 2);
+    QCOMPARE(store.newCardsOnStudyDay(0, QStringLiteral("Alpha")), 1);
+    QCOMPARE(store.newCardsOnStudyDay(0, QStringLiteral("Beta")), 1);
 }
 
 void TestStore::storeUsesConfiguredDayStart() {
@@ -89,12 +93,15 @@ void TestStore::storeUsesConfiguredDayStart() {
     // whichever side of the 3 AM boundary the clock is currently on.
     const qint64 probe = start3 > start0 ? start0 + 60000 : start0 - 60000;
     const FsrsState state = Fsrs::review(Fsrs::initial(), 3, probe).state;
-    store.recordRating("edge", 3, probe, state, 1, true);
+    store.recordRating("edge", 3, probe, state, 1, true, QStringLiteral("Edge"));
     const int midnight = store.newCardsOnStudyDay(0);
     const int atThree = store.newCardsOnStudyDay(3);
     QCOMPARE(midnight + atThree, 1);
     QCOMPARE(store.summary(0).newCardsOnStudyDay, midnight);
     QCOMPARE(store.summary(3).newCardsOnStudyDay, atThree);
+    QCOMPARE(store.newCardsOnStudyDay(0, QStringLiteral("Edge")), midnight);
+    QCOMPARE(store.newCardsOnStudyDay(3, QStringLiteral("Edge")), atThree);
+    QCOMPARE(store.newCardsOnStudyDay(0, QStringLiteral("Other")), 0);
 }
 
 void TestStore::openInvalidPathSetsError() {
@@ -363,10 +370,18 @@ void TestStore::migratesLegacyReviewsSchema() {
             QSqlQuery query(db);
             QVERIFY(query.exec(QStringLiteral("PRAGMA table_info(reviews)")));
             bool hasNewCard = false;
-            while (query.next())
+            bool hasDeckId = false;
+            while (query.next()) {
                 if (query.value(1).toString() == QStringLiteral("new_card"))
                     hasNewCard = true;
+                if (query.value(1).toString() == QStringLiteral("deck_id"))
+                    hasDeckId = true;
+            }
             QVERIFY(hasNewCard);
+            QVERIFY(hasDeckId);
+            QVERIFY(query.exec(QStringLiteral("SELECT deck_id FROM reviews")));
+            QVERIFY(query.next());
+            QCOMPARE(query.value(0).toString(), QString());
         }
         db.close();
         db = QSqlDatabase();
@@ -513,6 +528,11 @@ void TestStore::renameMovesCurrentAndLastStudiedSettings() {
     QVERIFY(store.setDeckLastStudied(QStringLiteral("Old"), 200));
     QVERIFY(store.setDeckLastStudied(QStringLiteral("Later"), 300));
 
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const FsrsState state = Fsrs::review(Fsrs::initial(), 3, now).state;
+    store.recordRating(QStringLiteral("old-card"), 3, now, state, 1, true, QStringLiteral("Old"));
+    store.recordRating(QStringLiteral("other-card"), 3, now, state, 1, true, QStringLiteral("Earlier"));
+
     QVERIFY(store.moveDeckSettings(QStringLiteral("Old"), QStringLiteral("New")));
 
     QCOMPARE(store.currentDeck(), QStringLiteral("New"));
@@ -523,6 +543,10 @@ void TestStore::renameMovesCurrentAndLastStudiedSettings() {
     QCOMPARE(studied.value(QStringLiteral("New")), qint64(200));
     QCOMPARE(studied.value(QStringLiteral("Earlier")), qint64(100));
     QCOMPARE(studied.value(QStringLiteral("Later")), qint64(300));
+    // The Study-day usage follows the renamed Deck, as its settings do.
+    QCOMPARE(store.newCardsOnStudyDay(0, QStringLiteral("New")), 1);
+    QCOMPARE(store.newCardsOnStudyDay(0, QStringLiteral("Old")), 0);
+    QCOMPARE(store.newCardsOnStudyDay(0, QStringLiteral("Earlier")), 1);
 }
 
 void TestStore::migratesLegacyNewCardAllowanceKey() {

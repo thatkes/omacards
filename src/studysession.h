@@ -9,6 +9,7 @@
 #include "studyplanner.h"
 
 #include <QObject>
+#include <QSet>
 #include <QString>
 #include <QTimer>
 
@@ -48,6 +49,10 @@ public:
     void reveal();
     bool rate(Rating rating, double desiredRetention);
     void showNext();
+    bool canAddAdditionalNew() const;
+    // One session-only Review action: with no ready card it either presents a
+    // waiting Pending repeat or adds up to count Additional New cards.
+    bool reviewWhenEmpty(int count);
 
     StudyMode mode() const { return m_mode; }
     QString question() const { return m_question; }
@@ -86,6 +91,7 @@ private:
     void presentCard(bool notifyStats = true);
     void answerCram(Rating rating);
     void answerReview(Rating rating, double desiredRetention);
+    bool addAdditionalNew(int count);
     void refreshDueCount();
     void queueMathPrefetch();
 
@@ -108,6 +114,7 @@ private:
     QString m_status;
     QString m_currentId;
     QString m_deckName;
+    QSet<QString> m_sessionRatedIds;
     bool m_showingAnswer = false;
     bool m_waitingForRepeat = false;
 };

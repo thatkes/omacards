@@ -20,7 +20,7 @@ public:
         virtual SchedulingRecord schedulingRecord(const QString &cardId) const = 0;
         virtual void save(const QString &cardId, const QString &hash, const FsrsState &state) = 0;
         virtual void recordRating(const QString &cardId, int rating, qint64 at, const FsrsState &state,
-                                  int intervalDays, bool wasNew) = 0;
+                                  int intervalDays, bool wasNew, const QString &deckId = {}) = 0;
         virtual bool beginRatingWrite() = 0;
         virtual bool finishRatingWrite() = 0;
         virtual QString lastError() const = 0;
@@ -53,7 +53,7 @@ public:
     SchedulingRecord schedulingRecord(const QString &cardId) const override;
     void save(const QString &cardId, const QString &hash, const FsrsState &state) override;
     void recordRating(const QString &cardId, int rating, qint64 at, const FsrsState &state, int intervalDays,
-                      bool wasNew) override;
+                      bool wasNew, const QString &deckId = {}) override;
     bool beginRatingWrite() override;
     bool finishRatingWrite() override;
     QString lastError() const override;

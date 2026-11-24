@@ -35,6 +35,7 @@ void StudySession::setMode(const QString &mode) {
     // notification so subscribers never see a half-switched session.
     m_repeatTimer.stop();
     m_progression.clear();
+    m_sessionRatedIds.clear();
     m_reviewed = 0;
     m_good = 0;
     emit modeChanged();
@@ -79,6 +80,7 @@ void StudySession::startFresh(const QString &deckName) {
     // previous sitting's Pending repeats, Leitner boxes and live counters.
     m_repeatTimer.stop();
     m_progression.clear();
+    m_sessionRatedIds.clear();
     m_reviewed = 0;
     m_good = 0;
     rebuild(deckName);
@@ -148,11 +150,69 @@ void StudySession::showNext() {
         reveal();
 }
 
+bool StudySession::canAddAdditionalNew() const {
+    if (m_mode != StudyMode::Review)
+        return false;
+    const Deck *deck = m_decks.deckByName(m_deckName);
+    if (!deck)
+        return false;
+    for (const Card &card : deck->cards) {
+        if (card.id == m_currentId || m_progression.contains(card.id) || m_sessionRatedIds.contains(card.id))
+            continue;
+        if (m_planner.stateFor(card).reps == 0)
+            return true;
+    }
+    return false;
+}
+
+bool StudySession::reviewWhenEmpty(int count) {
+    if (m_mode != StudyMode::Review || hasCard())
+        return false;
+    // Small Pending-repeat seam: presentation already owns the deadline and
+    // the waiting state. #182 can remove this branch without touching Add 5.
+    if (m_waitingForRepeat) {
+        m_progression.presentPendingNow(QDateTime::currentMSecsSinceEpoch());
+        presentCard(false);
+        return true;
+    }
+    return addAdditionalNew(count);
+}
+
+bool StudySession::addAdditionalNew(int count) {
+    if (count <= 0 || m_mode != StudyMode::Review)
+        return false;
+    const Deck *deck = m_decks.deckByName(m_deckName);
+    if (!deck)
+        return false;
+
+    QStringList added;
+    for (const Card &card : deck->cards) {
+        if (added.size() >= count)
+            break;
+        if (card.id == m_currentId || m_progression.contains(card.id) || m_sessionRatedIds.contains(card.id))
+            continue;
+        // A changed card whose current content has never been rated is New
+        // again under the glossary definition, so stateFor() is the test.
+        if (m_planner.stateFor(card).reps == 0)
+            added << card.id;
+    }
+    if (added.isEmpty())
+        return false;
+
+    // No Store write: these cards are queue content for this sitting only.
+    m_progression.appendReview(added);
+    presentCard(false);
+    return true;
+}
+
 bool StudySession::rate(Rating rating, double desiredRetention) {
     // Backend parses the int boundary; keep the sentinel guard so a direct
     // caller cannot push an ungraded review into the scheduler.
     if (rating == Rating::Invalid || !hasCard())
         return false;
+    // Queue content is session-only, but a rated card must never come back
+    // through Add 5 even if its stored content has changed since the rating.
+    m_sessionRatedIds.insert(m_currentId);
     ++m_reviewed;
     if (rating == Rating::Good)
         ++m_good;

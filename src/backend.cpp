@@ -47,6 +47,13 @@ Backend::Backend(const QString &decksDirectory, const QString &databasePath, Cra
     connect(&m_session, &StudySession::modeChanged, this, &Backend::modeChanged);
     connect(&m_session, &StudySession::cardChanged, this, &Backend::cardChanged);
     connect(&m_session, &StudySession::dueCountChanged, this, &Backend::dueCountChanged);
+    // The Review button's label depends on both the live queue and the
+    // planner's deck-scoped allowance; either can change without a mode switch.
+    connect(&m_session, &StudySession::cardChanged, this, &Backend::reviewActionChanged);
+    connect(&m_session, &StudySession::dueCountChanged, this, &Backend::reviewActionChanged);
+    connect(&m_session, &StudySession::statusChanged, this, &Backend::reviewActionChanged);
+    connect(this, &Backend::decksChanged, this, &Backend::reviewActionChanged);
+    connect(this, &Backend::settingsChanged, this, &Backend::reviewActionChanged);
     // Direct connections run in connection order, so subscribers to the
     // forwarded signal see box counts refreshed from the settled session.
     connect(&m_session, &StudySession::statsChanged, this, &Backend::refreshBoxDistributionCache);
@@ -86,6 +93,27 @@ bool Backend::initialize(QString *error) {
     m_deckRepo.watchDirectory();
     refresh();
     return true;
+}
+
+int Backend::newCardsOnStudyDay(const QString &deckName) const {
+    const QString scope = deckName.isEmpty() ? m_currentDeck : deckName;
+    return m_store.newCardsOnStudyDay(m_dayStartHour, scope);
+}
+
+int Backend::newRemaining(const QString &deckName) const {
+    return qMax(0, m_newCardAllowance - newCardsOnStudyDay(deckName));
+}
+
+QString Backend::reviewButtonLabel() const {
+    return canAddNew() ? tr("Add 5") : tr("Review");
+}
+
+void Backend::reviewWhenEmpty(int count) {
+    // The action is only meaningful in a live Review sitting with no ready
+    // card. QML keeps the normal start-study path for every other case.
+    if (m_mode != StudyMode::Review || m_session.hasCard())
+        return;
+    m_session.reviewWhenEmpty(count);
 }
 
 void Backend::refresh() {

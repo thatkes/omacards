@@ -35,7 +35,7 @@ public:
                 combined.insert(it.key(), SchedulingRecord{it.value(), allHashes.value(it.key())});
             return combined;
         }
-        virtual int newCardsOnStudyDay(int dayStartHour) const = 0;
+        virtual int newCardsOnStudyDay(int dayStartHour, const QString &deckId = {}) const = 0;
         virtual QString lastError() const = 0;
     };
 
@@ -62,7 +62,7 @@ public:
     Availability availability(const QString &deckName = {}) const;
     int countDue(const QString &deckName = {}) const;
     int availableCount(const QString &deckName = {}) const;
-    int newCount() const;
+    int newCount(const QString &deckName = {}) const;
     int deckDue(int deckIndex) const;
     int deckNew(int deckIndex) const;
     QVector<Card> dueCards(const QString &deckName = {}) const;
@@ -81,7 +81,7 @@ public:
         int sessionGood;
         double desiredRetention;
     };
-    QVariantMap statsSummary(const StatsSummaryInputs &inputs) const;
+    QVariantMap statsSummary(const StatsSummaryInputs &inputs, const QString &deckName = {}) const;
 
 private:
     struct StudySnapshot {
@@ -91,7 +91,9 @@ private:
         // edited Card with the same id still fails the stale-hash guard.
         QHash<QString, Card> hashedCards;
         QSet<QString> validIds;
-        int newBudget = 0;
+        // One allowance per Deck name. A future per-Deck setting only has to
+        // replace the value each entry is seeded with.
+        QHash<QString, int> newBudgetByDeck;
         qint64 now = 0;
     };
 
@@ -123,7 +125,7 @@ public:
     QHash<QString, FsrsState> states() const override;
     QHash<QString, QString> hashes() const override;
     QHash<QString, SchedulingRecord> schedulingRecords() const override;
-    int newCardsOnStudyDay(int dayStartHour) const override;
+    int newCardsOnStudyDay(int dayStartHour, const QString &deckId = {}) const override;
     QString lastError() const override;
 
 private:

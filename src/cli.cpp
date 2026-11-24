@@ -821,6 +821,11 @@ int run(const QStringList &arguments) {
         return path;
     };
 
+    // Daily New numbers follow --deck, or the Current Deck when it is absent.
+    // The JSON keys stay frozen; only the values become Deck-scoped. Read them
+    // where used: `config` can change the allowance and day-start hour first.
+    const auto dailyDeck = [&]() { return options.deck.isEmpty() ? backend.currentDeck() : options.deck; };
+
     if (options.command == "check") {
         const QString targetPath =
             options.deck.isEmpty() ? QString() : resolveDeckPath(decks, backend.decksDirectory(), options.deck);
@@ -888,7 +893,7 @@ int run(const QStringList &arguments) {
         object.insert("cards", total);
         object.insert("due", due);
         object.insert("totalDue", backend.countDue(options.deck));
-        object.insert("newCardsOnStudyDay", backend.reviewSummary().newCardsOnStudyDay);
+        object.insert("newCardsOnStudyDay", backend.newCardsOnStudyDay(dailyDeck()));
         object.insert("newCardAllowance", backend.newCardAllowance());
         object.insert("retention", backend.desiredRetention());
         object.insert("dayStartHour", backend.dayStartHour());
@@ -944,19 +949,18 @@ int run(const QStringList &arguments) {
         if (!settingError.isEmpty())
             return fail(settingError, json);
 
-        const ReviewSummary summary = backend.reviewSummary();
         QJsonObject object;
         object.insert("ok", true);
         object.insert("newCardAllowance", backend.newCardAllowance());
         object.insert("retention", backend.desiredRetention());
         object.insert("dayStartHour", backend.dayStartHour());
-        object.insert("newCardsOnStudyDay", summary.newCardsOnStudyDay);
-        object.insert("newRemaining", qMax(0, backend.newCardAllowance() - summary.newCardsOnStudyDay));
+        object.insert("newCardsOnStudyDay", backend.newCardsOnStudyDay(dailyDeck()));
+        object.insert("newRemaining", backend.newRemaining(dailyDeck()));
         write(object, json,
               QObject::tr("New-card allowance: %1 · new cards on Study day: %2 · desired retention: %3% · "
                           "day-start hour: %4")
                   .arg(backend.newCardAllowance())
-                  .arg(summary.newCardsOnStudyDay)
+                  .arg(backend.newCardsOnStudyDay(dailyDeck()))
                   .arg(qRound(backend.desiredRetention() * 100))
                   .arg(QStringLiteral("%1:00").arg(backend.dayStartHour(), 2, 10, QLatin1Char('0'))));
         return 0;
@@ -970,7 +974,7 @@ int run(const QStringList &arguments) {
         object.insert("studyDayRatings", summary.studyDayRatings);
         object.insert("studyDayGood", summary.studyDayGood);
         object.insert("streak", summary.streak);
-        object.insert("newCardsOnStudyDay", summary.newCardsOnStudyDay);
+        object.insert("newCardsOnStudyDay", backend.newCardsOnStudyDay(dailyDeck()));
         object.insert("newCardAllowance", backend.newCardAllowance());
         object.insert("due", backend.availableCount());
         object.insert("totalDue", backend.countDue());

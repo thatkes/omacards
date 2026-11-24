@@ -68,7 +68,8 @@ bool Store::open(QString *error) {
         "CREATE TABLE IF NOT EXISTS reviews ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT, card_id TEXT NOT NULL, rating INTEGER NOT NULL, "
         "at INTEGER NOT NULL, stability REAL NOT NULL, difficulty REAL NOT NULL, "
-        "interval INTEGER NOT NULL, new_card INTEGER NOT NULL DEFAULT 0)",
+        "interval INTEGER NOT NULL, new_card INTEGER NOT NULL DEFAULT 0, "
+        "deck_id TEXT NOT NULL DEFAULT '')",
         "CREATE TABLE IF NOT EXISTS settings ("
         "key TEXT PRIMARY KEY, value TEXT NOT NULL)",
     };
@@ -97,6 +98,7 @@ bool Store::open(QString *error) {
     // of dropping the review history.
     bool hasNewCard = false;
     bool hasAt = false;
+    bool hasDeckId = false;
     if (query.exec("PRAGMA table_info(reviews)")) {
         while (query.next()) {
             const QString column = query.value(1).toString();
@@ -104,6 +106,8 @@ bool Store::open(QString *error) {
                 hasNewCard = true;
             else if (column == "at")
                 hasAt = true;
+            else if (column == "deck_id")
+                hasDeckId = true;
         }
     }
     if (!hasNewCard && !query.exec("ALTER TABLE reviews ADD COLUMN new_card INTEGER NOT NULL DEFAULT 0")) {
@@ -112,14 +116,24 @@ bool Store::open(QString *error) {
             *error = m_lastError;
         return false;
     }
+    hasNewCard = true;
+    // Older reviews predate Deck-scoped counts. Their blank Deck id is read as
+    // "all Decks" by the unscoped summary; no history is lost on migration.
+    if (!hasDeckId && !query.exec("ALTER TABLE reviews ADD COLUMN deck_id TEXT NOT NULL DEFAULT ''")) {
+        m_lastError = query.lastError().text();
+        if (error)
+            *error = m_lastError;
+        return false;
+    }
+    hasDeckId = true;
 
     // No production query filters reviews by card id. The new-card count
-    // filters new_card and at, so that pair gets the covering index. Skip the
-    // index for a damaged reviews table; opening it must stay as forgiving as
-    // the legacy migration above.
-    if (hasNewCard && hasAt &&
+    // filters new_card, at and (for a Deck) deck_id, so that trio gets the
+    // covering index. Skip the index for a damaged reviews table; opening it
+    // must stay as forgiving as the legacy migrations above.
+    if (hasNewCard && hasAt && hasDeckId &&
         (!query.exec("DROP INDEX IF EXISTS reviews_card") ||
-         !query.exec("CREATE INDEX IF NOT EXISTS reviews_new_card_at ON reviews(new_card, at)"))) {
+         !query.exec("CREATE INDEX IF NOT EXISTS reviews_new_card_at_deck ON reviews(new_card, at, deck_id)"))) {
         m_lastError = query.lastError().text();
         if (error)
             *error = m_lastError;
@@ -243,12 +257,12 @@ void Store::save(const QString &cardId, const QString &hash, const FsrsState &st
 }
 
 void Store::recordRating(const QString &cardId, int rating, qint64 at, const FsrsState &state, int intervalDays,
-                         bool wasNew) {
+                         bool wasNew, const QString &deckId) {
     if (!m_db.isOpen())
         return;
     QSqlQuery query(m_db);
-    query.prepare("INSERT INTO reviews (card_id, rating, at, stability, difficulty, interval, new_card) "
-                  "VALUES (:id, :rating, :at, :stability, :difficulty, :interval, :new_card)");
+    query.prepare("INSERT INTO reviews (card_id, rating, at, stability, difficulty, interval, new_card, deck_id) "
+                  "VALUES (:id, :rating, :at, :stability, :difficulty, :interval, :new_card, :deck_id)");
     query.bindValue(":id", cardId);
     query.bindValue(":rating", rating);
     query.bindValue(":at", at);
@@ -256,6 +270,8 @@ void Store::recordRating(const QString &cardId, int rating, qint64 at, const Fsr
     query.bindValue(":difficulty", state.difficulty);
     query.bindValue(":interval", intervalDays);
     query.bindValue(":new_card", wasNew ? 1 : 0);
+    // A default-constructed QString binds as SQL NULL; the column is NOT NULL.
+    query.bindValue(":deck_id", deckId.isNull() ? QStringLiteral("") : deckId);
     if (!query.exec())
         m_lastError = query.lastError().text();
 }
@@ -361,23 +377,28 @@ ReviewSummary Store::summary(int dayStartHour) const {
     return result;
 }
 
-int Store::newCardsOnStudyDay(int dayStartHour) const {
-    const int count = countNewCardsOnStudyDay(dayStartHour);
+int Store::newCardsOnStudyDay(int dayStartHour, const QString &deckId) const {
+    const int count = countNewCardsOnStudyDay(dayStartHour, deckId);
     if (m_lastError.isEmpty() && !m_db.isOpen())
         m_lastError = QStringLiteral("State database is not open");
     return count;
 }
 
-int Store::countNewCardsOnStudyDay(int dayStartHour) const {
+int Store::countNewCardsOnStudyDay(int dayStartHour, const QString &deckId) const {
     if (!m_db.isOpen())
         return 0;
     QSqlQuery query(m_db);
-    if (!query.prepare("SELECT COUNT(DISTINCT card_id) FROM reviews "
-                       "WHERE new_card = 1 AND at >= :start")) {
+    QString sql = QStringLiteral("SELECT COUNT(DISTINCT card_id) FROM reviews "
+                                 "WHERE new_card = 1 AND at >= :start");
+    if (!deckId.isEmpty())
+        sql += QStringLiteral(" AND deck_id = :deck");
+    if (!query.prepare(sql)) {
         m_lastError = query.lastError().text();
         return 0;
     }
     query.bindValue(":start", Config::studyDayStartMs(QDateTime::currentMSecsSinceEpoch(), dayStartHour));
+    if (!deckId.isEmpty())
+        query.bindValue(":deck", deckId);
     if (!query.exec() || !query.next()) {
         m_lastError = query.lastError().text();
         return 0;
@@ -450,6 +471,21 @@ bool Store::setDeckLastStudied(const QString &name, qint64 at) {
 bool Store::moveDeckSettings(const QString &from, const QString &to) {
     if (from == to)
         return true;
+
+    // Study-day usage is recomputed from review history, so the Deck id on
+    // those rows has to follow the same rename as the settings below.
+    QSqlQuery reviews(m_db);
+    if (!reviews.prepare(QStringLiteral("UPDATE reviews SET deck_id = :to WHERE deck_id = :from"))) {
+        m_lastError = reviews.lastError().text();
+        return false;
+    }
+    reviews.bindValue(":to", to);
+    reviews.bindValue(":from", from);
+    if (!reviews.exec()) {
+        m_lastError = reviews.lastError().text();
+        return false;
+    }
+
     if (currentDeck() == from && !setCurrentDeck(to))
         return false;
 

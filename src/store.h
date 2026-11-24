@@ -37,7 +37,7 @@ public:
     SchedulingRecord schedulingRecord(const QString &cardId) const;
     void save(const QString &cardId, const QString &hash, const FsrsState &state);
     void recordRating(const QString &cardId, int rating, qint64 at, const FsrsState &state, int intervalDays,
-                      bool wasNew = false);
+                      bool wasNew = false, const QString &deckId = {});
 
     // Rating recording's two writes share one transaction. The raw first
     // error stays in lastError(); finishRatingWrite() rolls back on any error.
@@ -46,7 +46,8 @@ public:
 
     void removeExcept(const QSet<QString> &ids);
     ReviewSummary summary(int dayStartHour = 0) const;
-    int newCardsOnStudyDay(int dayStartHour = 0) const;
+    // An empty deck id means every Deck, which keeps summary() unchanged.
+    int newCardsOnStudyDay(int dayStartHour = 0, const QString &deckId = {}) const;
 
     QString setting(const QString &key, const QString &fallback = {}) const;
     bool setSetting(const QString &key, const QString &value);
@@ -68,7 +69,7 @@ public:
     void clearError() { m_lastError.clear(); }
 
 private:
-    int countNewCardsOnStudyDay(int dayStartHour = 0) const;
+    int countNewCardsOnStudyDay(int dayStartHour = 0, const QString &deckId = {}) const;
     bool removeSetting(const QString &key);
 
     QString m_path;

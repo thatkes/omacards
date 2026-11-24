@@ -42,6 +42,7 @@ struct RecordedRating {
     FsrsState state;
     int intervalDays = 0;
     bool wasNew = false;
+    QString deckId;
 };
 
 // Stub at the rating recording Store seam. A failing read or write is visible
@@ -67,10 +68,10 @@ public:
     }
 
     void recordRating(const QString &cardId, int rating, qint64 at, const FsrsState &state, int intervalDays,
-                      bool wasNew) override {
+                      bool wasNew, const QString &deckId = {}) override {
         ++m_logCount;
         m_lastRating = rating;
-        m_reviews.append({cardId, rating, at, state, intervalDays, wasNew});
+        m_reviews.append({cardId, rating, at, state, intervalDays, wasNew, deckId});
         if (!m_writeError.isEmpty())
             m_error = m_writeError;
     }
@@ -151,7 +152,7 @@ public:
         return {};
     }
     QHash<QString, QString> hashes() const override { return {}; }
-    int newCardsOnStudyDay(int) const override { return 0; }
+    int newCardsOnStudyDay(int, const QString & = {}) const override { return 0; }
     QString lastError() const override { return m_error; }
 
     void failReads(const QString &error) { m_readError = error; }
