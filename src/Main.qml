@@ -5,7 +5,7 @@ import QtQuick.Layouts
 
 // Main.qml map. Names, not line numbers, so this stays true after edits.
 // keyHandler - one Keys.onPressed for every screen
-// deck picker - shared trigger and Candidate deck popup on Home and Study
+// deck selector - shared trigger and Candidate deck popup on Home and Study
 // study - study Panel with the Flashcard viewport, edge fades, end hint and reveal MouseArea
 // library - deckList and cardView ListViews
 // settings - ScrollView
@@ -57,9 +57,9 @@ ApplicationWindow {
 
     function closeDeckPicker() {
         if (homePicker && homePicker.open)
-            homePicker.cancel()
+            homePicker.close()
         if (studyPicker && studyPicker.open)
-            studyPicker.cancel()
+            studyPicker.close()
     }
 
     function startStudy(mode) {
@@ -316,10 +316,10 @@ ApplicationWindow {
         }
     }
 
-    // Candidate deck picker. The trigger and rows are app-styled Rectangles;
+    // Candidate deck selector. The trigger and rows are app-styled Rectangles;
     // opening never switches decks, and keys outside the state machine are
     // swallowed so no screen shortcut fires behind the popup.
-    component DeckPicker: Rectangle {
+    component DeckSelector: Rectangle {
         id: picker
         property string triggerObjectName: ""
         property string summaryObjectName: ""
@@ -368,7 +368,7 @@ ApplicationWindow {
                 deckList.positionViewAtIndex(at, ListView.Contain)
         }
 
-        function cancel() {
+        function close() {
             picker.open = false
             picker.candidateName = backend.currentDeck
             listPopup.close()
@@ -389,9 +389,7 @@ ApplicationWindow {
                 return
             if (name !== backend.currentDeck)
                 backend.selectDeck(name)
-            picker.candidateName = backend.currentDeck
-            picker.open = false
-            listPopup.close()
+            win.closeDeckPicker()
             keyHandler.forceActiveFocus()
         }
 
@@ -408,7 +406,7 @@ ApplicationWindow {
                 picker.commit(picker.candidateName)
                 break
             case Qt.Key_Escape:
-                picker.cancel()
+                win.closeDeckPicker()
                 break
             }
             event.accepted = true
@@ -489,10 +487,7 @@ ApplicationWindow {
                 border.color: win.border
             }
 
-            onClosed: {
-                picker.open = false
-                picker.candidateName = backend.currentDeck
-            }
+            onClosed: win.closeDeckPicker()
 
             ListView {
                 id: deckList
@@ -515,11 +510,6 @@ ApplicationWindow {
                 delegate: Rectangle {
                     id: deckRow
                     objectName: picker.popupObjectName + "Row" + index
-                    property string deckName: modelData.name
-                    property string nameObjectName: picker.popupObjectName + "RowName" + index
-                    property string fullName: modelData.name
-                    property string tooltipText: nameLabel.ToolTip.text
-                    property bool tooltipVisible: nameLabel.ToolTip.visible
                     property bool candidate: modelData.name === picker.candidateName
                     property bool current: modelData.name === backend.currentDeck
                     width: deckList.width
@@ -541,7 +531,6 @@ ApplicationWindow {
 
                             Label {
                                 id: nameLabel
-                                objectName: deckRow.nameObjectName
                                 Layout.fillWidth: true
                                 text: modelData.name
                                 color: deckRow.candidate ? win.accentInk : win.text
@@ -686,12 +675,7 @@ ApplicationWindow {
         anchors.fill: parent
         enabled: (homePicker && homePicker.open) || (studyPicker && studyPicker.open)
         z: 1
-        onClicked: {
-            if (homePicker && homePicker.open)
-                homePicker.cancel()
-            if (studyPicker && studyPicker.open)
-                studyPicker.cancel()
-        }
+        onClicked: win.closeDeckPicker()
     }
 
     Item {
@@ -714,7 +698,7 @@ ApplicationWindow {
             LayoutMirroring.childrenInherit: true
 
             Keys.onPressed: function(event) {
-                // An open Candidate picker owns every key, before any Study
+                // An open Candidate selector owns every key, before any Study
                 // scroll, rating, shortcut or dialog branch can see it.
                 if (studyPicker && studyPicker.open) {
                     studyPicker.handleKey(event)
@@ -1030,7 +1014,7 @@ ApplicationWindow {
                                     font.pixelSize: 13
                                 }
 
-                                DeckPicker {
+                                DeckSelector {
                                     id: homePicker
                                     triggerObjectName: "homeDeckSelector"
                                     summaryObjectName: "homeDeckLabel"
@@ -1096,7 +1080,7 @@ ApplicationWindow {
 
                                 ColumnLayout {
                                     spacing: 2
-                                    DeckPicker {
+                                    DeckSelector {
                                         id: studyPicker
                                         triggerObjectName: "studyDeckSelector"
                                         summaryObjectName: "studyDeckLabel"
