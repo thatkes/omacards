@@ -19,9 +19,9 @@ private slots:
     void qmlCanNavigateLibraryCards();
     void qmlDeckSelectorShowsCurrentDeckAndCounts();
     void qmlDeckCycleKeysWrapAndAreScoped();
-    void qmlDeckPickerClickCommitsAndLongNamesElide();
+    void qmlDeckPickerClickCommitsAndLongNamesElideViaVisibleRow();
     void qmlHelpOverlayNamesDeckSelector();
-    void qmlStudySelectorSwitchesDeckFresh();
+    void qmlStudySelectorSwitchesDeckFreshViaVisibleRow();
     void qmlStudyFlashcardViewportClipsAndSizes();
     void qmlStudyScrollFirstKeysAndRevealFallbacks();
     void qmlStudyJKScrollOnlyWithoutOverflow();
