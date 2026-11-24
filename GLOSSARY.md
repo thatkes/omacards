@@ -34,6 +34,10 @@ _Avoid_: deck source, deck text file
 The optional prose stored in a Deck file's `# Description:` line and shown with the Deck.
 _Avoid_: deck metadata, description text
 
+**Deck id**:
+The canonical name that identifies a Deck wherever one is requested. A Deck file's filename may differ from it.
+_Avoid_: deck name, deck path, deck filename
+
 **Card**:
 A single study item with a question and an answer.
 _Avoid_: note, item
