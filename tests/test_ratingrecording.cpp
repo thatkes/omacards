@@ -17,68 +17,12 @@ namespace {
 constexpr qint64 kNow = 1700000000000LL;
 constexpr qint64 kDayMs = 86400000LL;
 
-struct RecordedRating {
-    QString cardId;
-    int rating = 0;
-    qint64 at = 0;
-    FsrsState state;
-    int intervalDays = 0;
-    bool wasNew = false;
-};
-
-class StubStore : public RatingRecording::StoreAdapter {
-public:
-    void clearError() override { m_error.clear(); }
-    QHash<QString, FsrsState> states() const override {
-        if (!m_readError.isEmpty())
-            m_error = m_readError;
-        return m_states;
-    }
-    QHash<QString, QString> hashes() const override { return m_hashes; }
-
-    void save(const QString &cardId, const QString &hash, const FsrsState &state) override {
-        if (!m_writeError.isEmpty()) {
-            m_error = m_writeError;
-            return;
-        }
-        m_states.insert(cardId, state);
-        m_hashes.insert(cardId, hash);
-    }
-
-    void recordRating(const QString &cardId, int rating, qint64 at, const FsrsState &state, int intervalDays,
-                      bool wasNew) override {
-        m_reviews.append({cardId, rating, at, state, intervalDays, wasNew});
-        if (!m_writeError.isEmpty())
-            m_error = m_writeError;
-    }
-
-    QString lastError() const override { return m_error; }
-
-    void seed(const Card &card, const QString &hash, const FsrsState &state) {
-        m_states.insert(card.id, state);
-        m_hashes.insert(card.id, hash);
-    }
-
-    void failWrites(const QString &error) { m_writeError = error; }
-    void failReads(const QString &error) { m_readError = error; }
-
-    FsrsState savedState(const QString &cardId) const { return m_states.value(cardId); }
-    QVector<RecordedRating> reviews() const { return m_reviews; }
-
-private:
-    QHash<QString, FsrsState> m_states;
-    QHash<QString, QString> m_hashes;
-    QVector<RecordedRating> m_reviews;
-    QString m_writeError;
-    QString m_readError;
-    mutable QString m_error;
-};
-
-void verifyState(const FsrsState &state, double stability, double difficulty, qint64 due, int reps, int lapses) {
+void verifyState(const FsrsState &state, double stability, double difficulty, qint64 due, int reps, int lapses,
+                 qint64 lastReview = kNow) {
     QVERIFY(qAbs(state.stability - stability) < 1e-9);
     QVERIFY(qAbs(state.difficulty - difficulty) < 1e-9);
     QCOMPARE(state.due, due);
-    QCOMPARE(state.lastReview, kNow);
+    QCOMPARE(state.lastReview, lastReview);
     QCOMPARE(state.reps, reps);
     QCOMPARE(state.lapses, lapses);
 }
@@ -87,7 +31,7 @@ void verifyState(const FsrsState &state, double stability, double difficulty, qi
 
 void TestRatingRecording::goodNewCardRecordsStateAndReturnsIntervalAndDue() {
     const Card card = makeCard(QStringLiteral("good"), QStringLiteral("Q?"), QStringLiteral("A"));
-    StubStore store;
+    RatingStoreStub store;
     RatingRecording recording(store);
 
     const RatingRecording::Result result = recording.record(card, Rating::Good, 0.9, kNow);
@@ -116,7 +60,7 @@ void TestRatingRecording::againUsesStoredSchedulingState() {
     starting.reps = 2;
     starting.lapses = 1;
 
-    StubStore store;
+    RatingStoreStub store;
     store.seed(card, DeckIO::contentHash(card), starting);
     RatingRecording recording(store);
 
@@ -148,7 +92,7 @@ void TestRatingRecording::contentHashMismatchStartsFromEmptySchedulingState() {
     stale.reps = 4;
     stale.lapses = 2;
 
-    StubStore store;
+    RatingStoreStub store;
     store.seed(card, QStringLiteral("old-hash"), stale);
     RatingRecording recording(store);
 
@@ -173,7 +117,7 @@ void TestRatingRecording::reviewHistoryRecordsWhetherCardWasNew() {
     starting.reps = 2;
     starting.lapses = 0;
 
-    StubStore store;
+    RatingStoreStub store;
     store.seed(existing, DeckIO::contentHash(existing), starting);
     RatingRecording recording(store);
 
@@ -198,7 +142,7 @@ void TestRatingRecording::storeWriteFailureReturnsRawErrorAndKeepsStartingState(
     starting.reps = 3;
     starting.lapses = 1;
 
-    StubStore store;
+    RatingStoreStub store;
     store.seed(card, DeckIO::contentHash(card), starting);
     store.failWrites(QStringLiteral("disk full"));
     RatingRecording recording(store);
@@ -224,7 +168,7 @@ void TestRatingRecording::storeWriteFailureReturnsRawErrorAndKeepsStartingState(
 
 void TestRatingRecording::storeReadFailureReturnsRawErrorAndReadPhase() {
     const Card card = makeCard(QStringLiteral("read-fail"), QStringLiteral("Read?"), QStringLiteral("A"));
-    StubStore store;
+    RatingStoreStub store;
     store.failReads(QStringLiteral("no such column: stability"));
     RatingRecording recording(store);
 
@@ -234,4 +178,91 @@ void TestRatingRecording::storeReadFailureReturnsRawErrorAndReadPhase() {
     QCOMPARE(result.failurePhase, RatingRecording::FailurePhase::SchedulingRead);
     QCOMPARE(result.storeError, QStringLiteral("no such column: stability"));
     QVERIFY(store.reviews().isEmpty());
+}
+
+void TestRatingRecording::recordUsesOneCardSchedulingLookup() {
+    const Card card = makeCard(QStringLiteral("lookup"), QStringLiteral("Lookup?"), QStringLiteral("A"));
+    const Card other = makeCard(QStringLiteral("bystander"), QStringLiteral("Other?"), QStringLiteral("A"));
+    FsrsState seeded;
+    seeded.stability = 4.0;
+    seeded.difficulty = 5.0;
+    seeded.lastReview = kNow - 2 * kDayMs;
+    seeded.due = kNow - kDayMs;
+    seeded.reps = 2;
+    seeded.lapses = 1;
+
+    RatingStoreStub store;
+    store.seed(card, DeckIO::contentHash(card), seeded);
+    store.seed(other, QStringLiteral("other-hash"), FsrsState{});
+    RatingRecording recording(store);
+
+    const RatingRecording::Result result = recording.record(card, Rating::Good, 0.9, kNow);
+
+    QVERIFY(result.ok);
+    QCOMPARE(store.lookupCount(), 1);
+    QCOMPARE(result.state.reps, 3);
+    QCOMPARE(result.state.lapses, 1);
+    verifyState(store.savedState(card.id), result.state.stability, result.state.difficulty, result.state.due, 3, 1);
+    QCOMPARE(store.savedHash(card.id), DeckIO::contentHash(card));
+    verifyState(store.savedState(other.id), 0.0, 0.0, 0, 0, 0, 0);
+}
+
+void TestRatingRecording::bothWritesShareOneCommittedTransaction() {
+    const Card card = makeCard(QStringLiteral("batch"), QStringLiteral("Batch?"), QStringLiteral("A"));
+    RatingStoreStub store;
+    RatingRecording recording(store);
+
+    const RatingRecording::Result result = recording.record(card, Rating::Good, 0.9, kNow);
+
+    QVERIFY(result.ok);
+    QCOMPARE(store.beginCount(), 1);
+    QCOMPARE(store.finishCount(), 1);
+    QCOMPARE(store.commitCount(), 1);
+    QCOMPARE(store.savedState(card.id).reps, 1);
+    QCOMPARE(store.reviews().size(), 1);
+}
+
+void TestRatingRecording::failedWriteRollsBackBothWritesInOneTransaction() {
+    const Card card = makeCard(QStringLiteral("rollback"), QStringLiteral("Rollback?"), QStringLiteral("A"));
+    FsrsState seeded;
+    seeded.stability = 5.0;
+    seeded.difficulty = 6.0;
+    seeded.lastReview = kNow - kDayMs;
+    seeded.due = kNow;
+    seeded.reps = 4;
+    seeded.lapses = 2;
+
+    RatingStoreStub store;
+    store.seed(card, DeckIO::contentHash(card), seeded);
+    store.failWrites(QStringLiteral("write boom"));
+    RatingRecording recording(store);
+
+    const RatingRecording::Result result = recording.record(card, Rating::Good, 0.9, kNow);
+
+    QVERIFY(!result.ok);
+    QCOMPARE(result.failurePhase, RatingRecording::FailurePhase::StoreWrite);
+    QCOMPARE(result.storeError, QStringLiteral("write boom"));
+    QCOMPARE(store.beginCount(), 1);
+    QCOMPARE(store.finishCount(), 1);
+    QCOMPARE(store.commitCount(), 0);
+    QVERIFY(store.reviews().isEmpty());
+    verifyState(store.savedState(card.id), 5.0, 6.0, kNow, 4, 2, kNow - kDayMs);
+    QCOMPARE(store.savedHash(card.id), DeckIO::contentHash(card));
+}
+
+void TestRatingRecording::failedTransactionStartWritesNothing() {
+    const Card card = makeCard(QStringLiteral("no-begin"), QStringLiteral("No begin?"), QStringLiteral("A"));
+    RatingStoreStub store;
+    store.failWritesToBegin(QStringLiteral("begin boom"));
+    RatingRecording recording(store);
+
+    const RatingRecording::Result result = recording.record(card, Rating::Good, 0.9, kNow);
+
+    QVERIFY(!result.ok);
+    QCOMPARE(result.failurePhase, RatingRecording::FailurePhase::StoreWrite);
+    QCOMPARE(result.storeError, QStringLiteral("begin boom"));
+    QCOMPARE(store.beginCount(), 1);
+    QCOMPARE(store.finishCount(), 0);
+    QVERIFY(store.reviews().isEmpty());
+    verifyState(store.savedState(card.id), 0.0, 0.0, 0, 0, 0, 0);
 }

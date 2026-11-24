@@ -12,4 +12,8 @@ private slots:
     void reviewHistoryRecordsWhetherCardWasNew();
     void storeWriteFailureReturnsRawErrorAndKeepsStartingState();
     void storeReadFailureReturnsRawErrorAndReadPhase();
+    void recordUsesOneCardSchedulingLookup();
+    void bothWritesShareOneCommittedTransaction();
+    void failedWriteRollsBackBothWritesInOneTransaction();
+    void failedTransactionStartWritesNothing();
 };

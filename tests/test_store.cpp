@@ -485,3 +485,75 @@ void TestStore::migratesLegacyNewCardAllowanceKey() {
     QCOMPARE(reopened.setting(QStringLiteral("new_card_allowance"), QStringLiteral("-1")), QStringLiteral("7"));
     QCOMPARE(reopened.setting(QStringLiteral("new_per_day"), QStringLiteral("-1")), QStringLiteral("12"));
 }
+
+void TestStore::schedulingRecordFindsOnlyOneCard() {
+    QTemporaryDir dir;
+    Store store(dir.filePath("state.db"));
+    QString error;
+    QVERIFY(store.open(&error));
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    FsrsState first = Fsrs::review(Fsrs::initial(), 3, now).state;
+    first.reps = 2;
+    first.lapses = 1;
+    const FsrsState second = Fsrs::review(Fsrs::initial(), 1, now).state;
+    store.save(QStringLiteral("one"), QStringLiteral("hash-one"), first);
+    store.save(QStringLiteral("two"), QStringLiteral("hash-two"), second);
+    store.clearError();
+
+    const SchedulingRecord found = store.schedulingRecord(QStringLiteral("one"));
+    QVERIFY(store.lastError().isEmpty());
+    QCOMPARE(found.hash, QStringLiteral("hash-one"));
+    QCOMPARE(found.state.reps, 2);
+    QCOMPARE(found.state.lapses, 1);
+    QCOMPARE(found.state.due, first.due);
+    QCOMPARE(found.state.stability, first.stability);
+    QCOMPARE(found.state.difficulty, first.difficulty);
+    QCOMPARE(found.state.lastReview, first.lastReview);
+
+    const SchedulingRecord missing = store.schedulingRecord(QStringLiteral("missing"));
+    QVERIFY(store.lastError().isEmpty());
+    QCOMPARE(missing.hash, QString());
+    QCOMPARE(missing.state.reps, 0);
+}
+
+void TestStore::ratingWriteRollsBackBothTablesOnFailure() {
+    QTemporaryDir dir;
+    const QString path = dir.filePath("state.db");
+    Store store(path);
+    QString error;
+    QVERIFY(store.open(&error));
+
+    // Schema drift through a second connection: the cards write succeeds but
+    // the history append cannot, so only a real rollback can undo the first.
+    const QString connection = QStringLiteral("omacards-store-rollback-setup");
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
+        db.setDatabaseName(path);
+        QVERIFY(db.open());
+        {
+            QSqlQuery query(db);
+            QVERIFY(query.exec(QStringLiteral("DROP TABLE reviews")));
+            QVERIFY(query.exec(QStringLiteral("CREATE TABLE reviews (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                                              "card_id TEXT NOT NULL, new_card INTEGER NOT NULL DEFAULT 0)")));
+        }
+        db.close();
+        db = QSqlDatabase();
+    }
+    QSqlDatabase::removeDatabase(connection);
+
+    const FsrsState state = Fsrs::initial();
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    QVERIFY(store.beginRatingWrite());
+    store.save(QStringLiteral("rolled-back"), QStringLiteral("hash"), state);
+    store.recordRating(QStringLiteral("rolled-back"), 3, now, state, 3, true);
+    QVERIFY(!store.finishRatingWrite());
+    // SQLite reports the schema drift as a parameter mismatch; the raw store
+    // error must survive the rollback unchanged.
+    QVERIFY2(!store.lastError().isEmpty(), qPrintable(store.lastError()));
+
+    store.clearError();
+    QVERIFY(store.states().isEmpty());
+    QVERIFY(store.hashes().isEmpty());
+    QVERIFY(store.lastError().isEmpty());
+}

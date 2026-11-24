@@ -24,4 +24,6 @@ private slots:
     void summaryUsesStudyDayForReviewDates();
     void settingFallbackAndUpsert();
     void renameMovesCurrentAndLastStudiedSettings();
+    void schedulingRecordFindsOnlyOneCard();
+    void ratingWriteRollsBackBothTablesOnFailure();
 };

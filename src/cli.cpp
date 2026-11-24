@@ -1315,10 +1315,9 @@ int run(const QStringList &arguments) {
         if (rating == Rating::Invalid)
             return fail(QObject::tr("Rating must be 1 (Again) or 3 (Good)"), json);
 
-        Store store(backend.databasePath());
-        if (!store.open(&error))
-            return fail(error, json);
-        StoreRatingAdapter storeAdapter(store);
+        // Backend::initialize() already opened this connection; a second Store
+        // on the same file would repeat the full scheduling read.
+        StoreRatingAdapter storeAdapter(backend.store());
         RatingRecording recording(storeAdapter);
         const RatingRecording::Result result =
             recording.record(*target, rating, backend.desiredRetention(), QDateTime::currentMSecsSinceEpoch());

@@ -94,6 +94,9 @@ public:
     int totalCards() const { return m_deckRepo.totalCards(); }
     QString decksDirectory() const { return m_deckRepo.decksDirectory(); }
     QString databasePath() const { return m_store.path(); }
+    // Headless commands share the already-open Store instead of opening a
+    // second connection to the same database file.
+    Store &store() { return m_store; }
     QString cardFilter() const { return m_cardFilter; }
     QString currentCardId() const { return m_session.currentCardId(); }
     bool canUndo() const { return m_history.canUndo(); }

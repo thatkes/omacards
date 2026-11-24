@@ -34,9 +34,16 @@ public:
     QHash<QString, FsrsState> states() const;
     QHash<QString, QString> hashes() const;
     QHash<QString, SchedulingRecord> schedulingRecords() const;
+    SchedulingRecord schedulingRecord(const QString &cardId) const;
     void save(const QString &cardId, const QString &hash, const FsrsState &state);
     void recordRating(const QString &cardId, int rating, qint64 at, const FsrsState &state, int intervalDays,
                       bool wasNew = false);
+
+    // Rating recording's two writes share one transaction. The raw first
+    // error stays in lastError(); finishRatingWrite() rolls back on any error.
+    bool beginRatingWrite();
+    bool finishRatingWrite();
+
     void removeExcept(const QSet<QString> &ids);
     ReviewSummary summary(int dayStartHour = 0) const;
     int newCardsOnStudyDay(int dayStartHour = 0) const;
@@ -69,5 +76,7 @@ private:
     QSqlDatabase m_db;
     mutable QSqlQuery m_schedulingQuery;
     mutable bool m_schedulingPrepared = false;
+    mutable QSqlQuery m_cardQuery;
+    mutable bool m_cardPrepared = false;
     mutable QString m_lastError;
 };

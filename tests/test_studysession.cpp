@@ -43,41 +43,8 @@ struct SessionFixture {
           planner(plannerStore), ratingStore(store), ratings(ratingStore), session(repo, planner, ratings) {}
 };
 
-// Counts what the session hands to Rating recording; scheduling semantics stay
-// in TestRatingRecording.
-class RecordingStoreStub : public RatingRecording::StoreAdapter {
-public:
-    void clearError() override { m_error.clear(); }
-    QHash<QString, FsrsState> states() const override {
-        if (!m_readError.isEmpty())
-            m_error = m_readError;
-        return {};
-    }
-    QHash<QString, QString> hashes() const override { return {}; }
-    void save(const QString &, const QString &, const FsrsState &) override {}
-    void recordRating(const QString &, int rating, qint64, const FsrsState &, int, bool) override {
-        ++m_logCount;
-        m_lastRating = rating;
-        if (!m_writeError.isEmpty())
-            m_error = m_writeError;
-    }
-    QString lastError() const override { return m_error; }
-
-    void failReads(const QString &error) { m_readError = error; }
-    void failWrites(const QString &error) { m_writeError = error; }
-    int logCount() const { return m_logCount; }
-    int lastRating() const { return m_lastRating; }
-
-private:
-    QString m_readError;
-    QString m_writeError;
-    mutable QString m_error;
-    int m_logCount = 0;
-    int m_lastRating = 0;
-};
-
-// The planner Store stub comes from #18; the recording stub stays local so
-// each side can fail independently at the StudySession rating seam.
+// The planner and rating Store stubs both come from test_support.h so each
+// side can fail independently at the StudySession rating seam.
 struct StubSessionFixture {
     QTemporaryDir dir;
     Store store;
@@ -85,7 +52,7 @@ struct StubSessionFixture {
     DeckRepository repo;
     TestSupport::PlannerStoreStub plannerStore;
     StudyPlanner planner;
-    RecordingStoreStub ratingStore;
+    RatingStoreStub ratingStore;
     RatingRecording ratings;
     StudySession session;
     QString current;
@@ -444,7 +411,7 @@ void TestStudySession::invalidRatingsAreNoOps() {
 
 void TestStudySession::reviewPassesTypedRatingToRecording() {
     SessionFixture fixture;
-    RecordingStoreStub stub;
+    RatingStoreStub stub;
     RatingRecording recording(stub);
     StudySession session(fixture.repo, fixture.planner, recording);
     QString error;
@@ -465,7 +432,7 @@ void TestStudySession::reviewPassesTypedRatingToRecording() {
 
 void TestStudySession::reviewFailuresKeepTranslatedText() {
     SessionFixture fixture;
-    RecordingStoreStub stub;
+    RatingStoreStub stub;
     RatingRecording recording(stub);
     StudySession session(fixture.repo, fixture.planner, recording);
     QString error;

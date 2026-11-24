@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QDir>
 #include <QFile>
+#include <QHash>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
@@ -14,8 +15,10 @@
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTextImageFormat>
+#include <QVector>
 
 #include "deck.h"
+#include "ratingrecording.h"
 #include "studyplanner.h"
 
 namespace TestSupport {
@@ -29,6 +32,111 @@ inline Card makeCard(const QString &id, const QString &question, const QString &
     card.deck = deckName;
     return card;
 }
+
+struct RecordedRating {
+    QString cardId;
+    int rating = 0;
+    qint64 at = 0;
+    FsrsState state;
+    int intervalDays = 0;
+    bool wasNew = false;
+};
+
+// Stub at the rating recording Store seam. A failing read or write is visible
+// only through lastError(), exactly as it is with the real Store. The stub also
+// counts lookups and transactions and unwinds both writes on rollback.
+class RatingStoreStub : public RatingRecording::StoreAdapter {
+public:
+    void clearError() override { m_error.clear(); }
+
+    SchedulingRecord schedulingRecord(const QString &cardId) const override {
+        ++m_lookups;
+        if (!m_readError.isEmpty())
+            m_error = m_readError;
+        return m_records.value(cardId);
+    }
+
+    void save(const QString &cardId, const QString &hash, const FsrsState &state) override {
+        if (!m_writeError.isEmpty()) {
+            m_error = m_writeError;
+            return;
+        }
+        m_records.insert(cardId, SchedulingRecord{state, hash});
+    }
+
+    void recordRating(const QString &cardId, int rating, qint64 at, const FsrsState &state, int intervalDays,
+                      bool wasNew) override {
+        ++m_logCount;
+        m_lastRating = rating;
+        m_reviews.append({cardId, rating, at, state, intervalDays, wasNew});
+        if (!m_writeError.isEmpty())
+            m_error = m_writeError;
+    }
+
+    bool beginRatingWrite() override {
+        ++m_beginCount;
+        if (!m_transactionError.isEmpty()) {
+            m_error = m_transactionError;
+            return false;
+        }
+        m_snapshot = m_records;
+        m_reviewCount = m_reviews.size();
+        return true;
+    }
+
+    bool finishRatingWrite() override {
+        ++m_finishCount;
+        if (!m_error.isEmpty() || !m_commitError.isEmpty()) {
+            m_records = m_snapshot;
+            m_reviews.resize(m_reviewCount);
+            if (m_error.isEmpty())
+                m_error = m_commitError;
+            return false;
+        }
+        ++m_commitCount;
+        return true;
+    }
+
+    QString lastError() const override { return m_error; }
+
+    void seed(const Card &card, const QString &hash, const FsrsState &state) {
+        m_records.insert(card.id, SchedulingRecord{state, hash});
+    }
+
+    void seed(const QString &cardId, const SchedulingRecord &record) { m_records.insert(cardId, record); }
+
+    void failReads(const QString &error) { m_readError = error; }
+    void failWrites(const QString &error) { m_writeError = error; }
+    void failWritesToBegin(const QString &error) { m_transactionError = error; }
+    void failWritesToCommit(const QString &error) { m_commitError = error; }
+
+    FsrsState savedState(const QString &cardId) const { return m_records.value(cardId).state; }
+    QString savedHash(const QString &cardId) const { return m_records.value(cardId).hash; }
+    QVector<RecordedRating> reviews() const { return m_reviews; }
+    int lookupCount() const { return m_lookups; }
+    int logCount() const { return m_logCount; }
+    int lastRating() const { return m_lastRating; }
+    int beginCount() const { return m_beginCount; }
+    int finishCount() const { return m_finishCount; }
+    int commitCount() const { return m_commitCount; }
+
+private:
+    QHash<QString, SchedulingRecord> m_records;
+    QHash<QString, SchedulingRecord> m_snapshot;
+    QVector<RecordedRating> m_reviews;
+    QString m_readError;
+    QString m_writeError;
+    QString m_transactionError;
+    QString m_commitError;
+    mutable QString m_error;
+    mutable int m_lookups = 0;
+    int m_logCount = 0;
+    int m_lastRating = 0;
+    int m_beginCount = 0;
+    int m_finishCount = 0;
+    int m_commitCount = 0;
+    int m_reviewCount = 0;
+};
 
 // Stub at the planner's Store seam: a failing read is visible only through
 // lastError(), exactly as it is with the real Store.
