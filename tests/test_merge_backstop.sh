@@ -104,6 +104,8 @@ expect_result success_merges_and_removes 0 'MERGED ticket-42' 'CONFLICT' \
 expect_line success_lint_ok 'OK lint build/merge-42-lint.log'
 expect_line success_build_ok 'OK build build/merge-42-build.log'
 expect_line success_test_ok 'OK test build/merge-42-test.log'
+expect_absent_line success_code_merge_has_no_docs_marker \
+    'DOCS_ONLY_TEST_DEFERRED'
 if [ ! -d "$wt" ]; then
     printf 'PASS success_worktree_removed\n'
 else
@@ -126,6 +128,48 @@ for check in lint build test; do
         failures=$((failures + 1))
     fi
 done
+
+# A docs-only diff still gets lint and build, but defers the compiled suite
+# and reports a marker the wave tooling can read.
+make_integration "$tmp/docs-only"
+wtd="$tmp/docs-only-wt"
+git -C "$tmp/docs-only" worktree add -q -b ticket-43 "$wtd"
+mkdir -p "$wtd/docs"
+printf 'Ticket doc.\n' > "$wtd/docs/guide.md"
+printf 'Ticket glossary.\n' > "$wtd/GLOSSARY.md"
+git -C "$wtd" add docs/guide.md GLOSSARY.md
+git -C "$wtd" commit -q -m 'ticket docs'
+expect_result docs_only_defers_suite 0 'DOCS_ONLY_TEST_DEFERRED ticket-43' \
+    'CONFLICT' sh -c "cd '$tmp' && '$tmp/docs-only/bin/merge-backstop' ticket-43"
+expect_line docs_only_lint_ok 'OK lint build/merge-43-lint.log'
+expect_line docs_only_build_ok 'OK build build/merge-43-build.log'
+expect_absent_line docs_only_skips_test 'OK test'
+if [ -f "$tmp/docs-only/build/merge-43-test.log" ]; then
+    printf 'FAIL docs_only_has_no_test_log\n'
+    failures=$((failures + 1))
+else
+    printf 'PASS docs_only_has_no_test_log\n'
+fi
+if [ ! -d "$wtd" ]; then
+    printf 'PASS docs_only_worktree_removed\n'
+else
+    printf 'FAIL docs_only_worktree_removed\n'
+    failures=$((failures + 1))
+fi
+
+# A markdown file outside the docs-only allowlist is a code diff: the full
+# backstop runs and no deferral marker is printed.
+make_integration "$tmp/nested-md"
+wtm="$tmp/nested-md-wt"
+git -C "$tmp/nested-md" worktree add -q -b ticket-44 "$wtm"
+mkdir -p "$wtm/guides"
+printf 'Ticket guide.\n' > "$wtm/guides/extra.md"
+git -C "$wtm" add guides/extra.md
+git -C "$wtm" commit -q -m 'ticket guide'
+expect_result nested_markdown_keeps_suite 0 'MERGED ticket-44' \
+    'DOCS_ONLY_TEST_DEFERRED' \
+    sh -c "cd '$tmp' && '$tmp/nested-md/bin/merge-backstop' ticket-44"
+expect_line nested_markdown_test_ok 'OK test build/merge-44-test.log'
 
 make_integration "$tmp/no-worktree"
 expect_result missing_worktree_fails 1 'no worktree on ticket-7' 'MERGED' \
