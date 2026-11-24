@@ -1564,6 +1564,14 @@ void TestCli::addCardJsonContracts() {
     QCOMPARE(code, 1);
     QCOMPARE(noQuestion.value(QStringLiteral("error")).toString(), QString("Use --question / -q"));
 
+    const QJsonObject noAnswer = runCli({"add-card", "--deck", "Fresh", "-q", "Q", "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QStringList noAnswerKeys{"error", "ok"};
+    noAnswerKeys.sort();
+    QCOMPARE(sortedKeys(noAnswer), noAnswerKeys);
+    QCOMPARE(noAnswer.value(QStringLiteral("error")).toString(), QString("Use --answer / -a"));
+    QVERIFY(!QFileInfo::exists(QDir(decks).filePath("Fresh.txt")));
+
     const QJsonObject added =
         runCli({"add-card", "--deck", "Fresh", "-q", "Q", "-a", "A", "--type", "cloze", "--tags", "x,y", "--json"},
                decks, database, &code);

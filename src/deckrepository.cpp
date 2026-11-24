@@ -430,14 +430,22 @@ bool DeckRepository::createCards(const QString &deckName, QString *currentDeck, 
     }
     for (int i = 0; i < drafts.size(); ++i) {
         const CardDraft &draft = drafts.at(i);
+        const CardType type = Domain::cardTypeFromString(draft.type);
         if (draft.question.trimmed().isEmpty()) {
             if (error)
                 *error = trBackend("cards[%1] needs a question").arg(i);
             return false;
         }
-        if (Domain::cardTypeFromString(draft.type) == CardType::Invalid) {
+        if (type == CardType::Invalid) {
             if (error)
                 *error = trBackend("cards[%1] has an invalid type: %2").arg(i).arg(draft.type);
+            return false;
+        }
+        // Cloze answers are derived from the question, so an empty answer is
+        // valid there; basic Cards need one to be reviewable.
+        if (draft.answer.trimmed().isEmpty() && type != CardType::Cloze) {
+            if (error)
+                *error = trBackend("cards[%1] needs an answer").arg(i);
             return false;
         }
     }

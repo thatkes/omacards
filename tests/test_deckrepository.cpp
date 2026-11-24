@@ -214,6 +214,43 @@ void TestDeckRepository::createCardsReportsInvalidDraftIndex() {
     QVERIFY(!QFileInfo::exists(f.dir.filePath("decks/Invalid.txt")));
 }
 
+void TestDeckRepository::createCardsRejectsEmptyAnswers() {
+    RepoFixture f;
+    QVERIFY(setup(f));
+    CardDraft draft;
+    draft.question = "Q";
+    draft.answer = "   ";
+
+    QString error;
+    QVERIFY(!f.repo.createCards("Blank", &f.current, {draft}, nullptr, nullptr, &error));
+    QVERIFY(error.contains(QStringLiteral("cards[0] needs an answer")));
+    QVERIFY(!f.repo.deckByName("Blank"));
+    QVERIFY(!QFileInfo::exists(f.dir.filePath("decks/Blank.txt")));
+
+    // An invalid type keeps its existing error even with an empty Answer.
+    draft.type = "bogus";
+    error.clear();
+    QVERIFY(!f.repo.createCards("Blank", &f.current, {draft}, nullptr, nullptr, &error));
+    QVERIFY(error.contains(QStringLiteral("cards[0] has an invalid type: bogus")));
+}
+
+void TestDeckRepository::createCardsKeepsClozeAnswersDerivedFromQuestion() {
+    RepoFixture f;
+    QVERIFY(setup(f));
+    CardDraft draft;
+    draft.question = "The {{c1::cat}} sleeps";
+    draft.type = "cloze";
+
+    QString error;
+    QVERIFY(f.repo.createCards("Cloze", &f.current, {draft}, nullptr, nullptr, &error));
+    QVERIFY(error.isEmpty());
+    const Deck *deck = f.repo.deckByName("Cloze");
+    QVERIFY(deck);
+    QCOMPARE(deck->cards.size(), 1);
+    QCOMPARE(deck->cards.first().answer, QString());
+    QCOMPARE(DeckIO::displayAnswer(deck->cards.first()), QString("The cat sleeps"));
+}
+
 void TestDeckRepository::createCardsCreatesDeckWithDescription() {
     RepoFixture f;
     QVERIFY(setup(f));

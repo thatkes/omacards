@@ -1107,6 +1107,8 @@ int run(const QStringList &arguments) {
     if (options.command == "add-card") {
         if (options.question.isEmpty())
             return fail(QObject::tr("Use --question / -q"), json);
+        if (options.answer.trimmed().isEmpty())
+            return fail(QObject::tr("Use --answer / -a"), json);
         CardDraft draft;
         draft.question = options.question;
         draft.answer = options.answer;

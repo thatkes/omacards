@@ -15,6 +15,8 @@ private slots:
     void createDeckTrimsDescription();
     void createCardsRejectsEmptyTargetAndDrafts();
     void createCardsReportsInvalidDraftIndex();
+    void createCardsRejectsEmptyAnswers();
+    void createCardsKeepsClozeAnswersDerivedFromQuestion();
     void createCardsCreatesDeckWithDescription();
     void createCardsKeepsExistingDescription();
     void createCardsDeduplicatesTagsAndGeneratesIds();
