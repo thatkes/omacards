@@ -121,6 +121,13 @@ void TestCli::helpIsHeadless() {
              qPrintable(renameHelp));
     QVERIFY2(!renameHelp.contains(QStringLiteral("Run the rename-deck command.")), qPrintable(renameHelp));
 
+    // add-cards help shows the minimal JSON input shape without the full schema.
+    int addCardsCode = -1;
+    const QString addCardsHelp = QString::fromUtf8(runCliRaw({"add-cards", "--help"}, decks, database, &addCardsCode));
+    QCOMPARE(addCardsCode, 0);
+    QVERIFY2(addCardsHelp.contains(QStringLiteral("[{\"question\":\"...\",\"answer\":\"...\"}]")),
+             qPrintable(addCardsHelp));
+
     QVERIFY2(!QFileInfo::exists(decks) || QDir(decks).entryList(QDir::NoDotAndDotDot).isEmpty(),
              "Help probes must not create a Deck");
     QVERIFY2(!QFileInfo::exists(database), "Help probes must not create the state database");
