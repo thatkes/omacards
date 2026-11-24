@@ -56,13 +56,10 @@ QString cardId(const Card &card) {
     return QString::fromLatin1(QCryptographicHash::hash(source.toUtf8(), QCryptographicHash::Sha1).toHex().left(12));
 }
 
-Deck load(const QString &path, QString *error) {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
-        return fail(error, QObject::tr("Cannot read deck file: %1").arg(path)), Deck{};
-
-    const QString text = QString::fromUtf8(file.readAll());
-    const QStringList lines = text.split('\n');
+// The one parse used by load() and lintBytes(): callers pass bytes they have
+// already read, so a Deck is read and split exactly once per operation.
+static Deck parse(const QString &path, const QByteArray &bytes, QString *error) {
+    const QStringList lines = QString::fromUtf8(bytes).split('\n');
     Deck deck;
     deck.path = path;
     deck.name = QFileInfo(path).completeBaseName();
@@ -164,6 +161,14 @@ Deck load(const QString &path, QString *error) {
     return deck;
 }
 
+Deck load(const QString &path, QString *error) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        return fail(error, QObject::tr("Cannot read deck file: %1").arg(path)), Deck{};
+
+    return parse(path, file.readAll(), error);
+}
+
 QVector<Deck> loadAll(const QString &directory, QString *error) {
     QVector<Deck> decks;
     const QDir dir(directory);
@@ -186,7 +191,9 @@ QVector<Deck> loadAll(const QString &directory, QString *error) {
     return decks;
 }
 
-QVector<DeckIssue> lintFile(const QString &path) {
+// Lints bytes the caller already read. The Deck parse and the line scan both
+// work from those bytes, so no file is opened here.
+QVector<DeckIssue> lintBytes(const QString &path, const QByteArray &bytes) {
     QVector<DeckIssue> issues;
 
     static const QRegularExpression keyLine(R"re(^(Q|A|Answer|tags|type|id)\s*:\s*(.*)$)re",
@@ -194,18 +201,8 @@ QVector<DeckIssue> lintFile(const QString &path) {
     MathRenderer math;
 
     QString error;
-    const Deck deck = load(path, &error);
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        DeckIssue issue;
-        issue.path = path;
-        issue.severity = QStringLiteral("error");
-        issue.message = QStringLiteral("Cannot read deck file");
-        issue.hint = QStringLiteral("Check file permissions.");
-        issues << issue;
-        return issues;
-    }
-    const QStringList lines = QString::fromUtf8(file.readAll()).split('\n');
+    const Deck deck = parse(path, bytes, &error);
+    const QStringList lines = QString::fromUtf8(bytes).split('\n');
     QHash<QString, QVector<int>> questionLines;
 
     bool inBlock = false;
@@ -311,6 +308,21 @@ QVector<DeckIssue> lintFile(const QString &path) {
     return issues;
 }
 
+QVector<DeckIssue> lintFile(const QString &path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QVector<DeckIssue> issues;
+        DeckIssue issue;
+        issue.path = path;
+        issue.severity = QStringLiteral("error");
+        issue.message = QStringLiteral("Cannot read deck file");
+        issue.hint = QStringLiteral("Check file permissions.");
+        issues << issue;
+        return issues;
+    }
+    return lintBytes(path, file.readAll());
+}
+
 QVector<DeckIssue> lint(const QString &directory) {
     QVector<DeckIssue> issues;
     const QDir dir(directory);
@@ -346,23 +358,30 @@ QString serialize(const Deck &deck) {
 }
 
 bool save(const Deck &deck, QString *error) {
+    return save(deck, nullptr, error);
+}
+
+bool save(const Deck &deck, QByteArray *written, QString *error) {
     if (deck.path.isEmpty()) {
         if (error)
             *error = QObject::tr("Deck %1 has no file path").arg(deck.name);
         return false;
     }
+    const QByteArray bytes = serialize(deck).toUtf8();
     QSaveFile file(deck.path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         if (error)
             *error = QObject::tr("Cannot write deck file: %1").arg(deck.path);
         return false;
     }
-    file.write(serialize(deck).toUtf8());
+    file.write(bytes);
     if (!file.commit()) {
         if (error)
             *error = QObject::tr("Cannot save deck file: %1").arg(deck.path);
         return false;
     }
+    if (written)
+        *written = bytes;
     return true;
 }
 

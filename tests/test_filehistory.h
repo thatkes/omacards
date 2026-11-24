@@ -10,6 +10,7 @@ private slots:
     void fileHistoryRestorePreWriteState();
     void fileHistoryUndoRemovesCreatedFile();
     void fileHistoryUnchangedRecordIsNoop();
+    void fileHistoryRecordUsesProvidedAfterBytes();
     void fileHistoryUndoRedoDeletedFile();
     void fileHistoryRecordClearsRedo();
     void fileHistoryEmptyStacksAreNoops();

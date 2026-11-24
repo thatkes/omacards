@@ -786,3 +786,25 @@ void TestDeckRepository::watchDirectoryRequestsReloadAfterFileChange() {
     QVERIFY(writeFile(QDir(f.dir.filePath("decks")).filePath("Watched.txt"), "# Deck: Watched\n---\nQ: q\nA: a\n"));
     QTRY_VERIFY_WITH_TIMEOUT(reloadSpy.count() > 0, 2000);
 }
+
+void TestDeckRepository::watchDirectoryIgnoresRepositoryWrites() {
+    RepoFixture f;
+    QVERIFY(setup(f));
+    f.repo.watchDirectory();
+    QSignalSpy reloadSpy(&f.repo, &DeckRepository::reloadRequested);
+
+    QString error;
+    QVERIFY(f.repo.createDeck("Self", &f.current, &error));
+    QVERIFY(f.repo.createCard("Self", &f.current, "Q", "A", "basic", {}, &error));
+    const QString id = f.repo.deckByName("Self")->cards.first().id;
+    QVERIFY(f.repo.modifyCard("Self", id, "Edited", "A", "basic", {}, &error));
+    QVERIFY(f.repo.undo(&error, nullptr)); // history restores write files too
+
+    QTest::qWait(400); // longer than the 120 ms watcher debounce
+    QCOMPARE(reloadSpy.count(), 0);
+
+    // An outside write still reaches the debounced reload.
+    const QString external = QDir(f.dir.filePath("decks")).filePath("External.txt");
+    QVERIFY(writeFile(external, "# Deck: External\n---\nQ: q\nA: a\n"));
+    QTRY_VERIFY_WITH_TIMEOUT(reloadSpy.count() > 0, 2000);
+}

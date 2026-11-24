@@ -3119,6 +3119,31 @@ void TestBackend::cachedBackendListsFollowMutations() {
     QCOMPARE(backend.cardList().size(), 0);
 }
 
+void TestBackend::cardEditRefreshesOnceWithoutWatcherEcho() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString decksDir = dir.filePath("decks");
+    QVERIFY(QDir().mkpath(decksDir));
+    Backend backend(decksDir, dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Edits", &error));
+    QVERIFY(backend.createCard("Edits", "Q", "A", "basic", {}, &error));
+    backend.selectDeck("Edits");
+    const QString id = backend.cardList().first().toMap().value("id").toString();
+
+    QSignalSpy decks(&backend, &Backend::decksChanged);
+    QSignalSpy cards(&backend, &Backend::cardsChanged);
+    QVERIFY(backend.modifyCard("Edits", id, "Edited", "A", "basic", {}, &error));
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(decks.count(), 1);
+    QCOMPARE(cards.count(), 1);
+    QTest::qWait(400); // longer than the watcher's 120 ms debounce
+    QCOMPARE(decks.count(), 1);
+    QCOMPARE(cards.count(), 1);
+    QCOMPARE(backend.cardList().first().toMap().value("question").toString(), QString("Edited"));
+}
+
 void TestBackend::ratingRefreshesCachedBoxCountsBeforeStats() {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());

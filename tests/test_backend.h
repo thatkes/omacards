@@ -69,4 +69,5 @@ private slots:
     void qmlStudyUsesCachedSvgWithoutPlaceholder();
     void cachedBackendListsFollowMutations();
     void ratingRefreshesCachedBoxCountsBeforeStats();
+    void cardEditRefreshesOnceWithoutWatcherEcho();
 };

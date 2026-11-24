@@ -82,6 +82,28 @@ void TestFileHistory::fileHistoryUnchangedRecordIsNoop() {
     QVERIFY(!history.canRedo());
 }
 
+void TestFileHistory::fileHistoryRecordUsesProvidedAfterBytes() {
+    QTemporaryDir dir;
+    const QString path = dir.filePath("note.txt");
+    QVERIFY(writeFile(path, "before"));
+    const QByteArray before = FileHistory::readBytes(path);
+    // The bytes on disk after the write differ from the bytes the writer
+    // reports, so redo proves the snapshot uses the supplied bytes.
+    QVERIFY(writeFile(path, "disk-after"));
+    const QByteArray written("provided-after");
+
+    FileHistory history;
+    QVERIFY(history.record(path, before, true, written, QStringLiteral("editing")));
+    QVERIFY(!history.record(path, written, true, written, QStringLiteral("no change")));
+
+    QString error;
+    QString description;
+    QVERIFY(history.undo(&error, &description));
+    QCOMPARE(FileHistory::readBytes(path), QByteArray("before"));
+    QVERIFY(history.redo(&error, &description));
+    QCOMPARE(FileHistory::readBytes(path), written);
+}
+
 void TestFileHistory::fileHistoryUndoRedoDeletedFile() {
     QTemporaryDir dir;
     const QString path = dir.filePath("deleted.txt");
