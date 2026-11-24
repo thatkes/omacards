@@ -25,6 +25,7 @@ private slots:
     void previewRendersMathAsText();
     void checkMathReportsUnsupportedCommands();
     void checkReportsLineNumberedDeckIssues();
+    void checkPreviewWarmIssueReportsOnlyTargetDeck();
     void headlessCommandDetectionIsComplete();
     void unknownCommandJsonError();
     void checkJsonKeyContract();

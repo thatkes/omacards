@@ -1125,6 +1125,147 @@ void TestCli::checkDeckScoping() {
     QVERIFY(all.value(QStringLiteral("issues")).toArray().size() >= 2);
 }
 
+void TestCli::checkPreviewWarmIssueReportsOnlyTargetDeck() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    EnvGuard env(decks, database);
+
+    const QDir deckDir(decks);
+    const QString duplicate = QStringLiteral("# Deck: %1\n---\nQ: same\nA: one\n---\nQ: same\nA: two\n");
+    const QString emptyWithIssues = QStringLiteral("# Deck: %1\n---\noops: not a key\n   too much indent\n");
+    QVERIFY(writeFile(deckDir.filePath("Target.txt"), duplicate.arg("Target").toUtf8()));
+    QVERIFY(writeFile(deckDir.filePath("Other.txt"), duplicate.arg("Other").toUtf8()));
+    QVERIFY(writeFile(deckDir.filePath("EmptyTarget.txt"), emptyWithIssues.arg("EmptyTarget").toUtf8()));
+    QVERIFY(writeFile(deckDir.filePath("EmptyOther.txt"), emptyWithIssues.arg("EmptyOther").toUtf8()));
+    QVERIFY(writeFile(deckDir.filePath("Clean.txt"), "# Deck: Clean\n---\nQ: clean\nA: ok\n"));
+    // The header name differs from the filename, so this Deck resolves by the
+    // .deck fallback rather than through the loaded Deck list.
+    QVERIFY(writeFile(deckDir.filePath("Fallback.deck"), duplicate.arg("Hidden").toUtf8()));
+
+    int code = -1;
+    const QJsonObject target = runCli({"check", "--deck", "Target", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY(target.value(QStringLiteral("ok")).toBool());
+    const QJsonArray targetIssues = target.value(QStringLiteral("issues")).toArray();
+    QCOMPARE(targetIssues.size(), 1);
+    const QJsonObject targetIssue = targetIssues.at(0).toObject();
+    QCOMPARE(targetIssue.value(QStringLiteral("path")).toString(), deckDir.filePath("Target.txt"));
+    QCOMPARE(targetIssue.value(QStringLiteral("message")).toString(), QStringLiteral("Duplicate question in deck"));
+    const QJsonObject targetCounts = target.value(QStringLiteral("issueCounts")).toObject();
+    QCOMPARE(targetCounts.value(QStringLiteral("error")).toInt(), 0);
+    QCOMPARE(targetCounts.value(QStringLiteral("warning")).toInt(), 1);
+
+    const QJsonObject strictTarget =
+        runCli({"check", "--deck", "Target", "--strict", "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QCOMPARE(strictTarget.value(QStringLiteral("strictPassed")), QJsonValue(false));
+    const QJsonObject strictClean = runCli({"check", "--deck", "Clean", "--strict", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(strictClean.value(QStringLiteral("strictPassed")), QJsonValue(true));
+    QVERIFY(strictClean.value(QStringLiteral("issues")).toArray().isEmpty());
+
+    QByteArray errors;
+    const QString targetText = runCliText({"check", "--deck", "Target"}, decks, database, &code, &errors);
+    QCOMPARE(code, 0);
+    QVERIFY(errors.isEmpty());
+    QVERIFY(targetText.contains(checkDeckIssueLine(targetIssue)));
+    QVERIFY(!targetText.contains(QStringLiteral("Other.txt")));
+    QVERIFY(!targetText.contains(QStringLiteral("EmptyTarget.txt")));
+
+    // The empty-Deck reports from preview and warm keep the check report's
+    // fields, counts, text lines and hint, without other Decks' issues.
+    const QJsonObject emptyCheck = runCli({"check", "--deck", "EmptyTarget", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    const QJsonArray emptyIssues = emptyCheck.value(QStringLiteral("issues")).toArray();
+    QVERIFY(emptyIssues.size() >= 2);
+    for (const QJsonValue &value : emptyIssues) {
+        const QJsonObject issue = value.toObject();
+        QCOMPARE(issue.value(QStringLiteral("path")).toString(), deckDir.filePath("EmptyTarget.txt"));
+    }
+
+    const QStringList failureKeys{"deck", "error", "hint", "issueCounts", "issues", "ok"};
+    const QJsonObject preview = runCli({"preview", "--deck", "EmptyTarget", "--json"}, decks, database, &code, &errors);
+    QCOMPARE(code, 1);
+    QVERIFY(errors.isEmpty());
+    QCOMPARE(sortedKeys(preview), failureKeys);
+    QCOMPARE(preview.value(QStringLiteral("error")).toString(), QStringLiteral("Deck EmptyTarget has no Cards"));
+    QCOMPARE(preview.value(QStringLiteral("hint")).toString(), QStringLiteral("omacards check --deck EmptyTarget"));
+    QCOMPARE(QJsonDocument(preview.value(QStringLiteral("issues")).toArray()).toJson(QJsonDocument::Compact),
+             QJsonDocument(emptyIssues).toJson(QJsonDocument::Compact));
+    QCOMPARE(QJsonDocument(preview.value(QStringLiteral("issueCounts")).toObject()).toJson(),
+             QJsonDocument(emptyCheck.value(QStringLiteral("issueCounts")).toObject()).toJson());
+
+    QStringList emptyLines{"Deck EmptyTarget has no Cards"};
+    for (const QJsonValue &value : emptyIssues)
+        emptyLines << checkDeckIssueLine(value.toObject());
+    emptyLines << QStringLiteral("omacards check --deck EmptyTarget");
+    const QString previewText = runCliText({"preview", "--deck", "EmptyTarget"}, decks, database, &code, &errors);
+    QCOMPARE(code, 1);
+    QVERIFY(previewText.isEmpty());
+    QCOMPARE(QString::fromUtf8(errors), emptyLines.join('\n') + '\n');
+
+    const QJsonObject warm = runCli({"warm", "--deck", "EmptyTarget", "--json"}, decks, database, &code, &errors);
+    QCOMPARE(code, 1);
+    QVERIFY(errors.isEmpty());
+    QCOMPARE(sortedKeys(warm), failureKeys);
+    QCOMPARE(warm.value(QStringLiteral("error")).toString(), QStringLiteral("Deck EmptyTarget has no Cards"));
+    QCOMPARE(QJsonDocument(warm.value(QStringLiteral("issues")).toArray()).toJson(QJsonDocument::Compact),
+             QJsonDocument(emptyIssues).toJson(QJsonDocument::Compact));
+    const QString warmText = runCliText({"warm", "--deck", "EmptyTarget"}, decks, database, &code, &errors);
+    QCOMPARE(code, 1);
+    QVERIFY(warmText.isEmpty());
+    QCOMPARE(QString::fromUtf8(errors), emptyLines.join('\n') + '\n');
+
+    // An existing empty Deck still wins over a stale --card id, while a miss
+    // on a Deck with Cards and a missing Deck keep their old messages.
+    const QJsonObject filtered =
+        runCli({"preview", "--deck", "EmptyTarget", "--card", "nope", "--json"}, decks, database, &code, &errors);
+    QCOMPARE(code, 1);
+    QCOMPARE(filtered.value(QStringLiteral("error")).toString(), QStringLiteral("Deck EmptyTarget has no Cards"));
+    QCOMPARE(QJsonDocument(filtered.value(QStringLiteral("issues")).toArray()).toJson(QJsonDocument::Compact),
+             QJsonDocument(emptyIssues).toJson(QJsonDocument::Compact));
+    const QJsonObject cardMiss =
+        runCli({"preview", "--deck", "Target", "--card", "nope", "--json"}, decks, database, &code, &errors);
+    QCOMPARE(code, 1);
+    QCOMPARE(sortedKeys(cardMiss), QStringList({"error", "ok"}));
+    QCOMPARE(cardMiss.value(QStringLiteral("error")).toString(), QStringLiteral("No such card: nope"));
+    const QJsonObject missing = runCli({"preview", "--deck", "Missing", "--json"}, decks, database, &code, &errors);
+    QCOMPARE(code, 1);
+    QCOMPARE(sortedKeys(missing), QStringList({"error", "ok"}));
+    QCOMPARE(missing.value(QStringLiteral("error")).toString(), QStringLiteral("No cards to preview"));
+
+    const QJsonObject warmed = runCli({"warm", "--deck", "Target", "--json"}, decks, database, &code, &errors);
+    QCOMPARE(code, 0);
+    QCOMPARE(warmed.value(QStringLiteral("deck")).toString(), QStringLiteral("Target"));
+    const QString warmSuccess = runCliText({"warm", "--deck", "Target"}, decks, database, &code, &errors);
+    QCOMPARE(code, 0);
+    QCOMPARE(warmSuccess, QStringLiteral("Warmed Target: 0 rendered · 0 cached\n"));
+
+    // The resolved .deck path is the path lintFile reports, even when the
+    // header name does not match the filename.
+    const QJsonObject fallback = runCli({"check", "--deck", "Fallback", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    const QJsonArray fallbackIssues = fallback.value(QStringLiteral("issues")).toArray();
+    QCOMPARE(fallbackIssues.size(), 1);
+    QCOMPARE(fallbackIssues.at(0).toObject().value(QStringLiteral("path")).toString(),
+             deckDir.filePath("Fallback.deck"));
+
+    // A relative decks directory resolves to the same relative issue path.
+    QTemporaryDir relative(QDir::current().filePath(QStringLiteral("check-scope-relative-XXXXXX")));
+    QVERIFY(relative.isValid());
+    const QString relativeDir = QDir::current().relativeFilePath(relative.path());
+    QVERIFY(!QDir::isAbsolutePath(relativeDir));
+    QVERIFY(writeFile(QDir(relativeDir).filePath("Relative.txt"), duplicate.arg("Relative").toUtf8()));
+    const QJsonObject relativeReport = runCli({"check", "--deck", "Relative", "--json"}, relativeDir, database, &code);
+    QCOMPARE(code, 0);
+    const QJsonArray relativeIssues = relativeReport.value(QStringLiteral("issues")).toArray();
+    QCOMPARE(relativeIssues.size(), 1);
+    QCOMPARE(relativeIssues.at(0).toObject().value(QStringLiteral("path")).toString(),
+             QDir(relativeDir).filePath("Relative.txt"));
+}
+
 void TestCli::readCommandJsonContracts() {
     QTemporaryDir dir;
     const QString decks = dir.filePath("decks");
