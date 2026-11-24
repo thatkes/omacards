@@ -693,7 +693,7 @@ int run(const QStringList &arguments) {
         }
         const QVector<Card> cards = allCards(targets, {});
         if (cards.isEmpty())
-            return failEmptyDeck(options.deck, deckIssueReport(backend.decksDirectory(), targetPath), json);
+            return failEmptyDeck(options.deck, deckIssueReportForFile(targetPath), json);
 
         MathRenderer renderer;
         int rendered = 0;
@@ -791,7 +791,8 @@ int run(const QStringList &arguments) {
             }
         }
 
-        const DeckIssueReport report = deckIssueReport(backend.decksDirectory(), targetPath);
+        const DeckIssueReport report = targetPath.isEmpty() ? deckIssueReport(backend.decksDirectory(), QString())
+                                                            : deckIssueReportForFile(targetPath);
         const bool strictPassed = !options.strict || report.entries.isEmpty();
 
         QJsonObject object;
@@ -856,7 +857,7 @@ int run(const QStringList &arguments) {
             if (deckHasNoCards) {
                 const QString targetPath = resolveDeckPath(decks, backend.decksDirectory(), options.deck);
                 if (!targetPath.isEmpty() && QFileInfo::exists(targetPath))
-                    return failEmptyDeck(options.deck, deckIssueReport(backend.decksDirectory(), targetPath), json);
+                    return failEmptyDeck(options.deck, deckIssueReportForFile(targetPath), json);
             }
             if (!options.card.isEmpty())
                 return fail(QObject::tr("No such card: %1").arg(options.card), json);
