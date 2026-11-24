@@ -26,6 +26,7 @@ private slots:
     void checkMathReportsUnsupportedCommands();
     void checkReportsLineNumberedDeckIssues();
     void checkPreviewWarmIssueReportsOnlyTargetDeck();
+    void checkDuplicateQuestionLinesStayPinned();
     void headlessCommandDetectionIsComplete();
     void unknownCommandJsonError();
     void checkJsonKeyContract();
