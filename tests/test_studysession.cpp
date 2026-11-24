@@ -630,6 +630,35 @@ void TestStudySession::rebuildKeepsPendingRepeatInReview() {
     QVERIFY(!fixture.session.waitingForRepeat());
 }
 
+void TestStudySession::rebuildKeepsUnratedAdditionalNewCards() {
+    SessionFixture fixture;
+    QString error;
+    QVERIFY(fixture.prepare("Study", {"Q1", "Q2", "Q3", "Q4"}, &error));
+    fixture.planner.configure(1, 0);
+    QString storeError;
+    fixture.planner.updateNewBudget(&storeError);
+    fixture.session.rebuild("Study");
+    QVERIFY(fixture.session.question().contains("Q1"));
+
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
+    QVERIFY(!fixture.session.hasCard());
+    QVERIFY(fixture.session.reviewWhenEmpty(2));
+    QVERIFY(fixture.session.question().contains("Q2"));
+
+    // A watcher refresh rebuilds from the Store; the session-only cards must
+    // survive in their original order until they are rated.
+    fixture.session.rebuild("Study");
+    QVERIFY(fixture.session.hasCard());
+    QVERIFY(fixture.session.question().contains("Q2"));
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
+    QVERIFY(fixture.session.question().contains("Q3"));
+    fixture.session.rebuild("Study");
+    QVERIFY(fixture.session.question().contains("Q3"));
+
+    fixture.session.startFresh("Study");
+    QVERIFY(!fixture.session.hasCard());
+}
+
 void TestStudySession::switchingToCramClearsPendingRepeat() {
     ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "20");
     SessionFixture fixture;

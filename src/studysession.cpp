@@ -75,13 +75,21 @@ void StudySession::rebuildQueue(const QString &deckName, bool notifyStats) {
         // original order. Rated cards stay out; their Pending repeats, if
         // any, were restored above from the progression's deadlines.
         QStringList restored;
+        QStringList stillInDeck;
         for (const QString &id : m_sessionAddedIds) {
+            const bool present = std::any_of(deck->cards.cbegin(), deck->cards.cend(),
+                                             [&id](const Card &card) { return card.id == id; });
+            if (!present)
+                continue;
+            stillInDeck << id;
             if (!m_sessionRatedIds.contains(id) && !m_progression.contains(id))
                 restored << id;
         }
+        m_sessionAddedIds = stillInDeck;
         m_progression.appendReview(restored);
     } else {
         m_progression.clear();
+        m_sessionAddedIds.clear();
     }
 
     refreshDueCount();

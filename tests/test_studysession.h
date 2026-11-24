@@ -25,6 +25,7 @@ private slots:
     void revealAndShowNextToggleAnswer();
     void setStatusDedupesAndReportErrorSignals();
     void rebuildKeepsPendingRepeatInReview();
+    void rebuildKeepsUnratedAdditionalNewCards();
     void switchingToCramClearsPendingRepeat();
     void statsTextAndMathEngine();
     void setMathColorsEmitsOnlyOnChange();
