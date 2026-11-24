@@ -1796,8 +1796,10 @@ void TestCli::checkPreviewWarmReviewCramResolveDeckFileName() {
     QCOMPARE(check.value(QStringLiteral("totalDue")).toInt(), 1);
     const QJsonObject checkName = runCli({"check", "--deck", "Written Name", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
-    for (const QString &key : {"cards", "decks", "due", "issueCounts", "issues", "totalDue"})
-        QCOMPARE(check.value(key), checkName.value(key));
+    for (const char *key : {"cards", "decks", "due", "issueCounts", "issues", "totalDue"}) {
+        const QString name = QString::fromLatin1(key);
+        QCOMPARE(check.value(name), checkName.value(name));
+    }
 
     const QJsonObject preview = runCli({"preview", "--deck", "Lesson Notes", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
