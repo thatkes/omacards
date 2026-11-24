@@ -11,6 +11,7 @@
 #include <QUrl>
 
 #include <algorithm>
+#include <utility>
 
 namespace {
 QString defaultDataDirectory() {
@@ -33,11 +34,12 @@ QString defaultDatabasePath() {
 
 } // namespace
 
-Backend::Backend(const QString &decksDirectory, const QString &databasePath, QObject *parent)
+Backend::Backend(const QString &decksDirectory, const QString &databasePath, CramOrder cramOrder, QObject *parent)
     : QObject(parent), m_store(databasePath.isEmpty() ? defaultDatabasePath() : databasePath), m_ratingStore(m_store),
       m_ratings(m_ratingStore),
       m_deckRepo(decksDirectory.isEmpty() ? defaultDecksDirectory() : decksDirectory, m_store, m_history, this),
-      m_plannerStore(m_store), m_planner(m_plannerStore), m_session(m_deckRepo, m_planner, m_ratings, this) {
+      m_plannerStore(m_store), m_planner(m_plannerStore),
+      m_session(m_deckRepo, m_planner, m_ratings, std::move(cramOrder), this) {
     connect(&m_deckRepo, &DeckRepository::reloadRequested, this, &Backend::refresh);
     connect(&m_deckRepo, &DeckRepository::errorOccurred, &m_session, &StudySession::reportError);
     connect(&m_deckRepo, &DeckRepository::historyChanged, this, &Backend::historyChanged);
@@ -51,7 +53,7 @@ Backend::Backend(const QString &decksDirectory, const QString &databasePath, QOb
 }
 
 std::unique_ptr<Backend> Backend::fromEnvironment(QObject *parent) {
-    return std::make_unique<Backend>(defaultDecksDirectory(), defaultDatabasePath(), parent);
+    return std::make_unique<Backend>(defaultDecksDirectory(), defaultDatabasePath(), CramOrder{}, parent);
 }
 
 bool Backend::initialize(QString *error) {
@@ -251,7 +253,6 @@ void Backend::setMode(const QString &mode) {
         return;
     m_mode = Domain::modeFromString(mode);
     m_session.setMode(mode);
-    m_session.rebuild(m_currentDeck);
 }
 
 void Backend::reveal() {

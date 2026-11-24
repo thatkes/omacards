@@ -10,6 +10,8 @@ private slots:
     void setModeUppercaseCramNormalizesToReview();
     void setModeCanonicalInputIsNoOp();
     void setModeCramSwitchesAndResets();
+    void modeSwitchStopsTimerAndClearsPendingRepeat();
+    void injectedCramOrderPresentsExactFlashcards();
     void statsChangedSeesPresentedLeitnerBox();
     void waitingExitEmitsOneSettledStatsNotification();
     void finishedExitEmitsOneSettledStatsNotification();

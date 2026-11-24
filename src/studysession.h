@@ -12,9 +12,11 @@
 #include <QString>
 #include <QTimer>
 
+#include <functional>
+
 // Owns one study sitting: card presentation, ratings, status and the live
 // counters. InSessionProgression owns card order, Cram Leitner boxes and
-// Pending repeat deadlines; the Study session supplies shuffling and Ratings.
+// Pending repeat deadlines; the Study session supplies the Cram order and Ratings.
 // Deck files stay in DeckRepository, Rating recording writes Scheduling state
 // and Review history, and StudyPlanner reads them for planning. Backend remains
 // the QML facade and forwards this object's signals.
@@ -22,9 +24,16 @@ class StudySession : public QObject {
     Q_OBJECT
 
 public:
-    explicit StudySession(DeckRepository &decks, StudyPlanner &planner, RatingRecording &ratings,
-                          QObject *parent = nullptr);
+    // Supplies the order of Cards handed to the Cram queue. Production shuffles
+    // on every rebuild; tests inject an identity order to assert the exact
+    // Flashcard that follows a rating.
+    using CramOrder = std::function<QVector<Card>(const QVector<Card> &)>;
 
+    explicit StudySession(DeckRepository &decks, StudyPlanner &planner, RatingRecording &ratings,
+                          CramOrder cramOrder = {}, QObject *parent = nullptr);
+
+    // One operation: stop the repeat timer, clear the old mode's progression and
+    // counters, rebuild this deck's queue and present its first Flashcard.
     void setMode(const QString &mode);
     void rebuild(const QString &deckName);
     // Rebuild for a freshly chosen deck: no pending repeats, Leitner boxes or
@@ -70,6 +79,7 @@ signals:
     void errorOccurred(const QString &message);
 
 private:
+    void rebuildQueue(const QString &deckName, bool notifyStats);
     void startRepeatTimer(qint64 waitMs);
     // Ratings own their single settled notification; other callers keep the
     // notification presentation has always emitted.
@@ -83,6 +93,7 @@ private:
     StudyPlanner &m_planner;
     RatingRecording &m_ratings;
     InSessionProgression m_progression;
+    CramOrder m_cramOrder;
     QTimer m_repeatTimer;
     MathRenderer m_math;
     qint64 m_repeatDelayMs;
@@ -96,6 +107,7 @@ private:
     QString m_answerInk = "#000000";
     QString m_status;
     QString m_currentId;
+    QString m_deckName;
     bool m_showingAnswer = false;
     bool m_waitingForRepeat = false;
 };

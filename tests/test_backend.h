@@ -51,6 +51,8 @@ private slots:
     void setMathColorsNotifiesColorChange();
     void statsSummaryKeepsContract();
     void setModeBoundarySemantics();
+    void modeSwitchStopsRepeatTimerAndClearsPending();
+    void qmlCramInjectedOrderPresentsExactNextFlashcard();
     void invalidRatingsAreNoOps();
     void settingsClampAndPersist();
     void legacyAllowanceSettingMigratesAndMirrorsWrites();
