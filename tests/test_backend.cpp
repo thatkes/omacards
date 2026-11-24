@@ -43,6 +43,11 @@ using namespace TestSupport;
 
 namespace {
 
+// Backend forwards this to DeckRepository for window tests only. Keep the
+// settle margin long enough for the watcher event and one event-loop turn.
+constexpr int kTestWatcherDebounceMs = 10;
+constexpr int kWatcherSettleMarginMs = 30;
+
 // The single seam for loading Main.qml in a test: callers verify view.window
 // before using it, and the harness owns the engine and window for them.
 struct MainWindowHarness {
@@ -144,10 +149,10 @@ struct MainWindowHarness {
         QTest::qWait(30);
     }
 
-    // DeckRepository debounces watcher signals for 120 ms; let one reload
-    // finish before asserting on study state after creating cards.
+    // Window tests inject a short watcher debounce; wait it out plus the
+    // event margin, then flush the QML notifications from the reload.
     void settleFileWatcher() const {
-        QTest::qWait(200);
+        QTest::qWait(kTestWatcherDebounceMs + kWatcherSettleMarginMs);
         QCoreApplication::processEvents();
     }
 
@@ -163,7 +168,7 @@ struct StudyViewFixture {
     enum class Sizing { Minimum, KeepWindowSize };
 
     explicit StudyViewFixture(Backend::CramOrder cramOrder = {})
-        : backend(dir.path(), dir.filePath("state.db"), std::move(cramOrder)) {}
+        : backend(dir.path(), dir.filePath("state.db"), std::move(cramOrder), nullptr, kTestWatcherDebounceMs) {}
 
     bool initialize() { return backend.initialize(&error); }
 

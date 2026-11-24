@@ -26,7 +26,8 @@ struct RepoFixture {
     DeckRepository repo;
     QString current;
 
-    RepoFixture() : store(dir.filePath("state.db")), repo(dir.filePath("decks"), store, history) {}
+    explicit RepoFixture(int reloadDebounceMs = DeckRepository::kProductionReloadDebounceMs)
+        : store(dir.filePath("state.db")), repo(dir.filePath("decks"), store, history, nullptr, reloadDebounceMs) {}
 };
 
 bool setup(RepoFixture &f) {
@@ -881,5 +882,28 @@ void TestDeckRepository::watchDirectoryIgnoresRepositoryWrites() {
     // An outside write still reaches the debounced reload.
     const QString external = QDir(f.dir.filePath("decks")).filePath("External.txt");
     QVERIFY(writeFile(external, "# Deck: External\n---\nQ: q\nA: a\n"));
+    QTRY_VERIFY_WITH_TIMEOUT(reloadSpy.count() > 0, 2000);
+}
+
+void TestDeckRepository::watchDirectoryDebounceOverrideReloadsPromptly() {
+    RepoFixture f(10);
+    QVERIFY(setup(f));
+    f.repo.watchDirectory();
+    QSignalSpy reloadSpy(&f.repo, &DeckRepository::reloadRequested);
+
+    QVERIFY(writeFile(QDir(f.dir.filePath("decks")).filePath("Fast.txt"), "# Deck: Fast\n---\nQ: q\nA: a\n"));
+    // The production debounce cannot answer inside this window.
+    QTRY_VERIFY_WITH_TIMEOUT(reloadSpy.count() > 0, 100);
+}
+
+void TestDeckRepository::watchDirectoryUsesProductionDebounceByDefault() {
+    RepoFixture f;
+    QVERIFY(setup(f));
+    f.repo.watchDirectory();
+    QSignalSpy reloadSpy(&f.repo, &DeckRepository::reloadRequested);
+
+    QVERIFY(writeFile(QDir(f.dir.filePath("decks")).filePath("Default.txt"), "# Deck: Default\n---\nQ: q\nA: a\n"));
+    QTest::qWait(60); // shorter than the production debounce
+    QCOMPARE(reloadSpy.count(), 0);
     QTRY_VERIFY_WITH_TIMEOUT(reloadSpy.count() > 0, 2000);
 }

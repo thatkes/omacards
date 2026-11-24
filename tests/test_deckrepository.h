@@ -42,4 +42,6 @@ private slots:
     void undoRedoEmitHistoryChanged();
     void watchDirectoryRequestsReloadAfterFileChange();
     void watchDirectoryIgnoresRepositoryWrites();
+    void watchDirectoryDebounceOverrideReloadsPromptly();
+    void watchDirectoryUsesProductionDebounceByDefault();
 };

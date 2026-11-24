@@ -85,10 +85,11 @@ private:
 };
 } // namespace
 
-DeckRepository::DeckRepository(const QString &decksDirectory, Store &store, FileHistory &history, QObject *parent)
+DeckRepository::DeckRepository(const QString &decksDirectory, Store &store, FileHistory &history, QObject *parent,
+                               int reloadDebounceMs)
     : QObject(parent), m_decksDir(decksDirectory), m_store(store), m_history(history) {
     m_reloadTimer.setSingleShot(true);
-    m_reloadTimer.setInterval(120);
+    m_reloadTimer.setInterval(reloadDebounceMs);
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, [this] { m_reloadTimer.start(); });
     connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, [this] { m_reloadTimer.start(); });
     connect(&m_reloadTimer, &QTimer::timeout, this, &DeckRepository::reloadRequested);

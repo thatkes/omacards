@@ -34,10 +34,11 @@ QString defaultDatabasePath() {
 
 } // namespace
 
-Backend::Backend(const QString &decksDirectory, const QString &databasePath, CramOrder cramOrder, QObject *parent)
+Backend::Backend(const QString &decksDirectory, const QString &databasePath, CramOrder cramOrder, QObject *parent,
+                 int watcherDebounceMs)
     : QObject(parent), m_store(databasePath.isEmpty() ? defaultDatabasePath() : databasePath), m_ratingStore(m_store),
-      m_ratings(m_ratingStore),
-      m_deckRepo(decksDirectory.isEmpty() ? defaultDecksDirectory() : decksDirectory, m_store, m_history, this),
+      m_ratings(m_ratingStore), m_deckRepo(decksDirectory.isEmpty() ? defaultDecksDirectory() : decksDirectory, m_store,
+                                           m_history, this, watcherDebounceMs),
       m_plannerStore(m_store), m_planner(m_plannerStore),
       m_session(m_deckRepo, m_planner, m_ratings, std::move(cramOrder), this) {
     connect(&m_deckRepo, &DeckRepository::reloadRequested, this, &Backend::refresh);
