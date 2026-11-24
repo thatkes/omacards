@@ -96,14 +96,21 @@ inline QString appBinary() {
     return QDir(QString(OMACARDS_SOURCE_DIR)).filePath("../build/omacards");
 }
 
+inline QProcessEnvironment cliProcessEnvironment(const QString &decksDir, const QString &stateDb,
+                                                 const QString &cacheDir = {}) {
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("OMACARDS_DECKS_DIR"), decksDir);
+    environment.insert(QStringLiteral("OMACARDS_STATE_DB"), stateDb);
+    if (!cacheDir.isEmpty())
+        environment.insert(QStringLiteral("XDG_CACHE_HOME"), cacheDir);
+    return environment;
+}
+
 inline QByteArray runCliRaw(const QStringList &arguments, const QString &decksDir, const QString &stateDb,
                             int *exitCode = nullptr, QByteArray *standardError = nullptr,
                             const QByteArray *standardInput = nullptr) {
     QProcess process;
-    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
-    environment.insert(QStringLiteral("OMACARDS_DECKS_DIR"), decksDir);
-    environment.insert(QStringLiteral("OMACARDS_STATE_DB"), stateDb);
-    process.setProcessEnvironment(environment);
+    process.setProcessEnvironment(cliProcessEnvironment(decksDir, stateDb));
     process.start(appBinary(), arguments);
     if (standardInput) {
         process.write(*standardInput);

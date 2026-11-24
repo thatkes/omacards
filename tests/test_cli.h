@@ -37,6 +37,7 @@ private slots:
     void reviewWrapsWriteStoreErrors();
     void cramCommandContract();
     void addCardJsonContracts();
+    void concurrentAddCardCommandsKeepEveryCard();
     void cardsJsonPreservesUnknownFileType();
     void addCardsInputValidationErrors();
     void editDeleteErrorContracts();

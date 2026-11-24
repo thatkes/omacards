@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QLockFile>
 #include <QRegularExpression>
 #include <QSet>
 #include <algorithm>
@@ -440,6 +441,20 @@ bool DeckRepository::createCards(const QString &deckName, QString *currentDeck, 
             return false;
         }
     }
+
+    // Each process loads Deck files at startup. Refresh under an exclusive
+    // lock so a writer appends to the latest Deck file instead of its stale
+    // snapshot; contention fails explicitly rather than losing a Card.
+    const QString lockPath = QDir(m_decksDir).filePath(DeckIO::safeFileName(target) + ".txt.lock");
+    QLockFile lock(lockPath);
+    if (!lock.tryLock(5000)) {
+        setError(error, trBackend("Cannot lock deck %1").arg(target));
+        return false;
+    }
+    QString selected = currentDeck ? *currentDeck : QString();
+    load(&selected);
+    if (currentDeck)
+        *currentDeck = selected;
 
     if (!deckByName(target) && !createDeck(target, currentDeck, error, description ? *description : QString()))
         return false;

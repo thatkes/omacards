@@ -7,9 +7,13 @@
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QProcess>
+#include <QSet>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTemporaryDir>
+
+#include <memory>
+#include <vector>
 
 #include "test_cli.h"
 #include "test_support.h"
@@ -39,6 +43,14 @@ QString checkDeckIssueLine(const QJsonObject &issue) {
         .arg(issue.value(QStringLiteral("line")).toInt())
         .arg(issue.value(QStringLiteral("severity")).toString(), issue.value(QStringLiteral("message")).toString(),
              issue.value(QStringLiteral("hint")).toString());
+}
+
+std::unique_ptr<QProcess> startCliProcess(const QStringList &arguments, const QString &decks, const QString &database,
+                                          const QString &cache) {
+    auto process = std::make_unique<QProcess>();
+    process->setProcessEnvironment(cliProcessEnvironment(decks, database, cache));
+    process->start(appBinary(), arguments);
+    return process;
 }
 
 } // namespace
@@ -1568,6 +1580,56 @@ void TestCli::addCardJsonContracts() {
     QCOMPARE(card.value(QStringLiteral("tags")).toArray().size(), 2);
     QCOMPARE(added.value(QStringLiteral("id")).toString(), card.value(QStringLiteral("id")).toString());
     QVERIFY(QFileInfo::exists(QDir(decks).filePath("Fresh.txt")));
+}
+
+void TestCli::concurrentAddCardCommandsKeepEveryCard() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    const QString cache = dir.filePath("cache");
+    QVERIFY(QDir().mkpath(decks));
+    QVERIFY(QDir().mkpath(cache));
+    const QString path = QDir(decks).filePath("Parallel.txt");
+    QVERIFY(writeFile(path, "# Deck: Parallel\n"));
+
+    constexpr int added = 6;
+    std::vector<std::unique_ptr<QProcess>> processes;
+    processes.reserve(added);
+    for (int i = 0; i < added; ++i) {
+        processes.push_back(
+            startCliProcess({"add-card", "--deck", "Parallel", "-q", QStringLiteral("Concurrent Q%1?").arg(i), "-a",
+                             QStringLiteral("Concurrent A%1").arg(i), "--json"},
+                            decks, database, cache));
+    }
+
+    QSet<QString> ids;
+    for (int i = 0; i < added; ++i) {
+        QProcess &process = *processes.at(i);
+        QVERIFY2(process.waitForFinished(20000), qPrintable(process.errorString()));
+        const QByteArray output = process.readAllStandardOutput();
+        const QByteArray errors = process.readAllStandardError();
+        QCOMPARE(process.exitCode(), 0);
+        const QJsonObject response = QJsonDocument::fromJson(output).object();
+        QVERIFY2(response.value(QStringLiteral("ok")).toBool(),
+                 qPrintable(QString::fromUtf8(output) + QString::fromUtf8(errors)));
+        const QString id = response.value(QStringLiteral("id")).toString();
+        QVERIFY2(!id.isEmpty(), qPrintable(QString::fromUtf8(output)));
+        QCOMPARE(response.value(QStringLiteral("card")).toObject().value(QStringLiteral("id")).toString(), id);
+        ids.insert(id);
+    }
+    QCOMPARE(ids.size(), added);
+
+    QString error;
+    const Deck deck = DeckIO::load(path, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(deck.cards.size(), added);
+    QSet<QString> storedIds;
+    for (const Card &card : deck.cards)
+        storedIds.insert(card.id);
+    QCOMPARE(storedIds.size(), added);
+    for (const QString &id : ids)
+        QVERIFY(storedIds.contains(id));
 }
 
 void TestCli::cardsJsonPreservesUnknownFileType() {

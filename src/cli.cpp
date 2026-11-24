@@ -1122,12 +1122,12 @@ int run(const QStringList &arguments) {
                     created = &card;
                     break;
                 }
+        if (!created)
+            return fail(QObject::tr("Cannot find created card in deck %1").arg(options.deck), json);
         QJsonObject object;
         object.insert("ok", true);
-        if (created) {
-            object.insert("id", created->id);
-            object.insert("card", cardJson(*created));
-        }
+        object.insert("id", created->id);
+        object.insert("card", cardJson(*created));
         write(object, json, QObject::tr("Added card"));
         return 0;
     }
