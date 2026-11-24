@@ -108,6 +108,10 @@ _Avoid_: sitting, run
 The Cards still to be presented in a Study session, in the order the session will show them.
 _Avoid_: card queue, pending cards
 
+**Additional New cards**:
+New cards added to the Current Deck's Study queue for the current Study session only. They do not change the New-card allowance or any daily count.
+_Avoid_: extra new cards, additional allowance, bonus cards
+
 **Flashcard**:
 A Card presented in the Study screen.
 _Avoid_: card
@@ -237,7 +241,7 @@ A Due card that can be shown right now.
 _Avoid_: due now, ready card
 
 **New-card allowance**:
-The number of new cards that may start in Review during one study day.
+The number of New cards that may start in Review for a Deck during one Study day.
 _Avoid_: new cards per day, daily cap, new budget
 
 **Desired retention**:
