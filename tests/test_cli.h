@@ -25,6 +25,7 @@ private slots:
     void previewRendersMathAsText();
     void checkMathReportsUnsupportedCommands();
     void checkReportsLineNumberedDeckIssues();
+    void checkMalformedContinuationFails();
     void checkPreviewWarmIssueReportsOnlyTargetDeck();
     void checkDuplicateQuestionLinesStayPinned();
     void headlessCommandDetectionIsComplete();

@@ -3,6 +3,7 @@
 #include "deck.h"
 #include "mathrender.h"
 
+#include <QChar>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -242,6 +243,18 @@ QVector<DeckIssue> lintFile(const QString &path) {
         }
         if (trimmed.startsWith('#'))
             continue;
+        // One leading space is not a continuation for load(): it rejects the
+        // line and loadAll() drops the Deck. That is an Error, not a Warning.
+        if (raw.startsWith(QLatin1Char(' '))) {
+            DeckIssue issue;
+            issue.path = path;
+            issue.line = i + 1;
+            issue.severity = QStringLiteral("error");
+            issue.message = QStringLiteral("Continuation line has one leading space");
+            issue.hint = QStringLiteral("Start multiline Q: or A: with exactly two spaces.");
+            issues << issue;
+            continue;
+        }
         DeckIssue issue;
         issue.path = path;
         issue.line = i + 1;
