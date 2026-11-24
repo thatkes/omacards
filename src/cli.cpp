@@ -265,25 +265,6 @@ struct DeckIssueReport {
     int warnings = 0;
 };
 
-// Same resolution order as check: a loaded Deck name first, then the deck
-// filename fallback for the supported suffixes.
-QString resolveDeckPath(const QVector<Deck> &decks, const QString &decksDirectory, const QString &deckName) {
-    for (const Deck &deck : decks) {
-        if (deck.name == deckName)
-            return deck.path;
-    }
-    if (!deckName.isEmpty()) {
-        const QDir dir(decksDirectory);
-        const QString base = DeckIO::safeFileName(deckName);
-        for (const QString &suffix : {QStringLiteral(".txt"), QStringLiteral(".deck")}) {
-            const QString candidate = dir.filePath(base + suffix);
-            if (QFileInfo::exists(candidate))
-                return candidate;
-        }
-    }
-    return {};
-}
-
 void appendDeckIssue(DeckIssueReport *report, const DeckIssue &issue) {
     QJsonObject entry;
     entry.insert("path", issue.path);
@@ -701,21 +682,19 @@ int run(const QStringList &arguments) {
         QString targetPath;
         QVector<Deck> targets;
         if (resolved.deckId) {
-            // The path belongs to the loaded Deck the resolver named.
             for (const Deck &deck : warmDecks) {
-                if (deck.name == *resolved.deckId) {
-                    targetPath = deck.path;
+                if (deck.name == *resolved.deckId)
                     targets << deck;
-                }
             }
-        } else {
+            targetPath = resolved.deckPath;
+        } else if (resolved.failureReason == DeckIdResolver::FailureReason::UnloadedDeckFile) {
             // A file that load() skipped has no Deck id, but keeps warm's
-            // empty-Deck report. Only then fall back to the old file lookup.
-            targetPath = resolveDeckPath(warmDecks, backend.decksDirectory(), options.deck);
-            if (targetPath.isEmpty())
-                return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
+            // empty-Deck report for that file.
+            targetPath = resolved.deckPath;
             QString loadError;
             targets << DeckIO::load(targetPath, &loadError);
+        } else {
+            return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
         }
         const QVector<Card> cards = allCards(targets, {});
         if (cards.isEmpty())
@@ -772,22 +751,10 @@ int run(const QStringList &arguments) {
         if (cards.isEmpty()) {
             // An existing Deck file that yields no Cards gets the empty-Deck
             // diagnostic; other misses name a stale --card id when supplied.
-            if (deckHasNoCards) {
-                QString targetPath;
-                if (resolved.deckId) {
-                    for (const Deck &deck : previewDecks) {
-                        if (deck.name == previewDeck) {
-                            targetPath = deck.path;
-                            break;
-                        }
-                    }
-                } else {
-                    // Keep the report for a Deck file that load() skipped.
-                    targetPath = resolveDeckPath(previewDecks, backend.decksDirectory(), options.deck);
-                }
-                if (!targetPath.isEmpty() && QFileInfo::exists(targetPath))
-                    return failEmptyDeck(options.deck, deckIssueReportForFile(targetPath), json);
-            }
+            const bool deckFileFound = resolved.failureReason == DeckIdResolver::FailureReason::None ||
+                                       resolved.failureReason == DeckIdResolver::FailureReason::UnloadedDeckFile;
+            if (deckHasNoCards && deckFileFound && QFileInfo::exists(resolved.deckPath))
+                return failEmptyDeck(options.deck, deckIssueReportForFile(resolved.deckPath), json);
             if (!options.card.isEmpty())
                 return fail(QObject::tr("No such card: %1").arg(options.card), json);
             return fail(QObject::tr("No cards to preview"), json);
@@ -840,7 +807,7 @@ int run(const QStringList &arguments) {
         if (requested.isEmpty())
             return QString();
         const DeckIdResolver::Result resolved = DeckIdResolver::resolve(decks, backend.decksDirectory(), requested);
-        if (!resolved.deckId) {
+        if (resolved.failureReason != DeckIdResolver::FailureReason::None) {
             if (allowNewDeck)
                 return requested;
             fail(QObject::tr("No such deck: %1").arg(requested), json);
@@ -863,21 +830,19 @@ int run(const QStringList &arguments) {
             checkedDecks = decks;
         } else if (resolved.deckId) {
             targetDeck = *resolved.deckId;
+            targetPath = resolved.deckPath;
             for (const Deck &deck : decks) {
-                if (deck.name == targetDeck) {
+                if (deck.name == targetDeck)
                     checkedDecks << deck;
-                    if (targetPath.isEmpty())
-                        targetPath = deck.path;
-                }
             }
-        } else {
+        } else if (resolved.failureReason == DeckIdResolver::FailureReason::UnloadedDeckFile) {
             // A Deck file that load() skipped has no id; keep the old report
             // for that file rather than claiming the Deck is unknown.
-            targetPath = resolveDeckPath(decks, backend.decksDirectory(), options.deck);
-            if (targetPath.isEmpty())
-                return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
+            targetPath = resolved.deckPath;
             QString loadError;
             checkedDecks << DeckIO::load(targetPath, &loadError);
+        } else {
+            return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
         }
 
         // Counts follow the resolved id, or the raw request when no loaded
@@ -1031,21 +996,14 @@ int run(const QStringList &arguments) {
     if (options.command == "use-deck") {
         if (options.path.isEmpty())
             return fail(QObject::tr("Usage: omacards use-deck NAME"), json);
-        const QString path = resolveDeckPath(decks, backend.decksDirectory(), options.path);
-        QString selected;
-        for (const Deck &deck : decks) {
-            if (deck.path == path) {
-                selected = deck.name;
-                break;
-            }
-        }
-        if (selected.isEmpty())
+        const DeckIdResolver::Result resolved = DeckIdResolver::resolve(decks, backend.decksDirectory(), options.path);
+        if (!resolved.deckId)
             return fail(QObject::tr("No such deck: %1").arg(options.path), json);
-        backend.selectDeck(selected);
+        backend.selectDeck(*resolved.deckId);
         QJsonObject object;
         object.insert("ok", true);
-        object.insert("deck", selected);
-        write(object, json, QObject::tr("Using deck %1").arg(selected));
+        object.insert("deck", *resolved.deckId);
+        write(object, json, QObject::tr("Using deck %1").arg(*resolved.deckId));
         return 0;
     }
 
@@ -1153,11 +1111,12 @@ int run(const QStringList &arguments) {
             return fail(error, json);
 
         // Reloaded after the write so an implicitly created Deck has the same
-        // stored path that decks --json reports. resolveDeckPath's filename
-        // fallback covers a Deck that load() skips after the write; only the
-        // written Deck is linted.
-        const QString writtenPath =
-            resolveDeckPath(backend.allDecks(), backend.decksDirectory(), options.deck.trimmed());
+        // stored path that decks --json reports. The resolver's file fallback
+        // covers a Deck that load() skips after the write; only the written
+        // Deck is linted.
+        const DeckIdResolver::Result written =
+            DeckIdResolver::resolve(backend.allDecks(), backend.decksDirectory(), *writeDeck);
+        const QString writtenPath = written.deckPath;
         const DeckIssueReport report = deckIssueReportForFile(writtenPath);
 
         QJsonArray idArray;

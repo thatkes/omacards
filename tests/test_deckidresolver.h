@@ -12,4 +12,5 @@ private slots:
     void textExtensionIsCheckedBeforeDeckExtension();
     void emptyRequestReturnsNoId();
     void unknownRequestReturnsStructuredReason();
+    void unloadedDeckFileCarriesCandidatePath();
 };
