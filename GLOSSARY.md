@@ -70,6 +70,14 @@ _Avoid_: standard card, Q&A card
 A card whose answer is a passage hidden inside the question.
 _Avoid_: fill-in-the-blank card
 
+**Cloze marker**:
+The `{{cN::answer}}` text in a Cloze card's Question that names the hidden passage and an optional hint. Markers keep their written number.
+_Avoid_: cloze bracket, blank marker
+
+**Cloze hint**:
+The text after the second `::` in a Cloze marker. It is not shown when the answer is revealed.
+_Avoid_: hint text
+
 **Import**:
 The act of bringing Cards from an Anki package, CSV/TSV file or JSON file into a Deck.
 _Avoid_: ingest, load cards
