@@ -51,7 +51,7 @@ public:
     void showNext();
     bool canAddAdditionalNew() const;
     // One session-only Review action: with no ready card it either presents a
-    // waiting Pending repeat or adds up to count Additional New cards.
+    // Pending repeat or adds up to count Additional New cards.
     bool reviewWhenEmpty(int count);
 
     StudyMode mode() const { return m_mode; }
@@ -59,7 +59,6 @@ public:
     QString answer() const { return m_answer; }
     bool showingAnswer() const { return m_showingAnswer; }
     bool hasCard() const { return !m_currentId.isEmpty(); }
-    bool waitingForRepeat() const { return m_waitingForRepeat; }
     int dueCount() const { return m_dueCount; }
     int reviewed() const { return m_reviewed; }
     int good() const { return m_good; }
@@ -114,8 +113,10 @@ private:
     QString m_status;
     QString m_currentId;
     QString m_deckName;
+    // Deadline of a Pending repeat on screen. A watcher rebuild must restore
+    // it: the card is not due in the Store yet, so the planner cannot find it.
+    qint64 m_currentPendingDeadline = 0;
     QSet<QString> m_sessionRatedIds;
     QStringList m_sessionAddedIds;
     bool m_showingAnswer = false;
-    bool m_waitingForRepeat = false;
 };

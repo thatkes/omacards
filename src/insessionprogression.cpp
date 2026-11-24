@@ -51,6 +51,24 @@ bool InSessionProgression::presentPendingNow(qint64 now) {
     return false;
 }
 
+void InSessionProgression::makePendingAvailable(qint64 now) {
+    // Pick the oldest expired deadline: that is the repeat the timer was
+    // armed for. Only its deadline changes, so the Flashcard on screen stays.
+    int oldest = -1;
+    qint64 deadline = 0;
+    for (int i = 0; i < m_reviewQueue.size(); ++i) {
+        const auto pending = m_reviewAgainNotBefore.constFind(m_reviewQueue.at(i));
+        if (pending == m_reviewAgainNotBefore.cend() || pending.value() > now)
+            continue;
+        if (oldest < 0 || pending.value() < deadline) {
+            oldest = i;
+            deadline = pending.value();
+        }
+    }
+    if (oldest >= 0)
+        m_reviewAgainNotBefore[m_reviewQueue.at(oldest)] = now;
+}
+
 void InSessionProgression::buildCram(const QVector<Card> &orderedCards) {
     clear();
     for (int i = 0; i < orderedCards.size(); ++i) {
@@ -84,10 +102,21 @@ InSessionProgression::NextResult InSessionProgression::next(qint64 now) {
         }
     }
     if (ready < 0) {
-        result.kind = Next::Waiting;
-        result.waitMs = qMax<qint64>(1, pendingWait(now));
-        return result;
+        // Nothing else is ready. Show the Pending repeat with the earliest
+        // deadline now; a waiting screen would just delay the same card.
+        qint64 earliest = 0;
+        for (int i = 0; i < m_reviewQueue.size(); ++i) {
+            const auto it = m_reviewAgainNotBefore.constFind(m_reviewQueue.at(i));
+            if (it == m_reviewAgainNotBefore.cend())
+                continue;
+            if (ready < 0 || it.value() < earliest) {
+                ready = i;
+                earliest = it.value();
+            }
+        }
     }
+    if (ready < 0)
+        return result; // Finished: no queued Card and no Pending repeat
 
     const QString chosen = m_reviewQueue.takeAt(ready);
     m_reviewQueueIds.remove(chosen);

@@ -27,7 +27,6 @@ class Backend : public QObject {
     Q_PROPERTY(QString answer READ answer NOTIFY cardChanged)
     Q_PROPERTY(bool showingAnswer READ showingAnswer NOTIFY cardChanged)
     Q_PROPERTY(bool hasCard READ hasCard NOTIFY cardChanged)
-    Q_PROPERTY(bool waitingForRepeat READ waitingForRepeat NOTIFY cardChanged)
     Q_PROPERTY(int dueCount READ dueCount NOTIFY dueCountChanged)
     Q_PROPERTY(int newCount READ newCount NOTIFY dueCountChanged)
     Q_PROPERTY(bool canAddNew READ canAddNew NOTIFY reviewActionChanged)
@@ -88,7 +87,6 @@ public:
     QString answer() const { return m_session.answer(); }
     bool showingAnswer() const { return m_session.showingAnswer(); }
     bool hasCard() const { return m_session.hasCard(); }
-    bool waitingForRepeat() const { return m_session.waitingForRepeat(); }
     int dueCount() const { return m_session.dueCount(); }
     int newCount() const { return m_planner.newCount(m_currentDeck); }
     // Empty deck names mean the Current Deck, matching the Home and CLI views.

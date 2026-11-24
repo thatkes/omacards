@@ -43,6 +43,7 @@ private slots:
     void perDeckAllowanceSpendsOnlyRatedDeck();
     void qmlReviewActionAddsSessionOnlyNewCards();
     void qmlReviewActionPresentsPendingRepeatFirst();
+    void qmlEndStateHasNoWaitingScreen();
     void backendKeepsPendingRepeatInSameSession();
     void unreadableDeckKeepsSchedulingState();
     void failedCardWriteDoesNotMutateBackend();

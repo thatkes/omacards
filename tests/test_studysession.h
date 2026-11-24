@@ -13,8 +13,12 @@ private slots:
     void modeSwitchStopsTimerAndClearsPendingRepeat();
     void injectedCramOrderPresentsExactFlashcards();
     void statsChangedSeesPresentedLeitnerBox();
-    void waitingExitEmitsOneSettledStatsNotification();
+    void endRepeatExitEmitsOneSettledStatsNotification();
     void finishedExitEmitsOneSettledStatsNotification();
+    void endOfSessionRepeatIsPresentedWithoutWaiting();
+    void repeatTimerDoesNotSwapTheUnratedFlashcard();
+    void oldestPendingDeadlineIsPresentedFirst();
+    void repeatedAgainLoopsUntilGoodThenFinishes();
     void invalidRatingsAreNoOps();
     void reviewPassesTypedRatingToRecording();
     void reviewFailuresKeepTranslatedText();

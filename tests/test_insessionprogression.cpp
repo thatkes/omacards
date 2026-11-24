@@ -88,16 +88,15 @@ void TestInSessionProgression::pendingRepeatWaitComesFromNextResult() {
     QCOMPARE(other.cardId, QStringLiteral("b"));
     QCOMPARE(other.waitMs, qint64(500)); // the Pending repeat left after taking b
 
-    const InSessionProgression::NextResult waiting = progression.next(1200);
-    QCOMPARE(waiting.kind, InSessionProgression::Next::Waiting);
-    QVERIFY(waiting.cardId.isEmpty());
-    QCOMPARE(waiting.waitMs, qint64(300));
-    QCOMPARE(waiting.leitnerBox, 0);
-
-    const InSessionProgression::NextResult repeated = progression.next(1500);
+    // No other card is ready, so the Pending repeat is shown before its
+    // original deadline instead of ending in a wait.
+    const InSessionProgression::NextResult repeated = progression.next(1200);
     QCOMPARE(repeated.kind, InSessionProgression::Next::Ready);
     QCOMPARE(repeated.cardId, QStringLiteral("a"));
+    QCOMPARE(repeated.waitMs, qint64(0));
+    QCOMPARE(repeated.leitnerBox, 0);
     QCOMPARE(progression.pendingRepeatCount(), 0);
+    QCOMPARE(progression.next(1500).kind, InSessionProgression::Next::Finished);
 
     InSessionProgression clamped;
     clamped.buildReview({"ready", "overdue", "later"}, {}, {{"overdue", 500}, {"later", 1500}});
@@ -111,8 +110,9 @@ void TestInSessionProgression::pendingRepeatWaitComesFromNextResult() {
     QCOMPARE(overdue.waitMs, qint64(300));
 
     const InSessionProgression::NextResult later = clamped.next(1200);
-    QCOMPARE(later.kind, InSessionProgression::Next::Waiting);
-    QCOMPARE(later.waitMs, qint64(300));
+    QCOMPARE(later.kind, InSessionProgression::Next::Ready);
+    QCOMPARE(later.cardId, QStringLiteral("later"));
+    QCOMPARE(later.waitMs, qint64(0));
 
     InSessionProgression now;
     now.buildReview({"ready", "repeat"}, {}, {{"repeat", 1200}});
@@ -127,7 +127,15 @@ void TestInSessionProgression::nextResultUsesSmallestPendingDeadline() {
     const InSessionProgression::NextResult ready = progression.next(1000);
     QCOMPARE(ready.cardId, QStringLiteral("a"));
     QCOMPARE(ready.waitMs, qint64(500));
-    QCOMPARE(progression.next(1000).kind, InSessionProgression::Next::Waiting);
+
+    // With no queued card ready, the oldest deadline is shown first even
+    // though its delay has not expired.
+    const InSessionProgression::NextResult oldest = progression.next(1000);
+    QCOMPARE(oldest.kind, InSessionProgression::Next::Ready);
+    QCOMPARE(oldest.cardId, QStringLiteral("b"));
+    QCOMPARE(oldest.waitMs, qint64(1500)); // the remaining repeat's deadline
+    QCOMPARE(progression.next(1000).cardId, QStringLiteral("c"));
+    QCOMPARE(progression.next(1000).kind, InSessionProgression::Next::Finished);
 }
 
 void TestInSessionProgression::rebuildPreservesAbsolutePendingDeadlines() {
@@ -142,8 +150,8 @@ void TestInSessionProgression::rebuildPreservesAbsolutePendingDeadlines() {
 
     QCOMPARE(rebuilt.pendingRepeats().value(QStringLiteral("a")), qint64(1500));
     QCOMPARE(rebuilt.next(1000).cardId, QStringLiteral("b"));
-    QCOMPARE(rebuilt.next(1200).kind, InSessionProgression::Next::Waiting);
-    QCOMPARE(rebuilt.next(1500).cardId, QStringLiteral("a"));
+    QCOMPARE(rebuilt.next(1200).cardId, QStringLiteral("a"));
+    QCOMPARE(rebuilt.next(1500).kind, InSessionProgression::Next::Finished);
 }
 
 void TestInSessionProgression::pendingAlreadyDueIsNotDuplicated() {
@@ -151,8 +159,7 @@ void TestInSessionProgression::pendingAlreadyDueIsNotDuplicated() {
     progression.buildReview({QStringLiteral("a"), QStringLiteral("b")}, {}, {{QStringLiteral("a"), 1500}});
 
     QCOMPARE(progression.next(1000).cardId, QStringLiteral("b"));
-    QCOMPARE(progression.next(1200).kind, InSessionProgression::Next::Waiting);
-    QCOMPARE(progression.next(1500).cardId, QStringLiteral("a"));
+    QCOMPARE(progression.next(1200).cardId, QStringLiteral("a"));
     QCOMPARE(progression.next(1500).kind, InSessionProgression::Next::Finished);
 }
 
@@ -164,8 +171,8 @@ void TestInSessionProgression::repeatAfterOverwritesDeadline() {
     QCOMPARE(progression.pendingRepeatCount(), 1);
     QCOMPARE(progression.pendingRepeats().value(QStringLiteral("a")), qint64(2000));
 
-    QCOMPARE(progression.next(1500).kind, InSessionProgression::Next::Waiting);
-    QCOMPARE(progression.next(2000).cardId, QStringLiteral("a"));
+    QCOMPARE(progression.next(1500).cardId, QStringLiteral("a"));
+    QCOMPARE(progression.next(2000).kind, InSessionProgression::Next::Finished);
 }
 
 void TestInSessionProgression::pendingRepeatsIsACopy() {
@@ -180,7 +187,7 @@ void TestInSessionProgression::pendingRepeatsIsACopy() {
     QVERIFY(!progression.pendingRepeats().contains(QStringLiteral("b")));
 
     QCOMPARE(progression.next(1000).cardId, QStringLiteral("b"));
-    QCOMPARE(progression.next(1000).kind, InSessionProgression::Next::Waiting);
+    QCOMPARE(progression.next(1000).cardId, QStringLiteral("a"));
 }
 
 void TestInSessionProgression::buildCramKeepsTheGivenOrder() {

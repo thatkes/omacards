@@ -254,7 +254,7 @@ void TestStudySession::modeSwitchStopsTimerAndClearsPendingRepeat() {
     QCOMPARE(fixture.session.mode(), StudyMode::Cram);
     QCOMPARE(fixture.session.reviewed(), 0);
     QCOMPARE(fixture.session.good(), 0);
-    QVERIFY(!fixture.session.waitingForRepeat());
+    QVERIFY(!fixture.session.status().contains(QStringLiteral("moment")));
     QCOMPARE(fixture.session.dueCount(), 1); // the Pending repeat did not follow
     QVERIFY(fixture.session.hasCard());
     QVERIFY(fixture.session.status().contains("Cram"));
@@ -316,7 +316,7 @@ void TestStudySession::statsChangedSeesPresentedLeitnerBox() {
         QCOMPARE(box, fixture.session.currentLeitnerBox());
 }
 
-void TestStudySession::waitingExitEmitsOneSettledStatsNotification() {
+void TestStudySession::endRepeatExitEmitsOneSettledStatsNotification() {
     ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "2000");
     SessionFixture fixture;
     QString error;
@@ -342,13 +342,96 @@ void TestStudySession::waitingExitEmitsOneSettledStatsNotification() {
     reviewedAtSignal.clear();
     goodAtSignal.clear();
     statusAtSignal.clear();
-    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention)); // Q2 done; only Q1 still waits
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention)); // Q2 done; Q1 returns at once
     QCOMPARE(reviewedAtSignal.size(), 1);
     QCOMPARE(reviewedAtSignal.last(), 2);
     QCOMPARE(goodAtSignal.last(), 1);
     QCOMPARE(statusAtSignal.last(), fixture.session.status());
-    QVERIFY(fixture.session.waitingForRepeat());
+    QVERIFY(fixture.session.hasCard());
+    QVERIFY(fixture.session.question().contains(QStringLiteral("Q1")));
+    QVERIFY(!fixture.session.status().contains(QStringLiteral("moment")));
+}
+
+void TestStudySession::endOfSessionRepeatIsPresentedWithoutWaiting() {
+    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "2000");
+    SessionFixture fixture;
+    QString error;
+    QVERIFY(fixture.prepare("EndRepeat", {"Q1"}, &error));
+    QVERIFY(error.isEmpty());
+    const QString firstCard = fixture.session.currentCardId();
+    QVERIFY(fixture.session.question().contains(QStringLiteral("Q1")));
+
+    QSignalSpy cardSpy(&fixture.session, &StudySession::cardChanged);
+    QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention));
+    QVERIFY(fixture.session.hasCard());
+    QCOMPARE(fixture.session.currentCardId(), firstCard);
+    QVERIFY(!fixture.session.showingAnswer());
+    QCOMPARE(fixture.session.dueCount(), 1);
+    QVERIFY(fixture.session.status().contains(QStringLiteral("predicted recall")));
+    QVERIFY(!fixture.session.status().contains(QStringLiteral("wait")));
+    QCOMPARE(cardSpy.count(), 1);
+}
+
+void TestStudySession::repeatTimerDoesNotSwapTheUnratedFlashcard() {
+    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "100");
+    SessionFixture fixture;
+    QString error;
+    QVERIFY(fixture.prepare("Timer", {"Q1", "Q2"}, &error));
+    QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention));
+    QVERIFY(fixture.session.question().contains(QStringLiteral("Q2")));
+    const QString onScreen = fixture.session.currentCardId();
+    fixture.session.reveal();
+
+    QSignalSpy cardSpy(&fixture.session, &StudySession::cardChanged);
+    QTest::qWait(400); // the Pending delay expires while the answer is up
+    QCOMPARE(fixture.session.currentCardId(), onScreen);
+    QVERIFY(fixture.session.showingAnswer());
+    QCOMPARE(cardSpy.count(), 0);
+
+    // The next transition is driven by the rating, not by the expired timer.
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
+    QVERIFY(fixture.session.question().contains(QStringLiteral("Q1")));
+}
+
+void TestStudySession::oldestPendingDeadlineIsPresentedFirst() {
+    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "5000");
+    SessionFixture fixture;
+    QString error;
+    QVERIFY(fixture.prepare("Deadlines", {"Q1", "Q2", "Q3"}, &error));
+
+    QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention)); // Q1 Pending, Q2 shown
+    QVERIFY(fixture.session.question().contains(QStringLiteral("Q2")));
+    QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention)); // Q2 Pending, Q3 shown
+    QVERIFY(fixture.session.question().contains(QStringLiteral("Q3")));
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
+    QVERIFY(fixture.session.question().contains(QStringLiteral("Q1"))); // older deadline first
+
+    // Rating that repeat Again gives it a fresh deadline, so Q2 takes its turn.
+    QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention));
+    QVERIFY(fixture.session.question().contains(QStringLiteral("Q2")));
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
+    QVERIFY(fixture.session.question().contains(QStringLiteral("Q1")));
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QVERIFY(!fixture.session.hasCard());
+    QVERIFY(fixture.session.status().contains(QStringLiteral("All caught up")));
+}
+
+void TestStudySession::repeatedAgainLoopsUntilGoodThenFinishes() {
+    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "5000");
+    SessionFixture fixture;
+    QString error;
+    QVERIFY(fixture.prepare("Loop", {"Q1"}, &error));
+
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention));
+        QVERIFY(fixture.session.hasCard());
+        QVERIFY(fixture.session.question().contains(QStringLiteral("Q1")));
+        QCOMPARE(fixture.session.dueCount(), 1);
+    }
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
+    QVERIFY(!fixture.session.hasCard());
+    QVERIFY(fixture.session.status().contains(QStringLiteral("All caught up")));
+    QCOMPARE(fixture.session.dueCount(), 0);
 }
 
 void TestStudySession::finishedExitEmitsOneSettledStatsNotification() {
@@ -526,11 +609,9 @@ void TestStudySession::againRatingWithFailedRefreshKeepsPendingRepeat() {
     QCOMPARE(errorSpy.count(), 2); // both refreshes after recording fail
     QCOMPARE(fixture.planner.availableCount(), 0);
     QCOMPARE(fixture.session.dueCount(), 1); // only the Pending repeat remains
-    QVERIFY(fixture.session.waitingForRepeat());
-    QVERIFY(!fixture.session.hasCard());
-
-    QTRY_VERIFY_WITH_TIMEOUT(fixture.session.question().contains(QStringLiteral("Q1")), 5000);
-    QVERIFY(!fixture.session.waitingForRepeat());
+    QVERIFY(fixture.session.hasCard());
+    QVERIFY(fixture.session.question().contains(QStringLiteral("Q1")));
+    QVERIFY(!fixture.session.status().contains(QStringLiteral("moment")));
 }
 
 void TestStudySession::reviewStatusOmitsSessionPositionBox() {
@@ -623,11 +704,10 @@ void TestStudySession::rebuildKeepsPendingRepeatInReview() {
     QVERIFY(fixture.session.hasCard());
     QVERIFY(fixture.session.question().contains("Q2"));
 
-    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention)); // Q2 done, Q1 still waiting
-    QVERIFY(fixture.session.waitingForRepeat());
-    QVERIFY(!fixture.session.hasCard());
-    QTRY_VERIFY_WITH_TIMEOUT(fixture.session.question().contains("Q1"), 5000);
-    QVERIFY(!fixture.session.waitingForRepeat());
+    QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention)); // Q2 done, Q1 returns at once
+    QVERIFY(fixture.session.hasCard());
+    QVERIFY(fixture.session.question().contains("Q1"));
+    QVERIFY(!fixture.session.status().contains(QStringLiteral("moment")));
 }
 
 void TestStudySession::rebuildKeepsUnratedAdditionalNewCards() {
@@ -674,11 +754,11 @@ void TestStudySession::switchingToCramClearsPendingRepeat() {
     // we only check that the session forwards the rebuilt state.
     QVERIFY(fixture.session.hasCard());
     QCOMPARE(fixture.session.currentLeitnerBox(), 1);
-    QVERIFY(!fixture.session.waitingForRepeat());
+    QVERIFY(!fixture.session.status().contains(QStringLiteral("moment")));
     fixture.session.reveal();
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QVERIFY(fixture.session.hasCard());
-    QVERIFY(!fixture.session.waitingForRepeat());
+    QVERIFY(!fixture.session.status().contains(QStringLiteral("moment")));
 }
 
 void TestStudySession::statsTextAndMathEngine() {

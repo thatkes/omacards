@@ -250,6 +250,24 @@ QString manyCardLines(int count) {
     return text;
 }
 
+// Every text item under the Study empty state, so a removed waiting branch
+// cannot leave its wording behind while "All caught up." stays intact.
+QStringList studyEmptyTexts(const StudyViewFixture &fixture) {
+    QStringList texts;
+    QQuickItem *empty = fixture.item(QStringLiteral("studyEmptyMessage"));
+    if (!empty)
+        return texts;
+    QList<QQuickItem *> pending{empty};
+    while (!pending.isEmpty()) {
+        QQuickItem *current = pending.takeLast();
+        const QString text = current->property("text").toString();
+        if (!text.isEmpty())
+            texts << text;
+        pending.append(current->childItems());
+    }
+    return texts;
+}
+
 } // namespace
 
 void TestBackend::defaultPathsIgnoreOrganizationName() {
@@ -2341,27 +2359,68 @@ void TestBackend::qmlReviewActionPresentsPendingRepeatFirst() {
     fixture.settle();
     QTest::keyClick(window, Qt::Key_1);
     fixture.settle();
-    QVERIFY(!fixture.backend.hasCard());
-    QVERIFY(fixture.backend.waitingForRepeat());
-    // The visible queue is empty even though a repeat is earning its delay.
-    QCOMPARE(reviewButtonLabel(fixture), QStringLiteral("Add 5"));
-    const int reviewedBefore = fixture.backend.reviewed();
-
-    QTest::keyClick(window, Qt::Key_R);
-    fixture.settle();
+    // The only queued card was rated Again: it returns at once, and R is not
+    // needed to pull it out of a waiting screen.
+    QVERIFY(fixture.backend.hasCard());
     QVERIFY(fixture.backend.question().contains(QStringLiteral("Q1")));
-    QVERIFY(!fixture.backend.waitingForRepeat());
-    QCOMPARE(fixture.backend.reviewed(), reviewedBefore);
+    QVERIFY(!fixture.backend.status().contains(QStringLiteral("moment")));
+    QCOMPARE(reviewButtonLabel(fixture), QStringLiteral("Review"));
+    const int reviewedBefore = fixture.backend.reviewed();
 
     QTest::keyClick(window, Qt::Key_Space);
     fixture.settle();
     QTest::keyClick(window, Qt::Key_2);
     fixture.settle();
     QVERIFY(!fixture.backend.hasCard());
+    QCOMPARE(fixture.backend.reviewed(), reviewedBefore + 1);
     QCOMPARE(reviewButtonLabel(fixture), QStringLiteral("Add 5"));
+
+    // Issue 181's Add 5 path still owns the empty Review queue: R adds
+    // session-only New cards without leaving Study.
     QTest::keyClick(window, Qt::Key_R);
     fixture.settle();
     QVERIFY(fixture.backend.question().contains(QStringLiteral("Q2")));
+}
+
+void TestBackend::qmlEndStateHasNoWaitingScreen() {
+    ScopedEnv delay("OMACARDS_AGAIN_DELAY_MS", "2000");
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    QVERIFY(fixture.createCard(QStringLiteral("Q1"), QStringLiteral("A1"), QStringLiteral("basic"), {}));
+    fixture.selectDeck();
+    fixture.view->settleFileWatcher();
+    QVERIFY(fixture.loadWindow());
+    auto *window = fixture.window();
+    QVERIFY(window);
+    QVERIFY(fixture.enterStudy(QStringLiteral("review")));
+    QVERIFY(fixture.backend.question().contains(QStringLiteral("Q1")));
+
+    QTest::keyClick(window, Qt::Key_Space);
+    fixture.settle();
+    QTest::keyClick(window, Qt::Key_1);
+    fixture.settle();
+    QVERIFY(fixture.backend.hasCard()); // the repeat is on screen, not pending a wait
+    QVERIFY(fixture.backend.question().contains(QStringLiteral("Q1")));
+
+    QTest::keyClick(window, Qt::Key_Space);
+    fixture.settle();
+    QTest::keyClick(window, Qt::Key_2);
+    fixture.settle();
+    QVERIFY(!fixture.backend.hasCard());
+    QVERIFY(fixture.backend.status().contains(QStringLiteral("All caught up")));
+
+    const QStringList texts = studyEmptyTexts(fixture);
+    QVERIFY(texts.contains(QStringLiteral("All caught up.")));
+    const QString emptyHint = "Nothing is waiting in this deck. Add a card, import a file, "
+                              "or keep the material warm with cram.";
+    QVERIFY(texts.contains(emptyHint));
+    QVERIFY(texts.contains(QStringLiteral("Cram this deck")));
+    QVERIFY(texts.contains(QStringLiteral("Back home")));
+    for (const QString &text : texts) {
+        QVERIFY(!text.contains(QStringLiteral("One more try")));
+        QVERIFY(!text.contains(QStringLiteral("coming back shortly")));
+    }
 }
 
 void TestBackend::backendKeepsPendingRepeatInSameSession() {
@@ -2383,10 +2442,10 @@ void TestBackend::backendKeepsPendingRepeatInSameSession() {
         QVERIFY(backend.question().contains("Q2"));
 
         backend.reveal();
-        backend.rate(3); // Good: the waiting Q1 comes back after the break.
-        QVERIFY(backend.waitingForRepeat());
-        QTRY_VERIFY_WITH_TIMEOUT(backend.question().contains("Q1"), 2000);
-        QVERIFY(!backend.waitingForRepeat());
+        backend.rate(3); // Good: the Pending Q1 is presented at once.
+        QVERIFY(backend.hasCard());
+        QVERIFY(backend.question().contains("Q1"));
+        QVERIFY(!backend.status().contains(QStringLiteral("moment")));
 
         const QVariantList cards = backend.cardList();
         QVariantMap againCard;
@@ -2780,7 +2839,7 @@ void TestBackend::modeSwitchStopsRepeatTimerAndClearsPending() {
         QCOMPARE(backend.mode(), QString("cram"));
         QCOMPARE(backend.reviewed(), 0);
         QCOMPARE(backend.good(), 0);
-        QVERIFY(!backend.waitingForRepeat());
+        QVERIFY(!backend.status().contains(QStringLiteral("moment")));
         QCOMPARE(backend.dueCount(), 1);
         QVERIFY(backend.hasCard());
         QVERIFY(backend.status().contains("Cram"));

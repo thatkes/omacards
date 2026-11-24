@@ -24,7 +24,7 @@ struct CramEntry {
 // supply the policy (ordered Cards and Ratings) and present the results.
 class InSessionProgression {
 public:
-    enum class Next { Ready, Waiting, Finished };
+    enum class Next { Ready, Finished };
 
     struct NextResult {
         Next kind = Next::Finished;
@@ -43,6 +43,9 @@ public:
     bool contains(const QString &id) const;
     // A learner asking R during a Pending repeat wants that card now.
     bool presentPendingNow(qint64 now);
+    // The repeat timer only makes an elapsed Pending repeat available for the
+    // next card transition; it never selects or presents a Flashcard.
+    void makePendingAvailable(qint64 now);
 
     NextResult next(qint64 now);
     // Read-only look at the next cards; used for prefetching only. It never
