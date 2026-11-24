@@ -200,9 +200,8 @@ void TestStudySession::setModeNormalizesInvalidInput() {
     QCOMPARE(statsSpy.count(), 1);
     QCOMPARE(order, QStringList({"mode", "stats"}));
 
-    // Backend forwards setMode() and then rebuilds; the session itself only
-    // resets counters and emits.
-    fixture.session.rebuild("Modes");
+    // The invalid mode still settles a Review Flashcard without a paired
+    // rebuild from the caller.
     QVERIFY(fixture.session.hasCard());
     QVERIFY(fixture.session.question().contains("Q"));
 }
@@ -230,7 +229,6 @@ void TestStudySession::setModeUppercaseCramNormalizesToReview() {
     QCOMPARE(statsSpy.count(), 1);
     QCOMPARE(order, QStringList({"mode", "stats"}));
 
-    fixture.session.rebuild("Modes");
     QVERIFY(fixture.session.hasCard());
     QCOMPARE(fixture.session.currentLeitnerBox(), 0); // remained in review mode
 }
@@ -290,7 +288,6 @@ void TestStudySession::setModeCramSwitchesAndResets() {
     QCOMPARE(statsSpy.count(), 1);
     QCOMPARE(order, QStringList({"mode", "stats"}));
 
-    fixture.session.rebuild("Modes");
     QVERIFY(fixture.session.hasCard());
     QCOMPARE(fixture.session.currentLeitnerBox(), 1);
     QVERIFY(fixture.session.status().contains("Cram"));
@@ -313,6 +310,60 @@ void TestStudySession::setModeCramSwitchesAndResets() {
     QCOMPARE(fixture.session.boxDistribution(), QVector<int>({1, 1, 0, 0, 0}));
     QCOMPARE(fixture.session.currentLeitnerBox(), 2); // the reset card waits; the other Box 2 card is next
     QCOMPARE(fixture.session.cramNextInCards(), 2);
+}
+
+void TestStudySession::modeSwitchStopsTimerAndClearsPendingRepeat() {
+    AgainDelayGuard guard;
+    qputenv("OMACARDS_AGAIN_DELAY_MS", "200");
+    SessionFixture fixture;
+    QString error;
+    QVERIFY(prepareSession(fixture, "AtomicMode", {"Q1", "Q2"}, &error));
+    QVERIFY(error.isEmpty());
+
+    QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention));
+    QVERIFY(fixture.session.question().contains("Q2"));
+    QCOMPARE(fixture.session.dueCount(), 2); // Q2 available, Q1 Pending
+
+    fixture.session.setMode("cram"); // no paired rebuild: the switch is atomic
+    QCOMPARE(fixture.session.mode(), StudyMode::Cram);
+    QCOMPARE(fixture.session.reviewed(), 0);
+    QCOMPARE(fixture.session.good(), 0);
+    QVERIFY(!fixture.session.waitingForRepeat());
+    QCOMPARE(fixture.session.dueCount(), 1); // the Pending repeat did not follow
+    QVERIFY(fixture.session.hasCard());
+    QVERIFY(fixture.session.status().contains("Cram"));
+
+    QSignalSpy cardSpy(&fixture.session, &StudySession::cardChanged);
+    // The old Review timer would have re-presented Q1 after 200 ms. A mode
+    // switch stops it, so no cardChanged arrives from the dead timer.
+    QTest::qWait(400);
+    QCOMPARE(cardSpy.count(), 0);
+}
+
+void TestStudySession::injectedCramOrderPresentsExactFlashcards() {
+    SessionFixture fixture;
+    StudySession ordered(fixture.repo, fixture.planner, fixture.ratings,
+                         [](const QVector<Card> &cards) { return cards; });
+    QString error;
+    QVERIFY(prepareSessionWith(fixture, ordered, "CramOrder", {"Q1", "Q2", "Q3"}, &error));
+    QVERIFY(error.isEmpty());
+    const QVector<Card> cards = fixture.repo.deckByName("CramOrder")->cards;
+    QCOMPARE(cards.size(), 3);
+
+    ordered.setMode("cram"); // one operation, no rebuild afterwards
+    QCOMPARE(ordered.mode(), StudyMode::Cram);
+    QCOMPARE(ordered.currentCardId(), cards.at(0).id);
+    QVERIFY(ordered.status().contains("Cram"));
+
+    for (int i = 1; i < cards.size(); ++i) {
+        ordered.reveal();
+        QVERIFY(ordered.rate(Rating::Good, Config::kDefaultRetention));
+        QCOMPARE(ordered.currentCardId(), cards.at(i).id);
+    }
+    // Cram is endless: the first Flashcard returns once the others have gone round.
+    ordered.reveal();
+    QVERIFY(ordered.rate(Rating::Good, Config::kDefaultRetention));
+    QCOMPARE(ordered.currentCardId(), cards.at(0).id);
 }
 
 void TestStudySession::statsChangedSeesPresentedLeitnerBox() {

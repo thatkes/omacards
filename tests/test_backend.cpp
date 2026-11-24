@@ -26,6 +26,7 @@
 #include <QUrl>
 #include <QVariant>
 #include <memory>
+#include <utility>
 
 #include "test_backend.h"
 #include "test_support.h"
@@ -178,7 +179,8 @@ struct ThemeDirGuard {
 struct StudyViewFixture {
     enum class Sizing { Minimum, KeepWindowSize };
 
-    StudyViewFixture() : backend(dir.path(), dir.filePath("state.db")) {}
+    explicit StudyViewFixture(Backend::CramOrder cramOrder = {})
+        : backend(dir.path(), dir.filePath("state.db"), std::move(cramOrder)) {}
 
     bool initialize() { return backend.initialize(&error); }
 
@@ -2456,6 +2458,84 @@ void TestBackend::setModeBoundarySemantics() {
     QVERIFY(order.size() >= 2);
     QCOMPARE(order.at(0), QStringLiteral("mode"));
     QCOMPARE(order.at(1), QStringLiteral("stats"));
+}
+
+void TestBackend::modeSwitchStopsRepeatTimerAndClearsPending() {
+    QTemporaryDir dir;
+    const QByteArray previousDelay = qgetenv("OMACARDS_AGAIN_DELAY_MS");
+    qputenv("OMACARDS_AGAIN_DELAY_MS", "200");
+    {
+        // Keep deck files out of the state-db directory so a SQLite write
+        // cannot trigger the deck watcher's debounced reload mid-test. Create
+        // it first so initialize() does not seed the two-card Welcome deck.
+        const QString decksDir = dir.filePath("decks");
+        QVERIFY(QDir().mkpath(decksDir));
+        Backend backend(decksDir, dir.filePath("state.db"));
+        QString error;
+        QVERIFY(backend.initialize(&error));
+        QVERIFY(backend.createDeck("Atomic", &error));
+        QVERIFY(backend.createCard("Atomic", "Q1", "A1", "basic", {}, &error));
+        QVERIFY(backend.createCard("Atomic", "Q2", "A2", "basic", {}, &error));
+        // Flush the watcher's 120 ms debounce before the repeat timer is armed.
+        QTest::qWait(250);
+        backend.selectDeck("Atomic");
+
+        backend.reveal();
+        backend.rate(1); // Again: Q1 Pending, Q2 presented
+        QVERIFY(backend.question().contains("Q2"));
+        QCOMPARE(backend.dueCount(), 2);
+
+        // Backend no longer pairs setMode() with rebuild(); the switch alone
+        // stops the timer, drops the Pending repeat and presents the new queue.
+        backend.setMode("cram");
+        QCOMPARE(backend.mode(), QString("cram"));
+        QCOMPARE(backend.reviewed(), 0);
+        QCOMPARE(backend.good(), 0);
+        QVERIFY(!backend.waitingForRepeat());
+        QCOMPARE(backend.dueCount(), 1);
+        QVERIFY(backend.hasCard());
+        QVERIFY(backend.status().contains("Cram"));
+
+        QSignalSpy cardSpy(&backend, &Backend::cardChanged);
+        QTest::qWait(400); // the old Review timer would have fired by now
+        QCOMPARE(cardSpy.count(), 0);
+    }
+    if (previousDelay.isNull())
+        qunsetenv("OMACARDS_AGAIN_DELAY_MS");
+    else
+        qputenv("OMACARDS_AGAIN_DELAY_MS", previousDelay);
+}
+
+void TestBackend::qmlCramInjectedOrderPresentsExactNextFlashcard() {
+    StudyViewFixture fixture([](const QVector<Card> &cards) { return cards; });
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    QVERIFY(fixture.createCard("Alpha", "A"));
+    QVERIFY(fixture.createCard("Bravo", "B"));
+    QVERIFY(fixture.createCard("Charlie", "C"));
+    fixture.selectDeck();
+
+    QVERIFY(fixture.loadWindow());
+    QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
+
+    const QVector<Card> deckCards = fixture.backend.searchCards({}, QStringLiteral("Study"));
+    QCOMPARE(deckCards.size(), 3);
+    QCOMPARE(fixture.backend.mode(), QStringLiteral("cram"));
+    QVERIFY(fixture.backend.status().contains(QStringLiteral("Cram")));
+    QCOMPARE(fixture.backend.currentCardId(), deckCards.at(0).id);
+
+    const auto rateGood = [&fixture] {
+        QTest::keyClick(fixture.window(), Qt::Key_Space);
+        fixture.settle();
+        QTest::keyClick(fixture.window(), Qt::Key_2);
+        fixture.settle();
+    };
+    rateGood();
+    QCOMPARE(fixture.backend.currentCardId(), deckCards.at(1).id);
+    rateGood();
+    QCOMPARE(fixture.backend.currentCardId(), deckCards.at(2).id);
+    rateGood();
+    QCOMPARE(fixture.backend.currentCardId(), deckCards.at(0).id);
 }
 
 void TestBackend::invalidRatingsAreNoOps() {

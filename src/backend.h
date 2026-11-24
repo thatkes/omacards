@@ -54,9 +54,14 @@ class Backend : public QObject {
     Q_PROPERTY(QString decksDirectory READ decksDirectory CONSTANT)
 
 public:
+    // Forwarded to StudySession so window tests can pin the Cram order. The
+    // default shuffles on every rebuild, exactly as production always has.
+    using CramOrder = StudySession::CramOrder;
+
     // Paths are required so callers cannot accidentally fall back to implicit
     // environment-driven locations. Use fromEnvironment() for that case.
-    explicit Backend(const QString &decksDirectory, const QString &databasePath, QObject *parent = nullptr);
+    explicit Backend(const QString &decksDirectory, const QString &databasePath, CramOrder cramOrder = {},
+                     QObject *parent = nullptr);
     static std::unique_ptr<Backend> fromEnvironment(QObject *parent = nullptr);
 
     bool initialize(QString *error = nullptr);

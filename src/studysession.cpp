@@ -5,9 +5,21 @@
 #include <QRegularExpression>
 
 #include <algorithm>
+#include <utility>
 
-StudySession::StudySession(DeckRepository &decks, StudyPlanner &planner, RatingRecording &ratings, QObject *parent)
-    : QObject(parent), m_decks(decks), m_planner(planner), m_ratings(ratings), m_repeatDelayMs(Config::againDelayMs()) {
+namespace {
+QVector<Card> shuffledCramOrder(const QVector<Card> &cards) {
+    QVector<Card> ordered = cards;
+    std::shuffle(ordered.begin(), ordered.end(), *QRandomGenerator::global());
+    return ordered;
+}
+} // namespace
+
+StudySession::StudySession(DeckRepository &decks, StudyPlanner &planner, RatingRecording &ratings, CramOrder cramOrder,
+                           QObject *parent)
+    : QObject(parent), m_decks(decks), m_planner(planner), m_ratings(ratings),
+      m_cramOrder(cramOrder ? std::move(cramOrder) : CramOrder(shuffledCramOrder)),
+      m_repeatDelayMs(Config::againDelayMs()) {
     m_repeatTimer.setSingleShot(true);
     connect(&m_repeatTimer, &QTimer::timeout, this, [this] { presentCard(); });
     connect(&m_math, &MathRenderer::mathRendered, this, &StudySession::applyMathRenderResult);
@@ -17,13 +29,25 @@ void StudySession::setMode(const QString &mode) {
     if (mode == Domain::toString(m_mode))
         return;
     m_mode = Domain::modeFromString(mode);
+    // A mode switch is a new sitting for this deck: nothing from the old mode's
+    // queue, Pending repeats or timer survives it. rebuildQueue() presents the
+    // new mode's first Flashcard; the counters settle before the one stats
+    // notification so subscribers never see a half-switched session.
+    m_repeatTimer.stop();
+    m_progression.clear();
     m_reviewed = 0;
     m_good = 0;
     emit modeChanged();
+    rebuildQueue(m_deckName, false);
     emit statsChanged();
 }
 
 void StudySession::rebuild(const QString &deckName) {
+    rebuildQueue(deckName, true);
+}
+
+void StudySession::rebuildQueue(const QString &deckName, bool notifyStats) {
+    m_deckName = deckName;
     // A watcher refresh can rebuild the queue while a repeat is pending. Keep
     // those deadlines for cards that are still available; a cram queue is
     // rebuilt from scratch and clears them instead.
@@ -34,11 +58,9 @@ void StudySession::rebuild(const QString &deckName) {
 
     const Deck *deck = m_decks.deckByName(deckName);
     if (deck && m_mode == StudyMode::Cram) {
-        // A rebuilt Cram session gets a fresh shuffle; the module only orders
-        // the Cards it is given.
-        QVector<Card> ordered = deck->cards;
-        std::shuffle(ordered.begin(), ordered.end(), *QRandomGenerator::global());
-        m_progression.buildCram(ordered);
+        // The module only orders the Cards it is given; the injected policy
+        // decides whether a rebuild shuffles them or keeps deck-file order.
+        m_progression.buildCram(m_cramOrder(deck->cards));
     } else if (deck) {
         QStringList dueIds;
         QStringList newIds;
@@ -49,7 +71,7 @@ void StudySession::rebuild(const QString &deckName) {
     }
 
     refreshDueCount();
-    presentCard();
+    presentCard(notifyStats);
 }
 
 void StudySession::startFresh(const QString &deckName) {
