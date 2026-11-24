@@ -63,34 +63,38 @@ exists, seeding is skipped and the Deck list is empty; the checkout helper
 ## Command list
 
 ```sh
-omacards add-card [--deck <deck>] -q <question> -a <answer> [--tags <tags>] [--json]
+omacards add-card [-d <deck>] -q <question> -a <answer> [--tags <tags>] [--json]
 omacards add-cards [--deck <deck>] [--description <text>] --input <file> [--json]
 omacards add-deck <deck> [--description <text>] [--json]
-omacards cards [--deck <deck>] [--json]
-omacards check [--deck <deck>] [--math] [--strict] [--json]
+omacards cards [-d <deck>] [--json]
+omacards check [-d <deck>] [--math] [--strict] [--json]
 omacards config [--new-card-allowance <n>] [--day-start-hour <h>] [--retention <r>] [--json]
-omacards cram [--deck <deck>] [--steps <n>] [--json]
+omacards cram [-d <deck>] [--steps <n>] [--json]
 omacards decks [--json]
 omacards decks current [--json]
-omacards delete-card -c <card-id> [--json]
+omacards delete-card -c <card-id> [-d <deck>] [--json]
 omacards delete-deck <deck> [--json]
-omacards due [--deck <deck>] [--json]
-omacards edit-card -c <card-id> -a <answer> [--type <type>] [--tags <tags>] [--json]
+omacards due [-d <deck>] [--json]
+omacards edit-card -c <card-id> [-q <question>] [-a <answer>] [--type <type>] [--tags <tags>] [--json]
 omacards edit-deck <deck> --description <text> [--json]
 omacards help  # aliases: --help, -h
-omacards import <file> [--deck <deck>] [--json]
+omacards import <file> [-d <deck>] [--json]
 omacards open  # start the GUI; ignores --json
-omacards preview [--deck <deck>] [--card <card-id>] [--format <format>] [--json]
+omacards preview [-d <deck>] [--card <card-id>] [--format text|html|markdown] [--json]
 omacards rename-deck <old-name> <new-name> [--json]
 omacards review -c <card-id> -r <rating> [--json]
-omacards search <term> [--deck <deck>] [--json]
+omacards search <term> [-d <deck>] [--json]
+omacards skill  # bare skill prints status and help; --json prints status only
 omacards skill <subcommand> [--json]
 omacards skill install [--json]
 omacards skill status [--json]
 omacards stats [--json]
 omacards use-deck <deck> [--json]
-omacards warm [--deck <deck>] [--json]
+omacards warm [-d <deck>] [--json]
 ```
+
+`-d` is shorthand for `--deck` wherever a deck flag is accepted. `-q` and
+`-a` set the question and answer for `add-card` and `edit-card`.
 
 `add-card` without `--deck` writes to the Current deck, so check
 `omacards decks current --json` first.
@@ -215,9 +219,11 @@ id: a1b2c3d4e5f6
   `type: cloze`, `tags: a, b`, and an explicit `id:`.
 - **Continuation lines must start with exactly two spaces.** One leading space
   or three or more is reported as a Deck issue by `check`.
-- A Card id is a hash of its Deck, question and answer: editing the question or
-  answer changes it, while tag and type edits keep it. Add an explicit `id:`
-  line to pin it across edits.
+- A Card id is a hash of its Deck, question and answer. A hand-edited file
+  with no `id:` line rehashes when the Deck, question or answer changes, while
+  tag and type edits keep the id. An explicit `id:` line pins it across edits
+  and Deck renames. `edit-card` keeps the id and writes that line only when
+  the content no longer matches the hash; `rename-deck` pins every id.
 
 After editing a file by hand, run the **validation loop** below.
 
@@ -321,7 +327,8 @@ same boundary governs Ratings on the Study day, Streaks and the New-card
 allowance. `due`, `check` and `stats` already account for the New-card
 allowance. `totalDue` in their JSON is the unclamped count.
 
-A Card's id is a hash of its Deck, question and answer: editing the question
-or answer changes it, while tag and type edits keep it. Use the id returned by
-`edit-card` for follow-up `review` or `delete-card`, or pin an explicit `id:`
-in the deck file.
+`edit-card` keeps a Card's id and writes an explicit `id:` line when the
+content no longer matches the hash; `rename-deck` pins every id when the Deck
+name changes. Hand-edited files with no `id:` line still rehash when the Deck,
+question or answer changes, while tag and type edits keep the id. Use the id
+returned by `edit-card` for follow-up `review` or `delete-card`.
