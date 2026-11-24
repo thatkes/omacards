@@ -30,7 +30,9 @@ void TestDeckIdResolver::exactDeckNameWins() {
     QVERIFY(result.deckId.has_value());
     QCOMPARE(*result.deckId, QStringLiteral("Notes"));
     QCOMPARE(result.failureReason, DeckIdResolver::FailureReason::None);
-    QCOMPARE(result.deckPath, QStringLiteral("/decks/Notes.txt"));
+    // The exact name wins over the file-name fallback, so the path belongs
+    // to the chosen Deck, not to the file the request happened to name.
+    QCOMPARE(result.deckPath, QStringLiteral("/decks/Other.txt"));
 }
 
 void TestDeckIdResolver::fileNameFallbackReturnsWrittenName() {
