@@ -37,6 +37,7 @@ private slots:
     void checkDeckScoping();
     void readCommandJsonContracts();
     void cardsResolvesDeckFileNameWithDifferentWrittenName();
+    void writeCommandsResolveDeckFileNameWithDifferentWrittenName();
     void useDeckCommandContract();
     void decksCurrentCommandContract();
     void reviewCommandContract();

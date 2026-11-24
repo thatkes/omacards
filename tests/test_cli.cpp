@@ -1692,6 +1692,100 @@ void TestCli::cardsResolvesDeckFileNameWithDifferentWrittenName() {
     QCOMPARE(missing.value(QStringLiteral("error")).toString(), QStringLiteral("No such deck: Unknown"));
 }
 
+void TestCli::writeCommandsResolveDeckFileNameWithDifferentWrittenName() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    const QString path = QDir(decks).filePath("Lesson-Notes.txt");
+    QVERIFY(writeFile(path, "# Deck: Written Name\n---\nQ: Existing?\nA: A\n"));
+
+    QString error;
+    const Deck initial = DeckIO::load(path, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(initial.cards.size(), 1);
+    const QString originalId = initial.cards.first().id;
+
+    int code = -1;
+    const QJsonObject single = runCli(
+        {"add-card", "--deck", "Lesson Notes", "-q", "Single Q?", "-a", "Single A", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY(single.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(single.value(QStringLiteral("card")).toObject().value(QStringLiteral("deck")).toString(),
+             QStringLiteral("Written Name"));
+    const QString singleId = single.value(QStringLiteral("id")).toString();
+    QVERIFY(!singleId.isEmpty());
+
+    const QString batchInput = dir.filePath("batch.json");
+    QVERIFY(writeFile(batchInput, R"([{"question":"Batch Q?","answer":"Batch A"}])"));
+    const QJsonObject batch =
+        runCli({"add-cards", "--deck", "Lesson Notes", "--input", batchInput, "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(sortedKeys(batch), QStringList({"created", "deck", "ids", "issueCounts", "ok", "path"}));
+    QCOMPARE(batch.value(QStringLiteral("deck")).toString(), QStringLiteral("Lesson Notes"));
+    QCOMPARE(batch.value(QStringLiteral("created")).toInt(), 1);
+    QCOMPARE(batch.value(QStringLiteral("path")).toString(), path);
+
+    const QString textInput = dir.filePath("batch-text.json");
+    QVERIFY(writeFile(textInput, R"([{"question":"Text Q?","answer":"Text A"}])"));
+    const QString batchText =
+        runCliText({"add-cards", "--deck", "Lesson Notes", "--input", textInput}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY(batchText.contains(QStringLiteral("Added 1 cards to Lesson Notes")));
+
+    const QJsonObject edited = runCli(
+        {"edit-card", "--deck", "Lesson Notes", "-c", originalId, "-q", "Edited Q?", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(sortedKeys(edited), QStringList({"card", "id", "ok"}));
+    const QJsonObject editedCard = edited.value(QStringLiteral("card")).toObject();
+    QCOMPARE(editedCard.value(QStringLiteral("deck")).toString(), QStringLiteral("Written Name"));
+    QCOMPARE(editedCard.value(QStringLiteral("question")).toString(), QStringLiteral("Edited Q?"));
+
+    const QJsonObject deleted =
+        runCli({"delete-card", "--deck", "Lesson Notes", "-c", singleId, "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(sortedKeys(deleted), QStringList({"id", "ok"}));
+    QCOMPARE(deleted.value(QStringLiteral("id")).toString(), singleId);
+
+    const QJsonObject described =
+        runCli({"edit-deck", "Lesson Notes", "--description", "Fresh description", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(sortedKeys(described), QStringList({"deck", "description", "ok", "path"}));
+    QCOMPARE(described.value(QStringLiteral("deck")).toString(), QStringLiteral("Lesson Notes"));
+    QCOMPARE(described.value(QStringLiteral("description")).toString(), QStringLiteral("Fresh description"));
+    QCOMPARE(described.value(QStringLiteral("path")).toString(), path);
+    const QString describedText =
+        runCliText({"edit-deck", "Lesson Notes", "--description", "Terse"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY(describedText.contains(QStringLiteral("Updated description of deck Lesson Notes")));
+
+    error.clear();
+    const Deck written = DeckIO::load(path, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(written.name, QStringLiteral("Written Name"));
+    QCOMPARE(written.description, QStringLiteral("Terse"));
+    QCOMPARE(written.cards.size(), 3);
+    for (const Card &card : written.cards) {
+        QCOMPARE(card.deck, QStringLiteral("Written Name"));
+        QVERIFY(card.id != singleId);
+    }
+    const QSet<QString> questions{written.cards.at(0).question, written.cards.at(1).question,
+                                  written.cards.at(2).question};
+    QCOMPARE(questions, QSet<QString>({"Edited Q?", "Batch Q?", "Text Q?"}));
+
+    // A name that is not an existing Deck id or file still defines a new Deck.
+    const QJsonObject fresh = runCli({"add-card", "--deck", "Brand New", "-q", "Fresh Q?", "-a", "Fresh A", "--json"},
+                                     decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(fresh.value(QStringLiteral("card")).toObject().value(QStringLiteral("deck")).toString(),
+             QStringLiteral("Brand New"));
+    error.clear();
+    const Deck freshDeck = DeckIO::load(QDir(decks).filePath("Brand-New.txt"), &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(freshDeck.name, QStringLiteral("Brand New"));
+}
+
 void TestCli::useDeckCommandContract() {
     QTemporaryDir dir;
     const QString decks = dir.filePath("decks");
