@@ -31,6 +31,7 @@ private slots:
     void headlessCommandDetectionIsComplete();
     void unknownCommandJsonError();
     void checkJsonKeyContract();
+    void summaryContractAcrossThreeStudyDays();
     void checkDeckScoping();
     void readCommandJsonContracts();
     void useDeckCommandContract();
