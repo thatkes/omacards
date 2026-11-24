@@ -6,6 +6,7 @@
 #include "translator.h"
 
 #include <QApplication>
+#include <QCoreApplication>
 #include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -29,13 +30,14 @@ int main(int argc, char *argv[]) {
     const QStringList arguments = allArguments.mid(1);
 
     // Agent commands must work on a headless machine. Set the platform before
-    // any QGuiApplication exists, then exit without loading QML.
-    if (Cli::needsOffscreen(arguments))
+    // any application object exists, then run without loading QML or QtGui.
+    if (Cli::needsOffscreen(arguments)) {
         qputenv("QT_QPA_PLATFORM", "offscreen");
+        QCoreApplication app(argc, argv);
+        return Cli::run(arguments);
+    }
 
     QApplication app(argc, argv);
-    if (Cli::needsOffscreen(arguments))
-        return Cli::run(arguments);
 
     app.setApplicationName("omacards");
     app.setApplicationVersion("0.1.0");

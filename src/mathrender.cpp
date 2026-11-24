@@ -4,11 +4,13 @@
 
 #include <QColor>
 #include <QCryptographicHash>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
 #include <QFontMetricsF>
+#include <QGuiApplication>
 #include <QHash>
 #include <QMutex>
 #include <QMutexLocker>
@@ -604,11 +606,18 @@ QSize MathRenderer::reservedMathSize(const QString &expression, double scale, co
         if (!logical.isEmpty())
             return QSize(qRound(logical.width() * scale), qRound(logical.height() * scale));
     }
+    const auto evenPixels = [](qreal value) { return qMax(2, 2 * qCeil(value / 2.0)); };
+    // The CLI runs under QCoreApplication, where Qt's font database is
+    // unavailable. Its placeholders are never displayed, so a deterministic
+    // scale-derived box is enough and avoids a QFontMetricsF abort.
+    if (!qobject_cast<QGuiApplication *>(QCoreApplication::instance())) {
+        const int edge = evenPixels(10.0 * scale + 4.0);
+        return QSize(edge, edge);
+    }
     QFont font(QStringLiteral("Noto Sans Math"));
     font.setPixelSize(qMax(1, qRound(10.0 * scale)));
     const QFontMetricsF metrics(font);
     const QRectF glyphs = metrics.boundingRect(unicodeMath(expression));
-    const auto evenPixels = [](qreal value) { return qMax(2, 2 * qCeil(value / 2.0)); };
     return QSize(evenPixels(glyphs.width() + 4.0), evenPixels(glyphs.height() + 4.0));
 }
 
