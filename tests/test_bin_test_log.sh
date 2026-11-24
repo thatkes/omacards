@@ -5,7 +5,8 @@ set -eu
 # bin/test against a fake test binary in an isolated checkout, twice at once,
 # so a fixed log path shows up as mixed or missing summaries. A plain run now
 # splits the suites into two concurrent groups; each group gets its own log and
-# environment, and the runner presents one combined summary.
+# environment, and the runner presents one combined summary. A CLI source edit
+# is checked against the app binary the fake CLI tests spawn.
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
@@ -18,13 +19,31 @@ export OMACARDS_SCALING_SMALL OMACARDS_SCALING_LARGE
 
 repo="$tmp/repo"
 fakebin="$tmp/fake-bin"
-mkdir -p "$repo/bin" "$repo/build/tests" "$fakebin"
-cp "$ROOT/bin/test" "$ROOT/bin/check-test-summary" "$ROOT/bin/check-scaling" "$repo/bin/"
-chmod +x "$repo/bin/test" "$repo/bin/check-test-summary" "$repo/bin/check-scaling"
+mkdir -p "$repo/bin" "$repo/build/tests" "$repo/src" "$fakebin"
+cp "$ROOT/bin/test" "$ROOT/bin/build" "$ROOT/bin/check-test-summary" \
+    "$ROOT/bin/check-scaling" "$repo/bin/"
+chmod +x "$repo/bin/test" "$repo/bin/build" "$repo/bin/check-test-summary" \
+    "$repo/bin/check-scaling"
 
 printf '#!/bin/sh\nexit 0\n' > "$fakebin/qmake6"
-printf '#!/bin/sh\nexit 0\n' > "$fakebin/make"
+# The app build stamps the binary with the current CLI source; the test build
+# leaves it alone. A stale binary therefore shows up as stale source below.
+cat > "$fakebin/make" <<EOF
+#!/bin/sh
+set -eu
+if [ "\$PWD" = "$repo/build" ]; then
+    {
+        printf '#!/bin/sh\\n'
+        printf '# app source: '
+        cat "$repo/src/cli.cpp"
+        printf 'exit 0\\n'
+    } > "$repo/build/omacards"
+    chmod +x "$repo/build/omacards"
+fi
+exit 0
+EOF
 chmod +x "$fakebin/qmake6" "$fakebin/make"
+printf 'cli-source-original\n' > "$repo/src/cli.cpp"
 printf '#!/bin/sh\nexit 0\n' > "$repo/build/omacards"
 chmod +x "$repo/build/omacards"
 
@@ -41,7 +60,7 @@ for arg in "$@"; do
         exit 0
     fi
     case "$arg" in
-        run-a|run-b|fail|partial|info) mode=$arg ;;
+        run-a|run-b|fail|partial|info|edited) mode=$arg ;;
         Test*)
             all_suites="$all_suites $arg"
             if [ -z "$group" ]; then group=$arg; fi
@@ -52,6 +71,7 @@ printf 'GROUP: %s\n' "$group"
 printf 'ALL_SUITES:%s\n' "$all_suites"
 printf 'ENV: HOME=%s XDG_CACHE_HOME=%s OMACARDS_STATE_DB=%s TMPDIR=%s\n' \
     "${HOME:-unset}" "${XDG_CACHE_HOME:-unset}" "${OMACARDS_STATE_DB:-unset}" "${TMPDIR:-unset}"
+printf 'APP_SOURCE: %s\n' "$(sed -n '2p' "$(dirname -- "$0")/../omacards")"
 if [ "$mode" = info ]; then
     printf 'OMACARDS_TEST_MODE: info\n'
     exit 0
@@ -61,7 +81,7 @@ case "$group" in
     TestBackend) suites=3; totals=3; marked=1 ;;
 esac
 case "$mode" in
-    run-a|run-b) ;;
+    run-a|run-b|edited) ;;
     fail) suites=1; totals=1; marked=0 ;;
     partial) suites=9; totals=2; marked=0 ;;
     *) exit 2 ;;
@@ -228,6 +248,19 @@ assert_contains partial_run_guard "$tmp/out-partial.log" 'expected 18'
 PATH="$fakebin:$PATH" "$repo/bin/test" info > "$tmp/out-info.log" 2>&1
 assert_matches info_has_two_groups 2 "$(count_matches "$tmp/out-info.log" 'GROUP: ')"
 assert_contains info_mode_summary "$tmp/out-info.log" 'across 0 suites'
+
+# A CLI source edit must reach the app binary the CLI tests spawn. The fake
+# make stamps it only during the app build, so a runner that skips that build
+# leaves the tests looking at the previous source.
+printf 'cli-source-edited\n' > "$repo/src/cli.cpp"
+set +e
+PATH="$fakebin:$PATH" "$repo/bin/test" --suite TestCli edited > "$tmp/out-rebuild.log" 2>&1
+status_rebuild=$?
+set -e
+assert_status rebuild_after_cli_edit_status 0 "$status_rebuild"
+assert_contains rebuild_runs_app_build "$tmp/out-rebuild.log" "Built $repo/build/omacards"
+assert_contains rebuild_cli_tests_see_edited_source "$tmp/out-rebuild.log" \
+    'APP_SOURCE: # app source: cli-source-edited'
 
 if [ "$failures" -ne 0 ]; then
     printf '%s bin/test log self-test case(s) failed\n' "$failures"
