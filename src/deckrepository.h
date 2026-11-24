@@ -33,8 +33,12 @@ class DeckRepository : public QObject {
     Q_OBJECT
 
 public:
+    static constexpr int kProductionReloadDebounceMs = 120;
+
+    // The interval is a test seam: callers can settle a watcher reload without
+    // waiting out the production debounce. Production always uses the default.
     explicit DeckRepository(const QString &decksDirectory, Store &store, FileHistory &history,
-                            QObject *parent = nullptr);
+                            QObject *parent = nullptr, int reloadDebounceMs = kProductionReloadDebounceMs);
 
     bool initialize(QString *error = nullptr);
     void watchDirectory();

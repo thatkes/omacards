@@ -66,8 +66,10 @@ public:
 
     // Paths are required so callers cannot accidentally fall back to implicit
     // environment-driven locations. Use fromEnvironment() for that case.
+    // The debounce argument is forwarded to DeckRepository for window tests;
+    // production callers omit it and keep the 120 ms watcher interval.
     explicit Backend(const QString &decksDirectory, const QString &databasePath, CramOrder cramOrder = {},
-                     QObject *parent = nullptr);
+                     QObject *parent = nullptr, int watcherDebounceMs = DeckRepository::kProductionReloadDebounceMs);
     static std::unique_ptr<Backend> fromEnvironment(QObject *parent = nullptr);
 
     bool initialize(QString *error = nullptr);
