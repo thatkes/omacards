@@ -659,6 +659,25 @@ QObject *pickerObject(const MainWindowHarness &view, const QString &objectName) 
     return view.window ? view.window->findChild<QObject *>(objectName) : nullptr;
 }
 
+// Everything a learner can observe after cancelling: the selector and its
+// popup are shut, the Candidate matches Current, and no deck was committed.
+QVariantMap deckSelectorCancelState(const MainWindowHarness &view, const QString &triggerName, const QString &popupName,
+                                    const Backend &backend) {
+    QVariantMap state;
+    QQuickItem *selector = pickerItem(view, triggerName);
+    QObject *popup = pickerObject(view, popupName);
+    state.insert(QStringLiteral("selectorOpen"), selector && selector->property("open").toBool());
+    state.insert(QStringLiteral("popupOpened"), popup && popup->property("opened").toBool());
+    state.insert(QStringLiteral("candidate"), selector ? selector->property("candidateName").toString() : QString());
+    state.insert(QStringLiteral("candidateRow"), selectorCandidate(view, popupName));
+    state.insert(QStringLiteral("currentDeck"), backend.currentDeck());
+    QStringList order;
+    for (const QVariant &entry : backend.deckSelector())
+        order << entry.toMap().value(QStringLiteral("name")).toString();
+    state.insert(QStringLiteral("deckOrder"), order);
+    return state;
+}
+
 QPoint centerInWindow(QQuickWindow *window, QQuickItem *item) {
     return window->contentItem()->mapFromScene(item->mapToScene(item->boundingRect().center())).toPoint();
 }
@@ -899,6 +918,76 @@ void TestBackend::qmlDeckPickerClickCommitsAndLongNamesElideViaVisibleRow() {
     view.settle();
     QCOMPARE(selectorCandidate(view, QStringLiteral("homeDeckPopup")), QString("Beta"));
     QCOMPARE(backend.currentDeck(), QString("Beta"));
+}
+
+void TestBackend::qmlLeavingScreenCancelsDeckPickerLikeEscape() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    prepareSelectorDecks(backend, &error);
+    QCOMPARE(backend.currentDeck(), QStringLiteral("Alpha"));
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+
+    const auto toHome = [&] { return QMetaObject::invokeMethod(view.window, "goHome"); };
+    const auto toStudy = [&] {
+        return QMetaObject::invokeMethod(view.window, "startStudy", Q_ARG(QVariant, QStringLiteral("review")));
+    };
+    const auto navigate = [&](const QString &method) {
+        if (method == QStringLiteral("startStudy"))
+            return QMetaObject::invokeMethod(view.window, "startStudy", Q_ARG(QVariant, QStringLiteral("review")));
+        return QMetaObject::invokeMethod(view.window, method.toLatin1().constData());
+    };
+
+    const auto assertCancelMatchesEscape = [&](const QString &trigger, const QString &popup, const auto &enterScreen,
+                                               const QString &method) {
+        QVERIFY(enterScreen());
+        view.settle();
+        QQuickItem *selector = pickerItem(view, trigger);
+        QVERIFY(selector);
+        QVERIFY(!selector->property("open").toBool());
+
+        const auto openWithCandidate = [&] {
+            QVERIFY(QMetaObject::invokeMethod(selector, "openAtCurrent"));
+            QVERIFY(QMetaObject::invokeMethod(selector, "moveCandidate", Q_ARG(QVariant, 1)));
+            view.settle();
+            QVERIFY(selector->property("open").toBool());
+            QCOMPARE(selector->property("candidateName").toString(), QStringLiteral("Beta"));
+        };
+
+        openWithCandidate();
+        QTest::keyClick(window, Qt::Key_Escape);
+        view.settle();
+        const QVariantMap afterEscape = deckSelectorCancelState(view, trigger, popup, backend);
+
+        openWithCandidate();
+        QVERIFY(navigate(method));
+        view.settle();
+        const QVariantMap afterNavigation = deckSelectorCancelState(view, trigger, popup, backend);
+
+        QCOMPARE(afterNavigation, afterEscape);
+        QVERIFY(!selector->property("open").toBool());
+        QObject *popupObject = pickerObject(view, popup);
+        QVERIFY(popupObject);
+        QVERIFY(!popupObject->property("opened").toBool());
+        QCOMPARE(selector->property("candidateName").toString(), QStringLiteral("Alpha"));
+        QCOMPARE(selectorCandidate(view, popup), QStringLiteral("Alpha"));
+        QCOMPARE(backend.currentDeck(), QStringLiteral("Alpha"));
+    };
+
+    // Home and Study share the cancel path; every way off either screen must
+    // reach it and leave the same state as the Escape key.
+    for (const QString &method : {QStringLiteral("startStudy"), QStringLiteral("goHome"), QStringLiteral("openLibrary"),
+                                  QStringLiteral("openSettings")}) {
+        assertCancelMatchesEscape(QStringLiteral("homeDeckSelector"), QStringLiteral("homeDeckPopup"), toHome, method);
+        assertCancelMatchesEscape(QStringLiteral("studyDeckSelector"), QStringLiteral("studyDeckPopup"), toStudy,
+                                  method);
+    }
 }
 
 void TestBackend::qmlHelpOverlayNamesDeckSelector() {
