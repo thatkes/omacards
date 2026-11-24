@@ -84,7 +84,7 @@ Flags: --help, -h
 Example: omacards open
 
 Path: preview
-Purpose: Preview a Deck's Cards. --format markdown returns unrendered source.
+Purpose: Preview a Deck's Cards. Math: supported $$...$$ and \(...\); $...$ stays literal. --format markdown returns unrendered source.
 Flags: --deck D, [--card ID], [--format text|html|markdown], [--json], --help, -h
 Example: omacards preview --deck Calculus --json
 
