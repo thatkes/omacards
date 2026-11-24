@@ -1717,6 +1717,120 @@ void TestCli::cardsResolvesDeckFileNameWithDifferentWrittenName() {
     QCOMPARE(missing.value(QStringLiteral("error")).toString(), QStringLiteral("No such deck: Unknown"));
 }
 
+void TestCli::searchAndDueResolveDeckFileNameWithDifferentWrittenName() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    QVERIFY(writeFile(QDir(decks).filePath("Lesson-Notes.txt"), "# Deck: Written Name\n---\nQ: lesson only\nA: A\n"));
+    QVERIFY(writeFile(QDir(decks).filePath("Other.txt"), "# Deck: Other\n---\nQ: other only\nA: A\n"));
+
+    int code = -1;
+    // The child process has only the Deck file name and the environment to go
+    // on, so it proves the fallback at the real CLI boundary.
+    const QJsonObject searchFile =
+        runCliProcess({"search", "only", "--deck", "Lesson Notes", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(sortedKeys(searchFile), QStringList({"cards", "count", "ok"}));
+    QCOMPARE(searchFile.value(QStringLiteral("count")).toInt(), 1);
+    const QJsonArray searchCards = searchFile.value(QStringLiteral("cards")).toArray();
+    QCOMPARE(searchCards.size(), 1);
+    QCOMPARE(searchCards.at(0).toObject().value(QStringLiteral("question")).toString(), QStringLiteral("lesson only"));
+
+    const QJsonObject searchName =
+        runCliProcess({"search", "only", "--deck", "Written Name", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(QJsonDocument(searchFile).toJson(QJsonDocument::Compact),
+             QJsonDocument(searchName).toJson(QJsonDocument::Compact));
+
+    const QJsonObject dueFile = runCliProcess({"due", "--deck", "Lesson Notes", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(sortedKeys(dueFile), QStringList({"cards", "count", "ok", "totalDue"}));
+    QCOMPARE(dueFile.value(QStringLiteral("count")).toInt(), 1);
+    QCOMPARE(dueFile.value(QStringLiteral("totalDue")).toInt(), 1);
+    const QJsonArray dueCards = dueFile.value(QStringLiteral("cards")).toArray();
+    QCOMPARE(dueCards.size(), 1);
+    QCOMPARE(dueCards.at(0).toObject().value(QStringLiteral("question")).toString(), QStringLiteral("lesson only"));
+
+    const QJsonObject dueName = runCliProcess({"due", "--deck", "Written Name", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(QJsonDocument(dueFile).toJson(QJsonDocument::Compact),
+             QJsonDocument(dueName).toJson(QJsonDocument::Compact));
+
+    QByteArray errors;
+    const QString dueText = runCliProcessText({"due", "--deck", "Lesson Notes"}, decks, database, &code, &errors);
+    QCOMPARE(code, 0);
+    QCOMPARE(dueText, QStringLiteral("1\n"));
+    QVERIFY(errors.isEmpty());
+}
+
+void TestCli::checkPreviewWarmReviewCramResolveDeckFileName() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    EnvGuard env(decks, database);
+    const QString lessonPath = QDir(decks).filePath("Lesson-Notes.txt");
+    QVERIFY(writeFile(lessonPath, "# Deck: Written Name\n---\nQ: lesson only\nA: A\n"));
+    QVERIFY(writeFile(QDir(decks).filePath("Other.txt"),
+                      "# Deck: Other\n---\nQ: other one\nA: A\n---\nQ: other two\nA: A\n"));
+
+    QString error;
+    const Deck lesson = DeckIO::load(lessonPath, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(lesson.name, QStringLiteral("Written Name"));
+    QCOMPARE(lesson.cards.size(), 1);
+    const QString cardId = lesson.cards.first().id;
+
+    int code = -1;
+    const QJsonObject check = runCli({"check", "--deck", "Lesson Notes", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(check.value(QStringLiteral("deck")).toString(), QStringLiteral("Lesson Notes"));
+    const QJsonArray checkedDecks = check.value(QStringLiteral("decks")).toArray();
+    QCOMPARE(checkedDecks.size(), 1);
+    QCOMPARE(checkedDecks.at(0).toObject().value(QStringLiteral("name")).toString(), QStringLiteral("Written Name"));
+    QCOMPARE(check.value(QStringLiteral("cards")).toInt(), 1);
+    QCOMPARE(check.value(QStringLiteral("due")).toInt(), 1);
+    QCOMPARE(check.value(QStringLiteral("totalDue")).toInt(), 1);
+    const QJsonObject checkName = runCli({"check", "--deck", "Written Name", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    for (const QString &key : {"cards", "decks", "due", "issueCounts", "issues", "totalDue"})
+        QCOMPARE(check.value(key), checkName.value(key));
+
+    const QJsonObject preview = runCli({"preview", "--deck", "Lesson Notes", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(preview.value(QStringLiteral("deck")).toString(), QStringLiteral("Lesson Notes"));
+    const QJsonArray previewItems = preview.value(QStringLiteral("items")).toArray();
+    QCOMPARE(previewItems.size(), 1);
+    QCOMPARE(previewItems.at(0).toObject().value(QStringLiteral("question")).toString(), QStringLiteral("lesson only"));
+
+    const QJsonObject warm = runCli({"warm", "--deck", "Lesson Notes", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(warm.value(QStringLiteral("deck")).toString(), QStringLiteral("Lesson Notes"));
+    QCOMPARE(warm.value(QStringLiteral("rendered")).toInt(), 0);
+    QCOMPARE(runCliText({"warm", "--deck", "Lesson Notes"}, decks, database, &code),
+             QStringLiteral("Warmed Lesson Notes: 0 rendered · 0 cached\n"));
+
+    const QJsonObject reviewed =
+        runCli({"review", "--deck", "Lesson Notes", "-c", cardId, "-r", "3", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(reviewed.value(QStringLiteral("id")).toString(), cardId);
+    QVERIFY(reviewed.value(QStringLiteral("intervalDays")).toInt() >= 0);
+
+    const QJsonObject cram =
+        runCli({"cram", "--deck", "Lesson Notes", "--steps", "2", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(cram.value(QStringLiteral("ratings")).toInt(), 2);
+    QCOMPARE(cram.value(QStringLiteral("good")).toInt(), 2);
+    const QJsonObject cramName =
+        runCli({"cram", "--deck", "Written Name", "--steps", "2", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(QJsonDocument(cram).toJson(QJsonDocument::Compact),
+             QJsonDocument(cramName).toJson(QJsonDocument::Compact));
+}
+
 void TestCli::writeCommandsResolveDeckFileNameWithDifferentWrittenName() {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());

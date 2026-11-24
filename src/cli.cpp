@@ -696,16 +696,24 @@ int run(const QStringList &arguments) {
         if (options.deck.isEmpty())
             return fail(QObject::tr("Use --deck / -d"), json);
         const QVector<Deck> warmDecks = DeckIO::loadAll(backend.decksDirectory());
-        const QString targetPath = resolveDeckPath(warmDecks, backend.decksDirectory(), options.deck);
-        if (targetPath.isEmpty())
-            return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
-
+        const DeckIdResolver::Result resolved =
+            DeckIdResolver::resolve(warmDecks, backend.decksDirectory(), options.deck);
+        QString targetPath;
         QVector<Deck> targets;
-        for (const Deck &deck : warmDecks) {
-            if (deck.path == targetPath)
-                targets << deck;
-        }
-        if (targets.isEmpty()) {
+        if (resolved.deckId) {
+            // The path belongs to the loaded Deck the resolver named.
+            for (const Deck &deck : warmDecks) {
+                if (deck.name == *resolved.deckId) {
+                    targetPath = deck.path;
+                    targets << deck;
+                }
+            }
+        } else {
+            // A file that load() skipped has no Deck id, but keeps warm's
+            // empty-Deck report. Only then fall back to the old file lookup.
+            targetPath = resolveDeckPath(warmDecks, backend.decksDirectory(), options.deck);
+            if (targetPath.isEmpty())
+                return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
             QString loadError;
             targets << DeckIO::load(targetPath, &loadError);
         }
@@ -747,7 +755,12 @@ int run(const QStringList &arguments) {
             options.format != QLatin1String("markdown"))
             return fail(QObject::tr("--format must be text, html or markdown"), json);
         const QVector<Deck> previewDecks = DeckIO::loadAll(backend.decksDirectory());
-        QVector<Card> cards = allCards(previewDecks, options.deck);
+        const DeckIdResolver::Result resolved =
+            DeckIdResolver::resolve(previewDecks, backend.decksDirectory(), options.deck);
+        // An unknown request keeps preview's old no-cards and --card errors;
+        // a known Deck is scoped by its resolved id.
+        const QString previewDeck = resolved.deckId.value_or(options.deck);
+        QVector<Card> cards = allCards(previewDecks, previewDeck);
         const bool deckHasNoCards = cards.isEmpty();
         if (!options.card.isEmpty()) {
             QVector<Card> filtered;
@@ -760,7 +773,18 @@ int run(const QStringList &arguments) {
             // An existing Deck file that yields no Cards gets the empty-Deck
             // diagnostic; other misses name a stale --card id when supplied.
             if (deckHasNoCards) {
-                const QString targetPath = resolveDeckPath(previewDecks, backend.decksDirectory(), options.deck);
+                QString targetPath;
+                if (resolved.deckId) {
+                    for (const Deck &deck : previewDecks) {
+                        if (deck.name == previewDeck) {
+                            targetPath = deck.path;
+                            break;
+                        }
+                    }
+                } else {
+                    // Keep the report for a Deck file that load() skipped.
+                    targetPath = resolveDeckPath(previewDecks, backend.decksDirectory(), options.deck);
+                }
                 if (!targetPath.isEmpty() && QFileInfo::exists(targetPath))
                     return failEmptyDeck(options.deck, deckIssueReportForFile(targetPath), json);
             }
@@ -808,20 +832,6 @@ int run(const QStringList &arguments) {
     const QVector<Deck> decks = backend.allDecks();
     const bool json = options.json;
 
-    // Shared lookup and validation for read-only command branches. An empty
-    // name means all Decks here, so it resolves to an empty path. A missing
-    // Deck fails and has no value; callers that only validate ignore the path.
-    const auto requireDeck = [&](const QString &deckName) -> std::optional<QString> {
-        if (deckName.isEmpty())
-            return QString();
-        const QString path = resolveDeckPath(decks, backend.decksDirectory(), deckName);
-        if (path.isEmpty()) {
-            fail(QObject::tr("No such deck: %1").arg(deckName), json);
-            return std::nullopt;
-        }
-        return path;
-    };
-
     // Commands that act on an existing Deck ask the shared resolver for its
     // id. Empty input stays with the caller's all-Decks or Current-deck
     // fallback; the error text stays here while the resolver returns a reason.
@@ -845,27 +855,36 @@ int run(const QStringList &arguments) {
     const auto dailyDeck = [&]() { return options.deck.isEmpty() ? backend.currentDeck() : options.deck; };
 
     if (options.command == "check") {
-        const QString targetPath =
-            options.deck.isEmpty() ? QString() : resolveDeckPath(decks, backend.decksDirectory(), options.deck);
-        if (!options.deck.isEmpty() && targetPath.isEmpty())
-            return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
-
+        const DeckIdResolver::Result resolved = DeckIdResolver::resolve(decks, backend.decksDirectory(), options.deck);
         QVector<Deck> checkedDecks;
-        if (targetPath.isEmpty()) {
+        QString targetPath;
+        QString targetDeck;
+        if (options.deck.isEmpty()) {
             checkedDecks = decks;
-        } else {
+        } else if (resolved.deckId) {
+            targetDeck = *resolved.deckId;
             for (const Deck &deck : decks) {
-                if (deck.path == targetPath)
+                if (deck.name == targetDeck) {
                     checkedDecks << deck;
+                    if (targetPath.isEmpty())
+                        targetPath = deck.path;
+                }
             }
-            if (checkedDecks.isEmpty()) {
-                QString loadError;
-                checkedDecks << DeckIO::load(targetPath, &loadError);
-            }
+        } else {
+            // A Deck file that load() skipped has no id; keep the old report
+            // for that file rather than claiming the Deck is unknown.
+            targetPath = resolveDeckPath(decks, backend.decksDirectory(), options.deck);
+            if (targetPath.isEmpty())
+                return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
+            QString loadError;
+            checkedDecks << DeckIO::load(targetPath, &loadError);
         }
 
+        // Counts follow the resolved id, or the raw request when no loaded
+        // Deck exists, so they stay scoped to the Cards just checked.
+        const QString countDeck = resolved.deckId.value_or(options.deck);
         const int total = allCards(checkedDecks, {}).size();
-        const int due = backend.availableCount(options.deck);
+        const int due = backend.availableCount(countDeck);
         QJsonArray deckArray;
         for (const Deck &deck : checkedDecks) {
             QJsonObject object;
@@ -910,7 +929,7 @@ int run(const QStringList &arguments) {
         object.insert("decks", deckArray);
         object.insert("cards", total);
         object.insert("due", due);
-        object.insert("totalDue", backend.countDue(options.deck));
+        object.insert("totalDue", backend.countDue(countDeck));
         object.insert("newCardsOnStudyDay", backend.newCardsOnStudyDay(dailyDeck()));
         object.insert("newCardAllowance", backend.newCardAllowance());
         object.insert("retention", backend.desiredRetention());
@@ -1085,9 +1104,10 @@ int run(const QStringList &arguments) {
     }
 
     if (options.command == "search") {
-        if (!requireDeck(options.deck))
+        const std::optional<QString> searchDeck = resolveDeckId(options.deck);
+        if (!searchDeck)
             return 1;
-        const QVector<Card> matches = backend.searchCards(options.path, options.deck);
+        const QVector<Card> matches = backend.searchCards(options.path, searchDeck.value_or(QString()));
         QJsonArray array;
         for (const Card &card : matches)
             array << cardJson(card);
@@ -1356,23 +1376,28 @@ int run(const QStringList &arguments) {
     }
 
     if (options.command == "due") {
-        if (!requireDeck(options.deck))
+        const std::optional<QString> dueDeck = resolveDeckId(options.deck);
+        if (!dueDeck)
             return 1;
-        const QVector<Card> cards = backend.dueCards(options.deck);
+        const QString targetDeck = dueDeck.value_or(QString());
+        const QVector<Card> cards = backend.dueCards(targetDeck);
         QJsonArray array;
         for (const Card &card : cards)
             array << cardJson(card);
         QJsonObject object;
         object.insert("ok", true);
         object.insert("count", cards.size());
-        object.insert("totalDue", backend.countDue(options.deck));
+        object.insert("totalDue", backend.countDue(targetDeck));
         object.insert("cards", array);
         write(object, json, QString::number(cards.size()));
         return 0;
     }
 
     if (options.command == "review") {
-        const QVector<Card> cards = allCards(decks, options.deck);
+        // Keep the Card-miss error for a name that resolves to no Deck; a
+        // known Deck file name still scopes the lookup by its written id.
+        const DeckIdResolver::Result resolved = DeckIdResolver::resolve(decks, backend.decksDirectory(), options.deck);
+        const QVector<Card> cards = allCards(decks, resolved.deckId.value_or(options.deck));
         const Card *target = nullptr;
         for (const Card &card : cards)
             if (card.id == options.card)
@@ -1409,7 +1434,10 @@ int run(const QStringList &arguments) {
     }
 
     if (options.command == "cram") {
-        const QVector<Card> cards = allCards(decks, options.deck);
+        // An unresolved name keeps the old empty-Deck error; a Deck file name
+        // resolves to the same Card set as the written Deck name.
+        const DeckIdResolver::Result resolved = DeckIdResolver::resolve(decks, backend.decksDirectory(), options.deck);
+        const QVector<Card> cards = allCards(decks, resolved.deckId.value_or(options.deck));
         if (cards.isEmpty())
             return fail(QObject::tr("No cards in this deck"), json);
         QVector<Card> ordered = cards;
