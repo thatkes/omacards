@@ -21,7 +21,10 @@ StudySession::StudySession(DeckRepository &decks, StudyPlanner &planner, RatingR
       m_cramOrder(cramOrder ? std::move(cramOrder) : CramOrder(shuffledCramOrder)),
       m_repeatDelayMs(Config::againDelayMs()) {
     m_repeatTimer.setSingleShot(true);
-    connect(&m_repeatTimer, &QTimer::timeout, this, [this] { presentCard(); });
+    // Expiry only makes the repeat available for the next transition; a
+    // Flashcard already on screen stays until the learner rates it.
+    connect(&m_repeatTimer, &QTimer::timeout, this,
+            [this] { m_progression.makePendingAvailable(QDateTime::currentMSecsSinceEpoch()); });
     connect(&m_math, &MathRenderer::mathRendered, this, &StudySession::applyMathRenderResult);
 }
 
@@ -35,6 +38,7 @@ void StudySession::setMode(const QString &mode) {
     // notification so subscribers never see a half-switched session.
     m_repeatTimer.stop();
     m_progression.clear();
+    m_currentPendingDeadline = 0;
     m_sessionRatedIds.clear();
     m_reviewed = 0;
     m_good = 0;
@@ -52,7 +56,9 @@ void StudySession::rebuildQueue(const QString &deckName, bool notifyStats) {
     // A watcher refresh can rebuild the queue while a repeat is pending. Keep
     // those deadlines for cards that are still available; a cram queue is
     // rebuilt from scratch and clears them instead.
-    const QHash<QString, qint64> pending = m_progression.pendingRepeats();
+    QHash<QString, qint64> pending = m_progression.pendingRepeats();
+    if (!m_currentId.isEmpty() && m_currentPendingDeadline > 0)
+        pending.insert(m_currentId, m_currentPendingDeadline);
     m_repeatTimer.stop();
     m_math.clearPendingMath();
     m_currentId.clear();
@@ -80,6 +86,7 @@ void StudySession::startFresh(const QString &deckName) {
     // previous sitting's Pending repeats, Leitner boxes and live counters.
     m_repeatTimer.stop();
     m_progression.clear();
+    m_currentPendingDeadline = 0;
     m_sessionRatedIds.clear();
     m_reviewed = 0;
     m_good = 0;
@@ -168,9 +175,10 @@ bool StudySession::canAddAdditionalNew() const {
 bool StudySession::reviewWhenEmpty(int count) {
     if (m_mode != StudyMode::Review || hasCard())
         return false;
-    // Small Pending-repeat seam: presentation already owns the deadline and
-    // the waiting state. #182 can remove this branch without touching Add 5.
-    if (m_waitingForRepeat) {
+    // Session-only Pending repeats take their turn before Add 5. This is the
+    // isolated R-key seam from the Add 5 work; it keys off the live Pending
+    // pool instead of a waiting state.
+    if (m_progression.pendingRepeatCount() > 0) {
         m_progression.presentPendingNow(QDateTime::currentMSecsSinceEpoch());
         presentCard(false);
         return true;
@@ -269,12 +277,13 @@ void StudySession::startRepeatTimer(qint64 waitMs) {
 
 void StudySession::presentCard(bool notifyStats) {
     m_showingAnswer = false;
-    m_waitingForRepeat = false;
     const bool cram = m_mode == StudyMode::Cram;
+    const QHash<QString, qint64> pendingBefore = m_progression.pendingRepeats();
     const InSessionProgression::NextResult next = m_progression.next(QDateTime::currentMSecsSinceEpoch());
 
     if (next.kind == InSessionProgression::Next::Finished) {
         m_currentId.clear();
+        m_currentPendingDeadline = 0;
         m_question.clear();
         m_answer.clear();
         m_repeatTimer.stop();
@@ -283,18 +292,8 @@ void StudySession::presentCard(bool notifyStats) {
         emit cardChanged();
         return;
     }
-    if (next.kind == InSessionProgression::Next::Waiting) {
-        startRepeatTimer(next.waitMs);
-        m_waitingForRepeat = true;
-        m_currentId.clear();
-        m_question.clear();
-        m_answer.clear();
-        setStatus(tr("Repeating a card in a moment…"));
-        emit cardChanged();
-        return;
-    }
-
     m_currentId = next.cardId;
+    m_currentPendingDeadline = pendingBefore.value(next.cardId, 0);
     startRepeatTimer(next.waitMs);
 
     const Card *card = m_decks.cardById(m_currentId);
