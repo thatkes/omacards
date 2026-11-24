@@ -669,6 +669,36 @@ void TestDeckRepository::writeAllowsPreExistingWarnings() {
     }));
 }
 
+void TestDeckRepository::cardByIdKeepsFirstDuplicateExplicitId() {
+    RepoFixture f;
+    QVERIFY(setup(f));
+    const QString decks = f.dir.filePath("decks");
+    QVERIFY(writeFile(QDir(decks).filePath("A.txt"), "# Deck: A\n---\nQ: First\nA: Answer\nid: shared-id\n"
+                                                     "---\nQ: Second\nA: Answer\nid: shared-id\n"));
+    QVERIFY(writeFile(QDir(decks).filePath("B.txt"), "# Deck: B\n---\nQ: Other deck\nA: Answer\nid: shared-id\n"));
+    f.repo.load(&f.current);
+
+    Card *found = f.repo.cardById(QStringLiteral("shared-id"));
+    QVERIFY(found);
+    QCOMPARE(found->question, QStringLiteral("First"));
+    QCOMPARE(found->deck, QStringLiteral("A"));
+    QVERIFY(!f.repo.cardById(QStringLiteral("no-such-id")));
+
+    // Removing the first card shifts the remaining cards; the lookup must
+    // resolve the id again rather than return a stale location.
+    QString error;
+    QVERIFY(f.repo.deleteCard(QStringLiteral("A"), QStringLiteral("shared-id"), &error));
+    found = f.repo.cardById(QStringLiteral("shared-id"));
+    QVERIFY(found);
+    QCOMPARE(found->question, QStringLiteral("Second"));
+    QCOMPARE(found->deck, QStringLiteral("A"));
+
+    f.repo.load(&f.current);
+    found = f.repo.cardById(QStringLiteral("shared-id"));
+    QVERIFY(found);
+    QCOMPARE(found->question, QStringLiteral("Second"));
+}
+
 void TestDeckRepository::loadPicksFirstDeckWhenCurrentIsInvalid() {
     RepoFixture f;
     QVERIFY(setup(f));

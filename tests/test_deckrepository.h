@@ -32,6 +32,7 @@ private slots:
     void setDeckDescriptionTrimsAndSkipsNoOp();
     void setDeckDescriptionRejectsInvalidSerializedDeck();
     void writeAllowsPreExistingWarnings();
+    void cardByIdKeepsFirstDuplicateExplicitId();
     void loadPicksFirstDeckWhenCurrentIsInvalid();
     void loadPrunesStaleSidecarRows();
     void loadKeepsStateWhenDeckFileUnreadable();
