@@ -282,11 +282,3 @@ pkgbuild/                Arch package, desktop entry, icon
 ```
 
 Theme watching follows Omacut (MIT, David Heinemeier Hansson).
-
-## Roadmap
-- Omarchy plugin support
-
-- Fix tray entry
-- Update README.md pictures
-- Redo deck format in README.md
-- Ensure switching themes works properly
