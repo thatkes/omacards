@@ -22,7 +22,7 @@ struct Result {
     QString name;         // new Deck name
     QString path;         // file the renamed Deck is stored in
     int cards = 0;        // Cards whose deck reference was changed
-    int preservedIds = 0; // generated ids pinned by this rename
+    int preservedIds = 0; // ids preserved by this rename (explicit or newly pinned)
 };
 } // namespace DeckRename
 

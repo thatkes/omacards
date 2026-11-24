@@ -26,6 +26,7 @@ private slots:
     void modifyCardRejectsEmptyQuestionAndNormalizesType();
     void modifyCardHandlesExplicitAndGeneratedIds();
     void modifyCardTrimsAndDeduplicatesTags();
+    void renameDeckCountsAllPreservedIds();
     void deleteAndRemoveRejectUnknownNames();
     void removeDeckClearsCurrentAndPrunesOnReload();
     void removeDeckKeepsUnrelatedCurrent();

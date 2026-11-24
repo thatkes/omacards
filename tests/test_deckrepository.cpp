@@ -470,11 +470,12 @@ void TestDeckRepository::modifyCardHandlesExplicitAndGeneratedIds() {
     QVERIFY(f.store.states().contains(renamedDeckId));
     QCOMPARE(f.store.states().value(renamedDeckId).reps, 3);
 
-    // An id already pinned in the file is preserved without a second pin.
+    // An id already pinned in the file is preserved without a second pin,
+    // and still counts as a preserved id.
     DeckRename::Result pinnedRename;
     QVERIFY(f.repo.renameDeck("Pinned", "Pinned New", &f.current, &pinnedRename, &error));
     QCOMPARE(pinnedRename.cards, 1);
-    QCOMPARE(pinnedRename.preservedIds, 0);
+    QCOMPARE(pinnedRename.preservedIds, 1);
     QCOMPARE(f.repo.deckByName("Pinned New")->cards.first().id, QString("pinned-123"));
 
     error.clear();
@@ -508,6 +509,50 @@ void TestDeckRepository::modifyCardTrimsAndDeduplicatesTags() {
     QCOMPARE(card.question, QString("Q"));
     QCOMPARE(card.answer, QString("A"));
     QCOMPARE(card.tags, QStringList({"a", "b"}));
+}
+
+void TestDeckRepository::renameDeckCountsAllPreservedIds() {
+    RepoFixture f;
+    QVERIFY(setup(f));
+    const QString path = QDir(f.dir.filePath("decks")).filePath("Mixed.txt");
+    QVERIFY(writeFile(path, "# Deck: Mixed\n"
+                            "---\nQ: Fixed\nA: Answer\nid: fixed-id\n"
+                            "---\nQ: One\nA: Answer\n"
+                            "---\nQ: Two\nA: Answer\n"
+                            "---\nQ: Three\nA: Answer\n"
+                            "---\nQ: Four\nA: Answer\n"));
+    f.repo.load(&f.current);
+    const Deck *before = f.repo.deckByName("Mixed");
+    QVERIFY(before);
+    QCOMPARE(before->cards.size(), 5);
+    QStringList ids;
+    for (const Card &card : before->cards)
+        ids << card.id;
+
+    QString error;
+    DeckRename::Result renamed;
+    QVERIFY(f.repo.renameDeck("Mixed", "Mixed New", &f.current, &renamed, &error));
+    QVERIFY(error.isEmpty());
+    QCOMPARE(renamed.cards, 5);
+    // One explicit id and four newly pinned ids all survive the rename.
+    QCOMPARE(renamed.preservedIds, 5);
+
+    const Deck *after = f.repo.deckByName("Mixed New");
+    QVERIFY(after);
+    QCOMPARE(after->cards.size(), 5);
+    for (int i = 0; i < after->cards.size(); ++i) {
+        QCOMPARE(after->cards.at(i).id, ids.at(i));
+        QVERIFY(after->cards.at(i).explicitId);
+    }
+
+    QString loadError;
+    const Deck reloaded = DeckIO::load(renamed.path, &loadError);
+    QVERIFY2(loadError.isEmpty(), qPrintable(loadError));
+    QCOMPARE(reloaded.cards.size(), 5);
+    for (int i = 0; i < reloaded.cards.size(); ++i) {
+        QCOMPARE(reloaded.cards.at(i).id, ids.at(i));
+        QVERIFY(reloaded.cards.at(i).explicitId);
+    }
 }
 
 void TestDeckRepository::deleteAndRemoveRejectUnknownNames() {

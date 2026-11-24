@@ -367,15 +367,19 @@ bool DeckRepository::renameDeck(const QString &oldName, const QString &newName, 
     Deck updated = original;
     updated.name = to;
     updated.path = newPath;
-    int pinned = 0;
+    int preserved = 0;
     for (Card &card : updated.cards) {
         card.deck = to;
         // cardId() hashes the Deck name, so a generated id would change. Pin
         // the existing id before writing the new file. A Card whose id was
-        // already explicit is preserved without a second pin.
-        if (!card.explicitId && card.id != DeckIO::cardId(card)) {
+        // already explicit needs no second pin, but its id is still preserved.
+        if (card.explicitId) {
+            ++preserved;
+            continue;
+        }
+        if (card.id != DeckIO::cardId(card)) {
             card.explicitId = true;
-            ++pinned;
+            ++preserved;
         }
     }
 
@@ -419,7 +423,7 @@ bool DeckRepository::renameDeck(const QString &oldName, const QString &newName, 
         result->name = to;
         result->path = newPath;
         result->cards = static_cast<int>(updated.cards.size());
-        result->preservedIds = pinned;
+        result->preservedIds = preserved;
     }
     return true;
 }
