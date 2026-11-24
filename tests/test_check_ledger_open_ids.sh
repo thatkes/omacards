@@ -5,49 +5,11 @@ set -eu
 # checker is exercised without a network call or a change to the real ledger.
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 CHECKER="$ROOT/bin/check-ledger-open-ids"
+. "$ROOT/tests/checker_test_support.sh"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 failures=0
-
-expect_result() {
-    name=$1
-    want_status=$2
-    want_text=$3
-    forbidden=${4:-}
-    shift 4
-    set +e
-    output="$("$CHECKER" "$@" 2>&1)"
-    got_status=$?
-    set -e
-    last_output=$output
-    if [ "$got_status" -ne "$want_status" ]; then
-        printf 'FAIL %s: status %s, wanted %s\n%s\n' \
-            "$name" "$got_status" "$want_status" "$output"
-        failures=$((failures + 1))
-        return
-    fi
-    case "$output" in
-        *"$want_text"*) ;;
-        *)
-            printf 'FAIL %s: output did not contain %s\n%s\n' \
-                "$name" "$want_text" "$output"
-            failures=$((failures + 1))
-            return
-            ;;
-    esac
-    if [ -n "$forbidden" ]; then
-        case "$output" in
-            *"$forbidden"*)
-                printf 'FAIL %s: output unexpectedly contained %s\n%s\n' \
-                    "$name" "$forbidden" "$output"
-                failures=$((failures + 1))
-                return
-                ;;
-        esac
-    fi
-    printf 'PASS %s\n' "$name"
-}
 
 cat > "$tmp/ledger.md" <<'EOF'
 Preamble text outside the markers.
@@ -69,16 +31,8 @@ expect_result matching_open_ids 0 'LEDGER OK 2 open ids' 'MISMATCH' \
 printf '59\n78\n' > "$tmp/mismatch-issues.txt"
 expect_result mismatch_lists_both_directions 1 'LEDGER MISMATCH' 'LEDGER OK' \
     --ledger "$tmp/ledger.md" --issues-file "$tmp/mismatch-issues.txt"
-case "$last_output" in
-    *'missing from ledger: 78'*) printf 'PASS missing_from_ledger\n' ;;
-    *) printf 'FAIL missing_from_ledger\n%s\n' "$last_output"
-       failures=$((failures + 1)) ;;
-esac
-case "$last_output" in
-    *'stale in ledger: 75'*) printf 'PASS stale_in_ledger\n' ;;
-    *) printf 'FAIL stale_in_ledger\n%s\n' "$last_output"
-       failures=$((failures + 1)) ;;
-esac
+assert_has missing_from_ledger 'missing from ledger: 78' "$last_output"
+assert_has stale_in_ledger 'stale in ledger: 75' "$last_output"
 
 printf '  #59  \n`75`\n' > "$tmp/prefixed-issues.txt"
 expect_result prefixed_issue_ids_are_normalised 0 'LEDGER OK 2 open ids' \

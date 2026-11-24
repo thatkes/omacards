@@ -7,6 +7,7 @@ set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 CHECKER="$ROOT/bin/check-commit-subject"
 HOOK="$ROOT/.githooks/commit-msg"
+. "$ROOT/tests/checker_test_support.sh"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
@@ -14,34 +15,6 @@ failures=0
 
 write_message() {
     printf '%s\n' "$2" > "$1"
-}
-
-report_failure() {
-    printf 'FAIL %s: status %s, wanted %s\n%s\n' \
-        "$1" "$2" "$3" "$4"
-    failures=$((failures + 1))
-}
-
-expect_result() {
-    name=$1
-    want_status=$2
-    want_text=$3
-    got_status=$4
-    output=$5
-    if [ "$got_status" -ne "$want_status" ]; then
-        report_failure "$name" "$got_status" "$want_status" "$output"
-        return
-    fi
-    case "$output" in
-        *"$want_text"*) ;;
-        *)
-            printf 'FAIL %s: output did not contain %s\n%s\n' \
-                "$name" "$want_text" "$output"
-            failures=$((failures + 1))
-            return
-            ;;
-    esac
-    printf 'PASS %s\n' "$name"
 }
 
 check_file() {

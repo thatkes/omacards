@@ -27,22 +27,6 @@ struct LocaleGuard {
     }
 };
 
-struct EnvVarGuard {
-    QByteArray name;
-    QByteArray original;
-    bool present;
-
-    explicit EnvVarGuard(const char *variable)
-        : name(variable), original(qgetenv(variable)), present(!original.isNull()) {}
-
-    ~EnvVarGuard() {
-        if (present)
-            qputenv(name.constData(), original);
-        else
-            qunsetenv(name.constData());
-    }
-};
-
 } // namespace
 
 void TestTranslator::readLanguageFallbacksAndFormats() {
@@ -292,11 +276,10 @@ void TestTranslator::pluralCategories() {
 }
 
 void TestTranslator::formatLocaleRegistryAndFallback() {
-    EnvVarGuard omarchy("OMARCHY_PATH");
+    ScopedEnv omarchy("OMARCHY_PATH");
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
 
-    qunsetenv("OMARCHY_PATH");
     QCOMPARE(Translator::formatLocale("pt-BR").name(), QLocale("pt-BR").name());
     QCOMPARE(Translator::formatLocale("de").name(), QLocale("de").name());
 
@@ -321,8 +304,7 @@ void TestTranslator::formatLocaleRegistryAndFallback() {
 
 void TestTranslator::translateStringAndPluralBasics() {
     LocaleGuard locale;
-    EnvVarGuard omarchy("OMARCHY_PATH");
-    qunsetenv("OMARCHY_PATH");
+    ScopedEnv omarchy("OMARCHY_PATH");
 
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -351,8 +333,7 @@ void TestTranslator::translateStringAndPluralBasics() {
 
 void TestTranslator::translateCatalogFallbackChain() {
     LocaleGuard locale;
-    EnvVarGuard omarchy("OMARCHY_PATH");
-    qunsetenv("OMARCHY_PATH");
+    ScopedEnv omarchy("OMARCHY_PATH");
 
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -387,8 +368,7 @@ void TestTranslator::translateCatalogFallbackChain() {
 
 void TestTranslator::translatePluralFallsBackToOther() {
     LocaleGuard locale;
-    EnvVarGuard omarchy("OMARCHY_PATH");
-    qunsetenv("OMARCHY_PATH");
+    ScopedEnv omarchy("OMARCHY_PATH");
 
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -406,8 +386,7 @@ void TestTranslator::translatePluralFallsBackToOther() {
 
 void TestTranslator::isEmptyReflectsCatalog() {
     LocaleGuard locale;
-    EnvVarGuard omarchy("OMARCHY_PATH");
-    qunsetenv("OMARCHY_PATH");
+    ScopedEnv omarchy("OMARCHY_PATH");
 
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -429,8 +408,7 @@ void TestTranslator::isEmptyReflectsCatalog() {
 
 void TestTranslator::changedOnLanguageFileChange() {
     LocaleGuard locale;
-    EnvVarGuard omarchy("OMARCHY_PATH");
-    qunsetenv("OMARCHY_PATH");
+    ScopedEnv omarchy("OMARCHY_PATH");
 
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -453,8 +431,7 @@ void TestTranslator::changedOnLanguageFileChange() {
 
 void TestTranslator::changedOnCatalogChangeWithLanguageSwitch() {
     LocaleGuard locale;
-    EnvVarGuard omarchy("OMARCHY_PATH");
-    qunsetenv("OMARCHY_PATH");
+    ScopedEnv omarchy("OMARCHY_PATH");
 
     QTemporaryDir dir;
     QVERIFY(dir.isValid());

@@ -2,7 +2,6 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QStandardPaths>
 #include <QTemporaryDir>
 
 #include "test_mathrender.h"
@@ -12,49 +11,6 @@
 using namespace TestSupport;
 
 namespace {
-
-// QStandardPaths::findExecutable only searches PATH. Restricting PATH to an
-// isolated bin directory hides any real TeX install from detect().
-struct PathOnlyGuard {
-    QByteArray original;
-
-    explicit PathOnlyGuard(const QString &directory) : original(qgetenv("PATH")) {
-        qputenv("PATH", directory.toLocal8Bit());
-    }
-
-    ~PathOnlyGuard() { qputenv("PATH", original); }
-};
-
-struct EnvVarGuard {
-    QByteArray name;
-    QByteArray original;
-    bool present = false;
-
-    EnvVarGuard(const char *variable, const QByteArray &value) : name(variable) {
-        original = qgetenv(name.constData());
-        present = !original.isNull();
-        qputenv(name.constData(), value);
-    }
-
-    ~EnvVarGuard() {
-        if (present)
-            qputenv(name.constData(), original);
-        else
-            qunsetenv(name.constData());
-    }
-};
-
-const auto kExecutable = QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner | QFile::ReadGroup | QFile::ExeGroup |
-                         QFile::ReadOther | QFile::ExeOther;
-
-bool writeFakeTool(const QString &binDir, const QString &name, const QString &body) {
-    const QString path = binDir + "/" + name;
-    const QString script = QStringLiteral("#!/bin/sh\n") +
-                           QStringLiteral("printf '%1' >> \"$OMACARDS_TEST_ARGS\"\n").arg(name) +
-                           QStringLiteral("for arg do printf ' %s' \"$arg\" >> \"$OMACARDS_TEST_ARGS\"; done\n") +
-                           QStringLiteral("printf '\\n' >> \"$OMACARDS_TEST_ARGS\"\n") + body;
-    return writeFile(path, script.toUtf8()) && QFile::setPermissions(path, kExecutable);
-}
 
 const QString kPtSvg =
     QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10pt\" height=\"5pt\" viewBox=\"0 0 10 5\">"
@@ -127,6 +83,45 @@ done
     return writeFakeTool(binDir, "latex", latexBody) && writeFakeTool(binDir, "dvisvgm", dvisvgmBody);
 }
 
+// One fixture for the four tectonic contracts. The fake bundle is marked
+// missing so the renderer exercises both its cached-only and download-enabled
+// invocations, and every tool argv is logged for the flags assertion.
+struct TectonicFixture {
+    QTemporaryDir dir;
+    QString bin = dir.filePath("bin");
+    QString cache = dir.filePath("cache");
+    QString argsLog = dir.filePath("args.log");
+    ScopedEnv args{"OMACARDS_TEST_ARGS", argsLog};
+    ScopedEnv missingBundle{"OMACARDS_TEST_MISSING_BUNDLE", "1"};
+    PathGuard path{bin, PathGuard::Mode::Prepend};
+
+    TectonicFixture() {
+        QVERIFY(dir.isValid());
+        QVERIFY(QDir().mkpath(bin));
+        QVERIFY(QDir().mkpath(cache));
+        const QString tectonic = QStringLiteral(R"sh(
+cached=0
+for arg do if [ "$arg" = "--only-cached" ]; then cached=1; fi; done
+if [ "$cached" = "1" ] && [ "$OMACARDS_TEST_MISSING_BUNDLE" = "1" ]; then exit 1; fi
+out=
+tex=
+for arg do
+    case "$arg" in --outdir=*) out=${arg#--outdir=} ;; esac
+    tex="$arg"
+done
+base=$(basename "$tex" .tex)
+printf '%%PDF-1.4\n' > "$out/$base.pdf"
+)sh");
+        const QString cairo =
+            QStringLiteral("svg=\n"
+                           "for arg do svg=\"$arg\"; done\n"
+                           "printf '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10pt\" height=\"5pt\" "
+                           "viewBox=\"0 0 10 5\"><g fill=\"rgb(0%%, 0%%, 0%%)\"/></svg>\\n' > \"$svg\"\n");
+        QVERIFY(writeFakeTool(bin, QStringLiteral("tectonic"), tectonic));
+        QVERIFY(writeFakeTool(bin, QStringLiteral("pdftocairo"), cairo));
+    }
+};
+
 } // namespace
 
 void TestMathRender::mathFallsBackToUnicode() {
@@ -150,112 +145,29 @@ void TestMathRender::mathFallsBackToUnicode() {
     QCOMPARE(renderer.warnings("\\(\\foobar{x}\\)").size(), 1);
 }
 
-void TestMathRender::tectonicRendererUsesSupportedFlags() {
-    QTemporaryDir dir;
-    QVERIFY(dir.isValid());
-    const QString bin = dir.filePath("bin");
-    const QString cache = dir.filePath("cache");
-    const QString argsLog = dir.filePath("args.log");
-    QVERIFY(QDir().mkpath(bin));
-    QVERIFY(QDir().mkpath(cache));
-
-    const auto makeTool = [&](const QString &name, const QByteArray &script) {
-        const QString path = bin + "/" + name;
-        QVERIFY(writeFile(path, script));
-        QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner | QFile::ReadGroup |
-                                        QFile::ExeGroup | QFile::ReadOther | QFile::ExeOther);
-    };
-    const auto script = [](const QStringList &lines) { return (lines.join('\n') + '\n').toUtf8(); };
-    makeTool("tectonic",
-             script({
-                 "#!/bin/sh",
-                 "printf 'tectonic' >> \"$OMACARDS_TEST_ARGS\"",
-                 "for arg do printf ' %s' \"$arg\" >> \"$OMACARDS_TEST_ARGS\"; done",
-                 "printf '\\n' >> \"$OMACARDS_TEST_ARGS\"",
-                 "cached=0",
-                 "for arg do if [ \"$arg\" = \"--only-cached\" ]; then cached=1; fi; done",
-                 "if [ \"$cached\" = \"1\" ] && [ \"$OMACARDS_TEST_MISSING_BUNDLE\" = \"1\" ]; then exit 1; fi",
-                 "out=",
-                 "tex=",
-                 "for arg do",
-                 "    case \"$arg\" in --outdir=*) out=${arg#--outdir=} ;; esac",
-                 "    tex=\"$arg\"",
-                 "done",
-                 "base=$(basename \"$tex\" .tex)",
-                 "printf '%%PDF-1.4\\n' > \"$out/$base.pdf\"",
-             }));
-    makeTool("pdftocairo", script({
-                               "#!/bin/sh",
-                               "printf 'pdftocairo' >> \"$OMACARDS_TEST_ARGS\"",
-                               "for arg do printf ' %s' \"$arg\" >> \"$OMACARDS_TEST_ARGS\"; done",
-                               "printf '\\n' >> \"$OMACARDS_TEST_ARGS\"",
-                               "printf '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10pt\" height=\"5pt\" "
-                               "viewBox=\"0 0 10 5\"><g fill=\"rgb(0%%, 0%%, 0%%)\"/></svg>\\n' > \"$3\"",
-                           }));
-
-    struct PathGuard {
-        QByteArray original;
-        explicit PathGuard(const QString &binDir) : original(qgetenv("PATH")) {
-            qputenv("PATH", (binDir + ":" + QString::fromLocal8Bit(original)).toLocal8Bit());
-        }
-        ~PathGuard() { qputenv("PATH", original); }
-    } pathGuard(bin);
-    qputenv("OMACARDS_TEST_ARGS", argsLog.toUtf8());
-    qputenv("OMACARDS_TEST_MISSING_BUNDLE", "1");
-    struct TestVarGuard {
-        ~TestVarGuard() {
-            qunsetenv("OMACARDS_TEST_ARGS");
-            qunsetenv("OMACARDS_TEST_MISSING_BUNDLE");
-        }
-    } varGuard;
-
-    MathRenderer renderer(cache);
+void TestMathRender::tectonicRendererWritesExpectedTexPreamble() {
+    TectonicFixture fixture;
+    MathRenderer renderer(fixture.cache);
     QVERIFY(renderer.hasRenderer());
     QVERIFY(renderer.renderExpression("x^2").startsWith("<img "));
-    QVERIFY(!QDir(cache).entryList({"*.svg"}).isEmpty());
 
-    const QStringList texFiles = QDir(cache + "/tex").entryList({"*.tex"});
+    const QStringList texFiles = QDir(fixture.cache + "/tex").entryList({"*.tex"});
     QVERIFY(!texFiles.isEmpty());
-    QFile texFile(cache + "/tex/" + texFiles.first());
+    QFile texFile(fixture.cache + "/tex/" + texFiles.first());
     QVERIFY(texFile.open(QIODevice::ReadOnly));
     const QString tex = QString::fromUtf8(texFile.readAll());
     QVERIFY(tex.contains("\\hoffset=-1in"));
     QVERIFY(tex.contains("\\pdfpagewidth=\\wd0"));
     QVERIFY(tex.contains("\\shipout\\vbox"));
+}
 
-    // One neutral master serves every ink and scale. The file keeps the
-    // toolchain's black fill; the ink appears only in the emitted data URI.
-    const QStringList neutralFiles = QDir(cache).entryList({"*.svg"});
-    QCOMPARE(neutralFiles.size(), 1);
-    QVERIFY(neutralFiles.first().startsWith("eq5-"));
-    QFile neutral(cache + "/" + neutralFiles.first());
-    QVERIFY(neutral.open(QIODevice::ReadOnly));
-    const QString neutralSvg = QString::fromUtf8(neutral.readAll());
-    QVERIFY(neutralSvg.contains("rgb(0%, 0%, 0%)"));
-    QVERIFY(neutralSvg.contains("width=\"26px\" height=\"14px\""));
+void TestMathRender::tectonicRendererUsesSupportedFlags() {
+    TectonicFixture fixture;
+    MathRenderer renderer(fixture.cache);
+    QVERIFY(renderer.hasRenderer());
+    QVERIFY(renderer.renderExpression("x^2").startsWith("<img "));
 
-    MathRenderer themed(cache);
-    const QString themedHtml = themed.renderExpression("x^2", "#c0caf5", 2.0);
-    QVERIFY(themedHtml.startsWith("<img src='data:image/svg+xml;base64,"));
-    const QString themedSvg = svgFromMathHtml(themedHtml);
-    QVERIFY(themedSvg.contains("fill=\"#c0caf5\""));
-    QVERIFY(!themedSvg.contains("rgb(0%, 0%, 0%)"));
-    QCOMPARE(QDir(cache).entryList({"*.svg"}).size(), 1);
-    QFile afterThemed(cache + "/" + neutralFiles.first());
-    QVERIFY(afterThemed.open(QIODevice::ReadOnly));
-    QCOMPARE(QString::fromUtf8(afterThemed.readAll()), neutralSvg);
-
-    // Scale multiplies the cached SVG's logical size in the <img> dimensions;
-    // the SVG itself keeps one supersampled master size for every scale.
-    QVERIFY(themedHtml.contains("width='26'"));
-    QVERIFY(themedHtml.contains("height='14'"));
-    const QString smallHtml = themed.renderExpression("x^2", "#70d6ff", 1.0);
-    QVERIFY(smallHtml.contains("width='13'"));
-    QVERIFY(smallHtml.contains("height='7'"));
-    QVERIFY(svgFromMathHtml(smallHtml).contains("fill=\"#70d6ff\""));
-    QCOMPARE(QDir(cache).entryList({"*.svg"}).size(), 1);
-
-    QFile logFile(argsLog);
+    QFile logFile(fixture.argsLog);
     QVERIFY(logFile.open(QIODevice::ReadOnly));
     const QString log = QString::fromUtf8(logFile.readAll());
     QVERIFY(log.contains("tectonic --untrusted --only-cached --outdir="));
@@ -264,12 +176,56 @@ void TestMathRender::tectonicRendererUsesSupportedFlags() {
     QVERIFY(log.contains("pdftocairo -svg "));
 }
 
+void TestMathRender::cachedSvgKeepsNeutralInkAndThemesDataUri() {
+    TectonicFixture fixture;
+    MathRenderer renderer(fixture.cache);
+    QVERIFY(renderer.renderExpression("x^2").startsWith("<img "));
+
+    // One neutral master serves every ink and scale. The file keeps the
+    // toolchain's black fill; the ink appears only in the emitted data URI.
+    const QStringList neutralFiles = QDir(fixture.cache).entryList({"*.svg"});
+    QCOMPARE(neutralFiles.size(), 1);
+    QVERIFY(neutralFiles.first().startsWith("eq5-"));
+    QFile neutral(fixture.cache + "/" + neutralFiles.first());
+    QVERIFY(neutral.open(QIODevice::ReadOnly));
+    const QString neutralSvg = QString::fromUtf8(neutral.readAll());
+    QVERIFY(neutralSvg.contains("rgb(0%, 0%, 0%)"));
+    QVERIFY(neutralSvg.contains("width=\"26px\" height=\"14px\""));
+
+    MathRenderer themed(fixture.cache);
+    const QString themedHtml = themed.renderExpression("x^2", "#c0caf5", 2.0);
+    QVERIFY(themedHtml.startsWith("<img src='data:image/svg+xml;base64,"));
+    const QString themedSvg = svgFromMathHtml(themedHtml);
+    QVERIFY(themedSvg.contains("fill=\"#c0caf5\""));
+    QVERIFY(!themedSvg.contains("rgb(0%, 0%, 0%)"));
+    QCOMPARE(QDir(fixture.cache).entryList({"*.svg"}).size(), 1);
+    QFile afterThemed(fixture.cache + "/" + neutralFiles.first());
+    QVERIFY(afterThemed.open(QIODevice::ReadOnly));
+    QCOMPARE(QString::fromUtf8(afterThemed.readAll()), neutralSvg);
+}
+
+void TestMathRender::svgScaleUsesCachedMasterSize() {
+    TectonicFixture fixture;
+    MathRenderer renderer(fixture.cache);
+
+    // Scale multiplies the cached SVG's logical size in the <img> dimensions;
+    // the SVG itself keeps one supersampled master size for every scale.
+    const QString largeHtml = renderer.renderExpression("x^2", "#c0caf5", 2.0);
+    QVERIFY(largeHtml.contains("width='26'"));
+    QVERIFY(largeHtml.contains("height='14'"));
+    const QString smallHtml = renderer.renderExpression("x^2", "#70d6ff", 1.0);
+    QVERIFY(smallHtml.contains("width='13'"));
+    QVERIFY(smallHtml.contains("height='7'"));
+    QVERIFY(svgFromMathHtml(smallHtml).contains("fill=\"#70d6ff\""));
+    QCOMPARE(QDir(fixture.cache).entryList({"*.svg"}).size(), 1);
+}
+
 void TestMathRender::renderEscapesPlainTextAndRendersMath() {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
     const QString bin = dir.filePath("empty-bin");
     QVERIFY(QDir().mkpath(bin));
-    PathOnlyGuard pathGuard(bin); // No TeX tools anywhere on PATH: Unicode fallback.
+    PathGuard pathGuard(bin, PathGuard::Mode::Replace); // No TeX tools anywhere on PATH: Unicode fallback.
     MathRenderer renderer(dir.filePath("cache"));
     QVERIFY(!renderer.hasRenderer());
 
@@ -290,7 +246,7 @@ void TestMathRender::renderExpressionUnicodeFallbackIsStable() {
     QVERIFY(dir.isValid());
     const QString bin = dir.filePath("empty-bin");
     QVERIFY(QDir().mkpath(bin));
-    PathOnlyGuard pathGuard(bin); // Exercise the fallback even if TeX is installed elsewhere.
+    PathGuard pathGuard(bin, PathGuard::Mode::Replace); // Exercise the fallback even if TeX is installed elsewhere.
     MathRenderer renderer(dir.filePath("cache"));
     if (renderer.hasRenderer())
         QSKIP("A LaTeX toolchain is installed; the Unicode fallback span is not returned here");
@@ -375,11 +331,9 @@ void TestMathRender::dviToolchainUsesNoShellEscapeAndNoFonts() {
 
     // PATH contains only the two fake DVI tools: tectonic, pdflatex and
     // pdftocairo are absent, so detect() must choose the DVI branch.
-    PathOnlyGuard pathGuard(bin);
-    EnvVarGuard argsGuard("OMACARDS_TEST_ARGS", argsLog.toUtf8());
-    if (!QStandardPaths::findExecutable(QStringLiteral("tectonic")).isEmpty() ||
-        !QStandardPaths::findExecutable(QStringLiteral("pdflatex")).isEmpty() ||
-        !QStandardPaths::findExecutable(QStringLiteral("pdftocairo")).isEmpty())
+    PathGuard pathGuard(bin, PathGuard::Mode::Replace);
+    ScopedEnv argsGuard("OMACARDS_TEST_ARGS", argsLog);
+    if (hasPdfToolchain())
         QSKIP("Cannot hide the PDF toolchain from QStandardPaths by replacing PATH");
 
     MathRenderer renderer(cache);
@@ -418,8 +372,8 @@ void TestMathRender::failedLatexRenderFallsBackToUnicode() {
     QVERIFY(QDir().mkpath(cache));
     QVERIFY(writePdfToolchain(bin, kPtSvg, false));
 
-    PathOnlyGuard pathGuard(bin);
-    EnvVarGuard argsGuard("OMACARDS_TEST_ARGS", argsLog.toUtf8());
+    PathGuard pathGuard(bin, PathGuard::Mode::Replace);
+    ScopedEnv argsGuard("OMACARDS_TEST_ARGS", argsLog);
     MathRenderer renderer(cache);
     QVERIFY(renderer.hasRenderer()); // detection only checks that tools exist
 
@@ -444,8 +398,8 @@ void TestMathRender::pdftocairoPixelUnitsScaleImageAndSvg() {
     QVERIFY(QDir().mkpath(cache));
     QVERIFY(writePdfToolchain(bin, kPxSvg, true));
 
-    PathOnlyGuard pathGuard(bin);
-    EnvVarGuard argsGuard("OMACARDS_TEST_ARGS", argsLog.toUtf8());
+    PathGuard pathGuard(bin, PathGuard::Mode::Replace);
+    ScopedEnv argsGuard("OMACARDS_TEST_ARGS", argsLog);
     MathRenderer renderer(cache);
     QVERIFY(renderer.hasRenderer());
 
@@ -483,8 +437,8 @@ void TestMathRender::cachedSvgSkipsSecondToolchainRun() {
     QVERIFY(QDir().mkpath(cache));
     QVERIFY(writePdfToolchain(bin, kPtSvg, true));
 
-    PathOnlyGuard pathGuard(bin);
-    EnvVarGuard argsGuard("OMACARDS_TEST_ARGS", argsLog.toUtf8());
+    PathGuard pathGuard(bin, PathGuard::Mode::Replace);
+    ScopedEnv argsGuard("OMACARDS_TEST_ARGS", argsLog);
     MathRenderer renderer(cache);
     QVERIFY(renderer.hasRenderer());
 
@@ -516,7 +470,7 @@ void TestMathRender::warmRendersMissingExpressionsAndSkipsHits() {
     QVERIFY(QDir().mkpath(cache));
     QVERIFY(writeFakePdfToolchain(bin, kPtSvg));
 
-    PathPrependGuard pathGuard(bin);
+    PathGuard pathGuard(bin);
     ScopedEnv argsGuard("OMACARDS_TEST_ARGS", argsLog);
     MathRenderer renderer(cache);
     QVERIFY(renderer.hasRenderer());
@@ -556,7 +510,7 @@ void TestMathRender::liveRenderAndPrefetchShareOneCacheEntry() {
     QVERIFY(QDir().mkpath(cache));
     QVERIFY(writeFakePdfToolchain(bin, kPtSvg, QStringLiteral("sleep 0.2\n")));
 
-    PathPrependGuard pathGuard(bin);
+    PathGuard pathGuard(bin);
     ScopedEnv argsGuard("OMACARDS_TEST_ARGS", argsLog);
     MathRenderer renderer(cache);
     QVERIFY(renderer.hasRenderer());
@@ -584,7 +538,7 @@ void TestMathRender::failedQueuedRendersDoNotBlockLaterPrefetches() {
     QVERIFY(QDir().mkpath(cache));
     QVERIFY(writePartlyFailingPdfToolchain(bin, kPtSvg));
 
-    PathPrependGuard pathGuard(bin);
+    PathGuard pathGuard(bin);
     ScopedEnv argsGuard("OMACARDS_TEST_ARGS", argsLog);
     MathRenderer renderer(cache);
     QVERIFY(renderer.hasRenderer());
@@ -607,8 +561,8 @@ void TestMathRender::invalidInkNormalizesToBlack() {
     QVERIFY(QDir().mkpath(cache));
     QVERIFY(writePdfToolchain(bin, kPtSvg, true));
 
-    PathOnlyGuard pathGuard(bin);
-    EnvVarGuard argsGuard("OMACARDS_TEST_ARGS", argsLog.toUtf8());
+    PathGuard pathGuard(bin, PathGuard::Mode::Replace);
+    ScopedEnv argsGuard("OMACARDS_TEST_ARGS", argsLog);
     MathRenderer renderer(cache);
     QVERIFY(renderer.hasRenderer());
     const QString html = renderer.renderExpression("x^2", "not-a-color");

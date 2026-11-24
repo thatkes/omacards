@@ -8,27 +8,6 @@
 
 using namespace TestSupport;
 
-namespace {
-class EnvGuardValue {
-public:
-    explicit EnvGuardValue(const char *name) : m_name(name), m_old(qgetenv(name)), m_had(!m_old.isNull()) {}
-
-    ~EnvGuardValue() {
-        if (m_had)
-            qputenv(m_name, m_old);
-        else
-            qunsetenv(m_name);
-    }
-
-    void set(const QByteArray &value) { qputenv(m_name, value); }
-
-private:
-    const char *m_name;
-    QByteArray m_old;
-    bool m_had;
-};
-} // namespace
-
 void TestConfig::configDayStartHourHelpers() {
     const qint64 dueNight = QDateTime(QDate(2026, 11, 19), QTime(22, 49)).toMSecsSinceEpoch();
     const qint64 beforeDayStart = QDateTime(QDate(2026, 11, 19), QTime(1, 0)).toMSecsSinceEpoch();
@@ -51,10 +30,9 @@ void TestConfig::configDayStartHourHelpers() {
 }
 
 void TestConfig::configAgainDelayFallsBackAndClamps() {
-    EnvGuardValue guard("OMACARDS_AGAIN_DELAY_MS");
+    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS");
 
     // No override, non-numeric text, and an empty value all use the default.
-    qunsetenv("OMACARDS_AGAIN_DELAY_MS");
     QCOMPARE(Config::againDelayMs(), Config::kAgainDelayMs);
     guard.set("not-a-number");
     QCOMPARE(Config::againDelayMs(), Config::kAgainDelayMs);
