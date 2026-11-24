@@ -7,7 +7,10 @@ class TestMathRender : public QObject {
 
 private slots:
     void mathFallsBackToUnicode();
+    void tectonicRendererWritesExpectedTexPreamble();
     void tectonicRendererUsesSupportedFlags();
+    void cachedSvgKeepsNeutralInkAndThemesDataUri();
+    void svgScaleUsesCachedMasterSize();
     void renderEscapesPlainTextAndRendersMath();
     void renderExpressionUnicodeFallbackIsStable();
     void unicodeMathCharacterization();

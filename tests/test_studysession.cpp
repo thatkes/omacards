@@ -8,6 +8,7 @@
 #include <QStringList>
 #include <QTemporaryDir>
 #include <QVariantMap>
+#include <type_traits>
 
 #include "test_studysession.h"
 #include "test_support.h"
@@ -26,124 +27,83 @@ using namespace TestSupport;
 
 namespace {
 
-struct SessionFixture {
+template <typename Adapter> Adapter makeStoreAdapter(Store &store) {
+    if constexpr (std::is_constructible_v<Adapter, Store &>)
+        return Adapter(store);
+    else
+        return Adapter{};
+}
+
+// One fixture owns the whole session graph and its setup. The adapter types
+// vary: the stub fixture fails each seam independently at the rating path.
+template <typename PlannerStore, typename RatingStore> struct SessionFixtureBase {
     QTemporaryDir dir;
     Store store;
     FileHistory history;
     DeckRepository repo;
-    StorePlannerAdapter plannerStore;
+    PlannerStore plannerStore;
     StudyPlanner planner;
-    StoreRatingAdapter ratingStore;
+    RatingStore ratingStore;
     RatingRecording ratings;
     StudySession session;
     QString current;
 
-    SessionFixture()
-        : store(dir.filePath("state.db")), repo(dir.filePath("decks"), store, history), plannerStore(store),
-          planner(plannerStore), ratingStore(store), ratings(ratingStore), session(repo, planner, ratings) {}
+    SessionFixtureBase()
+        : store(dir.filePath("state.db")), repo(dir.filePath("decks"), store, history),
+          plannerStore(makeStoreAdapter<PlannerStore>(store)), planner(plannerStore),
+          ratingStore(makeStoreAdapter<RatingStore>(store)), ratings(ratingStore), session(repo, planner, ratings) {}
+
+    bool prepare(const QString &deckName, const QStringList &questions, QString *error, const QStringList &answers = {},
+                 StudySession *target = nullptr) {
+        if (!repo.initialize(error))
+            return false;
+        if (!store.open(error))
+            return false;
+        repo.load(&current);
+        if (repo.deckByName("Welcome")) {
+            if (!repo.removeDeck("Welcome", &current, error))
+                return false;
+        }
+        if (!repo.createDeck(deckName, &current, error))
+            return false;
+        for (int i = 0; i < questions.size(); ++i) {
+            const QString answer = i < answers.size() ? answers.at(i) : "A " + questions.at(i);
+            if (!repo.createCard(deckName, &current, questions.at(i), answer, "basic", QString(), error))
+                return false;
+        }
+        repo.load(&current);
+        planner.setDecks(repo.deckData());
+        planner.configure(Config::kDefaultNewPerDay, 0);
+        QString storeError;
+        if (!planner.refresh(&storeError)) {
+            if (error)
+                *error = storeError;
+            return false;
+        }
+        StudySession &study = target ? *target : session;
+        study.rebuild(deckName);
+        return true;
+    }
 };
 
-// The planner and rating Store stubs both come from test_support.h so each
-// side can fail independently at the StudySession rating seam.
-struct StubSessionFixture {
-    QTemporaryDir dir;
-    Store store;
-    FileHistory history;
-    DeckRepository repo;
-    TestSupport::PlannerStoreStub plannerStore;
-    StudyPlanner planner;
-    RatingStoreStub ratingStore;
-    RatingRecording ratings;
-    StudySession session;
-    QString current;
-
-    StubSessionFixture()
-        : store(dir.filePath("state.db")), repo(dir.filePath("decks"), store, history), planner(plannerStore),
-          ratings(ratingStore), session(repo, planner, ratings) {}
-};
-
-bool prepareSessionParts(DeckRepository &repo, Store &store, StudyPlanner &planner, StudySession &session,
-                         QString *loadedDeck, const QString &deckName, const QStringList &questions, QString *error,
-                         const QStringList &answers = {}) {
-    if (!repo.initialize(error))
-        return false;
-    if (!store.open(error))
-        return false;
-    repo.load(loadedDeck);
-    if (repo.deckByName("Welcome")) {
-        if (!repo.removeDeck("Welcome", loadedDeck, error))
-            return false;
-    }
-    if (!repo.createDeck(deckName, loadedDeck, error))
-        return false;
-    for (int i = 0; i < questions.size(); ++i) {
-        const QString answer = i < answers.size() ? answers.at(i) : "A " + questions.at(i);
-        if (!repo.createCard(deckName, loadedDeck, questions.at(i), answer, "basic", QString(), error))
-            return false;
-    }
-    repo.load(loadedDeck);
-    planner.setDecks(repo.deckData());
-    planner.configure(Config::kDefaultNewPerDay, 0);
-    QString storeError;
-    if (!planner.refresh(&storeError)) {
-        if (error)
-            *error = storeError;
-        return false;
-    }
-    session.rebuild(deckName);
-    return true;
-}
-
-bool prepareSessionWith(SessionFixture &fixture, StudySession &session, const QString &deckName,
-                        const QStringList &questions, QString *error) {
-    return prepareSessionParts(fixture.repo, fixture.store, fixture.planner, session, &fixture.current, deckName,
-                               questions, error);
-}
-
-bool prepareSession(SessionFixture &fixture, const QString &deckName, const QStringList &questions, QString *error) {
-    return prepareSessionWith(fixture, fixture.session, deckName, questions, error);
-}
+using SessionFixture = SessionFixtureBase<StorePlannerAdapter, StoreRatingAdapter>;
+using StubSessionFixture = SessionFixtureBase<PlannerStoreStub, RatingStoreStub>;
 
 // StudySession reads the delay in its constructor, so the variable must be set
 // before the fixture is built. RAII keeps it safe even if an assertion fails.
 const QString kTinySvg = QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10pt\" height=\"5pt\" "
                                         "viewBox=\"0 0 10 5\"><g fill=\"rgb(0%, 0%, 0%)\"/></svg>");
 
-QString toolchainLog(const QString &logPath) {
-    QFile log(logPath);
-    return log.open(QIODevice::ReadOnly) ? QString::fromUtf8(log.readAll()) : QString();
-}
-
-int tectonicRenders(const QString &logPath) {
-    // Two workers can interleave their appends, so count the .tex argument
-    // rather than a whole command line.
-    return toolchainLog(logPath).count(QStringLiteral(".tex"));
-}
-
 QString cacheKey(const QString &path) {
     return QFileInfo(path).completeBaseName();
 }
-
-class AgainDelayGuard {
-public:
-    AgainDelayGuard() : m_previous(qgetenv("OMACARDS_AGAIN_DELAY_MS")) {}
-    ~AgainDelayGuard() {
-        if (m_previous.isNull())
-            qunsetenv("OMACARDS_AGAIN_DELAY_MS");
-        else
-            qputenv("OMACARDS_AGAIN_DELAY_MS", m_previous);
-    }
-
-private:
-    QByteArray m_previous;
-};
 
 } // namespace
 
 void TestStudySession::setModeNormalizesInvalidInput() {
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Modes", {"Q1", "Q2"}, &error));
+    QVERIFY(fixture.prepare("Modes", {"Q1", "Q2"}, &error));
     QVERIFY(error.isEmpty());
     QVERIFY(fixture.session.hasCard());
 
@@ -176,7 +136,7 @@ void TestStudySession::setModeNormalizesInvalidInput() {
 void TestStudySession::setModeUppercaseCramNormalizesToReview() {
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Modes", {"Q1", "Q2"}, &error));
+    QVERIFY(fixture.prepare("Modes", {"Q1", "Q2"}, &error));
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QCOMPARE(fixture.session.reviewed(), 1);
 
@@ -203,7 +163,7 @@ void TestStudySession::setModeUppercaseCramNormalizesToReview() {
 void TestStudySession::setModeCanonicalInputIsNoOp() {
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Modes", {"Q1", "Q2"}, &error));
+    QVERIFY(fixture.prepare("Modes", {"Q1", "Q2"}, &error));
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QCOMPARE(fixture.session.reviewed(), 1);
     QCOMPARE(fixture.session.good(), 1);
@@ -234,7 +194,7 @@ void TestStudySession::setModeCanonicalInputIsNoOp() {
 void TestStudySession::setModeCramSwitchesAndResets() {
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Modes", {"Q1", "Q2"}, &error));
+    QVERIFY(fixture.prepare("Modes", {"Q1", "Q2"}, &error));
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QCOMPARE(fixture.session.reviewed(), 1);
     QCOMPARE(fixture.session.good(), 1);
@@ -280,11 +240,10 @@ void TestStudySession::setModeCramSwitchesAndResets() {
 }
 
 void TestStudySession::modeSwitchStopsTimerAndClearsPendingRepeat() {
-    AgainDelayGuard guard;
-    qputenv("OMACARDS_AGAIN_DELAY_MS", "200");
+    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "200");
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "AtomicMode", {"Q1", "Q2"}, &error));
+    QVERIFY(fixture.prepare("AtomicMode", {"Q1", "Q2"}, &error));
     QVERIFY(error.isEmpty());
 
     QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention));
@@ -312,7 +271,7 @@ void TestStudySession::injectedCramOrderPresentsExactFlashcards() {
     StudySession ordered(fixture.repo, fixture.planner, fixture.ratings,
                          [](const QVector<Card> &cards) { return cards; });
     QString error;
-    QVERIFY(prepareSessionWith(fixture, ordered, "CramOrder", {"Q1", "Q2", "Q3"}, &error));
+    QVERIFY(fixture.prepare("CramOrder", {"Q1", "Q2", "Q3"}, &error, {}, &ordered));
     QVERIFY(error.isEmpty());
     const QVector<Card> cards = fixture.repo.deckByName("CramOrder")->cards;
     QCOMPARE(cards.size(), 3);
@@ -336,7 +295,7 @@ void TestStudySession::injectedCramOrderPresentsExactFlashcards() {
 void TestStudySession::statsChangedSeesPresentedLeitnerBox() {
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "SignalOrder", {"Q1", "Q2"}, &error));
+    QVERIFY(fixture.prepare("SignalOrder", {"Q1", "Q2"}, &error));
     QVERIFY(error.isEmpty());
     fixture.session.setMode("cram");
     fixture.session.rebuild("SignalOrder");
@@ -358,11 +317,10 @@ void TestStudySession::statsChangedSeesPresentedLeitnerBox() {
 }
 
 void TestStudySession::waitingExitEmitsOneSettledStatsNotification() {
-    AgainDelayGuard guard;
-    qputenv("OMACARDS_AGAIN_DELAY_MS", "2000");
+    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "2000");
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Waiting", {"Q1", "Q2"}, &error));
+    QVERIFY(fixture.prepare("Waiting", {"Q1", "Q2"}, &error));
     QVERIFY(error.isEmpty());
 
     QVector<int> reviewedAtSignal;
@@ -396,7 +354,7 @@ void TestStudySession::waitingExitEmitsOneSettledStatsNotification() {
 void TestStudySession::finishedExitEmitsOneSettledStatsNotification() {
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Finished", {"Q1"}, &error));
+    QVERIFY(fixture.prepare("Finished", {"Q1"}, &error));
     QVERIFY(error.isEmpty());
 
     QVector<int> reviewedAtSignal;
@@ -421,7 +379,7 @@ void TestStudySession::finishedExitEmitsOneSettledStatsNotification() {
 void TestStudySession::invalidRatingsAreNoOps() {
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Ratings", {"Q1", "Q2"}, &error));
+    QVERIFY(fixture.prepare("Ratings", {"Q1", "Q2"}, &error));
 
     QSignalSpy statsSpy(&fixture.session, &StudySession::statsChanged);
     QSignalSpy cardSpy(&fixture.session, &StudySession::cardChanged);
@@ -466,7 +424,7 @@ void TestStudySession::reviewPassesTypedRatingToRecording() {
     RatingRecording recording(stub);
     StudySession session(fixture.repo, fixture.planner, recording);
     QString error;
-    QVERIFY(prepareSessionWith(fixture, session, "Ratings", {"Q1", "Q2", "Q3"}, &error));
+    QVERIFY(fixture.prepare("Ratings", {"Q1", "Q2", "Q3"}, &error, {}, &session));
     QVERIFY(error.isEmpty());
 
     QVERIFY(session.rate(Rating::Again, Config::kDefaultRetention));
@@ -487,7 +445,7 @@ void TestStudySession::reviewFailuresKeepTranslatedText() {
     RatingRecording recording(stub);
     StudySession session(fixture.repo, fixture.planner, recording);
     QString error;
-    QVERIFY(prepareSessionWith(fixture, session, "Errors", {"Q1", "Q2"}, &error));
+    QVERIFY(fixture.prepare("Errors", {"Q1", "Q2"}, &error, {}, &session));
     QSignalSpy errorSpy(&session, &StudySession::errorOccurred);
 
     // presentCard() replaces the transient status after a rating, so the
@@ -507,7 +465,7 @@ void TestStudySession::reviewFailuresKeepTranslatedText() {
 void TestStudySession::successfulReviewRefreshesPlanner() {
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Refresh", {"Q1", "Q2", "Q3"}, &error));
+    QVERIFY(fixture.prepare("Refresh", {"Q1", "Q2", "Q3"}, &error));
     const Card card = fixture.repo.deckByName("Refresh")->cards.first();
     QCOMPARE(fixture.planner.stateFor(card).reps, 0);
     QCOMPARE(fixture.planner.newCount(), 3);
@@ -527,8 +485,7 @@ void TestStudySession::successfulReviewRefreshesPlanner() {
 void TestStudySession::goodRatingWithFailedRefreshPinsErrorAndDegradedValues() {
     StubSessionFixture fixture;
     QString error;
-    QVERIFY(prepareSessionParts(fixture.repo, fixture.store, fixture.planner, fixture.session, &fixture.current,
-                                "RefreshFailure", {"Q1", "Q2"}, &error));
+    QVERIFY(fixture.prepare("RefreshFailure", {"Q1", "Q2"}, &error));
     QVERIFY(error.isEmpty());
     QVERIFY(fixture.session.hasCard());
     QVERIFY(fixture.session.dueCount() > 0);
@@ -550,12 +507,10 @@ void TestStudySession::goodRatingWithFailedRefreshPinsErrorAndDegradedValues() {
 }
 
 void TestStudySession::againRatingWithFailedRefreshKeepsPendingRepeat() {
-    AgainDelayGuard guard;
-    qputenv("OMACARDS_AGAIN_DELAY_MS", "1000");
+    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "1000");
     StubSessionFixture fixture;
     QString error;
-    QVERIFY(prepareSessionParts(fixture.repo, fixture.store, fixture.planner, fixture.session, &fixture.current,
-                                "RepeatFailure", {"Q1", "Q2"}, &error));
+    QVERIFY(fixture.prepare("RepeatFailure", {"Q1", "Q2"}, &error));
     QVERIFY(error.isEmpty());
     QVERIFY(fixture.session.question().contains(QStringLiteral("Q1")));
 
@@ -581,7 +536,7 @@ void TestStudySession::againRatingWithFailedRefreshKeepsPendingRepeat() {
 void TestStudySession::reviewStatusOmitsSessionPositionBox() {
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Status", {"Q1"}, &error));
+    QVERIFY(fixture.prepare("Status", {"Q1"}, &error));
 
     QVERIFY(fixture.session.status().contains(QStringLiteral("predicted recall")));
     QVERIFY(!fixture.session.status().contains(QStringLiteral("FSRS box")));
@@ -590,7 +545,7 @@ void TestStudySession::reviewStatusOmitsSessionPositionBox() {
 void TestStudySession::revealAndShowNextToggleAnswer() {
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Reveal", {"Q1"}, &error));
+    QVERIFY(fixture.prepare("Reveal", {"Q1"}, &error));
     QSignalSpy cardSpy(&fixture.session, &StudySession::cardChanged);
 
     QVERIFY(!fixture.session.showingAnswer());
@@ -624,7 +579,7 @@ void TestStudySession::revealAndShowNextToggleAnswer() {
 void TestStudySession::setStatusDedupesAndReportErrorSignals() {
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Status", {"Q1"}, &error));
+    QVERIFY(fixture.prepare("Status", {"Q1"}, &error));
 
     QSignalSpy statusSpy(&fixture.session, &StudySession::statusChanged);
     QSignalSpy errorSpy(&fixture.session, &StudySession::errorOccurred);
@@ -654,11 +609,10 @@ void TestStudySession::setStatusDedupesAndReportErrorSignals() {
 }
 
 void TestStudySession::rebuildKeepsPendingRepeatInReview() {
-    AgainDelayGuard guard;
-    qputenv("OMACARDS_AGAIN_DELAY_MS", "2000");
+    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "2000");
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Repeats", {"Q1", "Q2"}, &error));
+    QVERIFY(fixture.prepare("Repeats", {"Q1", "Q2"}, &error));
     QVERIFY(fixture.session.question().contains("Q1"));
 
     QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention)); // Again: Q1 waits, Q2 is shown
@@ -677,11 +631,10 @@ void TestStudySession::rebuildKeepsPendingRepeatInReview() {
 }
 
 void TestStudySession::switchingToCramClearsPendingRepeat() {
-    AgainDelayGuard guard;
-    qputenv("OMACARDS_AGAIN_DELAY_MS", "20");
+    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "20");
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Switch", {"Q1", "Q2"}, &error));
+    QVERIFY(fixture.prepare("Switch", {"Q1", "Q2"}, &error));
 
     QVERIFY(fixture.session.rate(Rating::Again, Config::kDefaultRetention)); // a pending Again in review mode
     fixture.session.setMode("cram");
@@ -702,7 +655,7 @@ void TestStudySession::switchingToCramClearsPendingRepeat() {
 void TestStudySession::statsTextAndMathEngine() {
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Stats", {"Q1", "Q2"}, &error));
+    QVERIFY(fixture.prepare("Stats", {"Q1", "Q2"}, &error));
 
     QCOMPARE(fixture.session.boxDistribution(), QVector<int>({0, 0, 0, 0, 0}));
     QCOMPARE(fixture.session.statsText(), QString("0 reviewed · 0% Good"));
@@ -729,7 +682,7 @@ void TestStudySession::statsTextAndMathEngine() {
 void TestStudySession::setMathColorsEmitsOnlyOnChange() {
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Math", {"What is \\(x^2\\)?"}, &error));
+    QVERIFY(fixture.prepare("Math", {"What is \\(x^2\\)?"}, &error));
     QVERIFY(fixture.session.hasCard());
     QVERIFY(!fixture.session.question().isEmpty());
 
@@ -756,18 +709,18 @@ void TestStudySession::prefetchQueuesTheNextThreeCardsWithoutChangingOrder() {
 
     TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
     TestSupport::ScopedEnv argsEnv("OMACARDS_TEST_ARGS", argsLog);
-    TestSupport::PathPrependGuard pathGuard(bin);
+    TestSupport::PathGuard pathGuard(bin);
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Prefetch", {"plain", "\\(x1\\)", "\\(x2\\)", "\\(x3\\)", "\\(x4\\)"}, &error));
+    QVERIFY(fixture.prepare("Prefetch", {"plain", "\\(x1\\)", "\\(x2\\)", "\\(x3\\)", "\\(x4\\)"}, &error));
     QVERIFY(error.isEmpty());
     QCOMPARE(fixture.session.question(), QStringLiteral("plain"));
 
     // Only the next three cards are warmed; the first card has no math and x4
     // is too far away. Question and Answer share one neutral SVG per expression
     // even though they display at different scales.
-    QTRY_VERIFY_WITH_TIMEOUT(tectonicRenders(argsLog) >= 3, 5000);
-    QCOMPARE(tectonicRenders(argsLog), 3);
+    QTRY_VERIFY_WITH_TIMEOUT(toolchainRenders(argsLog) >= 3, 5000);
+    QCOMPARE(toolchainRenders(argsLog), 3);
     MathRenderer renderer(cache);
     for (const QString expression : {"x1", "x2", "x3"})
         QVERIFY(QFileInfo::exists(renderer.mathSvgPath(expression)));
@@ -793,10 +746,10 @@ void TestStudySession::prefetchResultIsIgnoredForCardsAlreadyLeftBehind() {
 
     TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
     TestSupport::ScopedEnv argsEnv("OMACARDS_TEST_ARGS", argsLog);
-    TestSupport::PathPrependGuard pathGuard(bin);
+    TestSupport::PathGuard pathGuard(bin);
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Stale", {"\\(x^2\\)", "plain"}, &error));
+    QVERIFY(fixture.prepare("Stale", {"\\(x^2\\)", "plain"}, &error));
     MathRenderer renderer(cache);
     const QString key = cacheKey(renderer.mathSvgPath("x^2"));
     QVERIFY(fixture.session.question().contains(QStringLiteral("<!--omacards-math:%1-->").arg(key)));
@@ -823,11 +776,11 @@ void TestStudySession::themeChangeRecolorsFromCacheWithoutPrefetch() {
 
     TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
     TestSupport::ScopedEnv argsEnv("OMACARDS_TEST_ARGS", argsLog);
-    TestSupport::PathPrependGuard pathGuard(bin);
+    TestSupport::PathGuard pathGuard(bin);
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSession(fixture, "Theme", {"\\(x^2\\)", "plain", "\\(y^2\\)"}, &error));
-    QTRY_VERIFY_WITH_TIMEOUT(tectonicRenders(argsLog) >= 2, 5000);
+    QVERIFY(fixture.prepare("Theme", {"\\(x^2\\)", "plain", "\\(y^2\\)"}, &error));
+    QTRY_VERIFY_WITH_TIMEOUT(toolchainRenders(argsLog) >= 2, 5000);
 
     MathRenderer renderer(cache);
     QVERIFY(QFileInfo::exists(renderer.mathSvgPath("x^2")));
@@ -841,7 +794,7 @@ void TestStudySession::themeChangeRecolorsFromCacheWithoutPrefetch() {
 
     // New inks only change the data URIs. No upcoming card is re-rendered and
     // no cache file is added, so a theme switch stays instant.
-    QCOMPARE(tectonicRenders(argsLog), 2);
+    QCOMPARE(toolchainRenders(argsLog), 2);
     QCOMPARE(QDir(cache).entryList({"*.svg"}), filesBefore);
     const QString questionAfter = fixture.session.question();
     QVERIFY(questionAfter != questionBefore);
@@ -871,17 +824,16 @@ void TestStudySession::themeChangeDuringRenderUsesNewInk() {
     TestSupport::ScopedEnv argsEnv("OMACARDS_TEST_ARGS", argsLog);
     TestSupport::ScopedEnv startedEnv("OMACARDS_TEST_STARTED", started);
     TestSupport::ScopedEnv releaseEnv("OMACARDS_TEST_RELEASE", release);
-    TestSupport::PathPrependGuard pathGuard(bin);
+    TestSupport::PathGuard pathGuard(bin);
 
     SessionFixture fixture;
     QString error;
-    QVERIFY(prepareSessionParts(fixture.repo, fixture.store, fixture.planner, fixture.session, &fixture.current,
-                                "InFlight", {"\\(x^2\\)"}, &error, {"plain"}));
+    QVERIFY(fixture.prepare("InFlight", {"\\(x^2\\)"}, &error, {"plain"}));
     QVERIFY(error.isEmpty());
 
     QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(started), 5000);
     QVERIFY(fixture.session.question().contains(QStringLiteral("<!--omacards-math:")));
-    QCOMPARE(tectonicRenders(argsLog), 1);
+    QCOMPARE(toolchainRenders(argsLog), 1);
 
     fixture.session.setMathColors("#112233", "#445566");
     QVERIFY(writeFile(release, ""));
@@ -894,7 +846,7 @@ void TestStudySession::themeChangeDuringRenderUsesNewInk() {
     QVERIFY(!svg.contains(QStringLiteral("fill=\"#000000\"")));
     // Switching ink reused the in-flight neutral render; it never started a
     // second toolchain run or changed the cached SVG.
-    QCOMPARE(tectonicRenders(argsLog), 1);
+    QCOMPARE(toolchainRenders(argsLog), 1);
 }
 
 void TestStudySession::themeChangeAfterSvgIsCachedUsesNewInk() {
@@ -922,7 +874,7 @@ void TestStudySession::themeChangeAfterSvgIsCachedUsesNewInk() {
     TestSupport::ScopedEnv argsEnv("OMACARDS_TEST_ARGS", argsLog);
     TestSupport::ScopedEnv cachedEnv("OMACARDS_TEST_CACHED", cached);
     TestSupport::ScopedEnv releaseEnv("OMACARDS_TEST_RELEASE", release);
-    TestSupport::PathPrependGuard pathGuard(bin);
+    TestSupport::PathGuard pathGuard(bin);
 
     MathRenderer renderer(cache);
     QSignalSpy rendered(&renderer, &MathRenderer::mathRendered);
@@ -932,7 +884,7 @@ void TestStudySession::themeChangeAfterSvgIsCachedUsesNewInk() {
     QVERIFY(placeholder.contains(QStringLiteral("<!--omacards-math:%1-->").arg(key)));
 
     QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(cached), 5000);
-    QCOMPARE(tectonicRenders(argsLog), 1);
+    QCOMPARE(toolchainRenders(argsLog), 1);
 
     renderer.clearPendingMath();
     const QString first = renderer.renderWithPlaceholders(expression, "#112233", MathScale::kQuestion);
@@ -954,5 +906,5 @@ void TestStudySession::themeChangeAfterSvgIsCachedUsesNewInk() {
     QVERIFY(!emittedSvg.contains(QStringLiteral("fill=\"#000000\"")));
     QVERIFY(emittedSvg.contains(QStringLiteral("fill=\"#abcdef\"")));
     // Recoloring from the neutral cache never starts a second toolchain run.
-    QCOMPARE(tectonicRenders(argsLog), 1);
+    QCOMPARE(toolchainRenders(argsLog), 1);
 }

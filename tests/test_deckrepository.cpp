@@ -15,14 +15,9 @@
 #include "store.h"
 #include "test_support.h"
 
-namespace {
+using namespace TestSupport;
 
-bool writeText(const QString &path, const QByteArray &contents) {
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly))
-        return false;
-    return file.write(contents) == contents.size();
-}
+namespace {
 
 struct RepoFixture {
     QTemporaryDir dir;
@@ -80,7 +75,7 @@ void TestDeckRepository::initializeDoesNotOverwriteExistingDeckDirectory() {
     QVERIFY(QDir().mkpath(decks));
     const QString path = QDir(decks).filePath("Custom.txt");
     const QByteArray contents = "# Deck: Custom\n---\nQ: Keep me\nA: Please\n";
-    QVERIFY(writeText(path, contents));
+    QVERIFY(writeFile(path, contents));
 
     QString error;
     QVERIFY(f.repo.initialize(&error));
@@ -128,7 +123,7 @@ void TestDeckRepository::createDeckRejectsExistingUntrackedFile() {
     QVERIFY(setup(f));
     const QString path = f.dir.filePath("decks/Taken.txt");
     const QByteArray contents = "not a deck\n";
-    QVERIFY(writeText(path, contents));
+    QVERIFY(writeFile(path, contents));
 
     QString error;
     QVERIFY(!f.repo.createDeck("Taken", &f.current, &error));
@@ -413,7 +408,7 @@ void TestDeckRepository::modifyCardHandlesExplicitAndGeneratedIds() {
     QCOMPARE(finalId, oldId);
 
     const QString pinnedPath = QDir(f.dir.filePath("decks")).filePath("Pinned.txt");
-    QVERIFY(writeText(pinnedPath, "# Deck: Pinned\n---\nQ: Fixed\nA: Answer\nid: pinned-123\n"));
+    QVERIFY(writeFile(pinnedPath, "# Deck: Pinned\n---\nQ: Fixed\nA: Answer\nid: pinned-123\n"));
     f.repo.load(&f.current);
     const Deck *pinned = f.repo.deckByName("Pinned");
     QVERIFY(pinned);
@@ -788,6 +783,6 @@ void TestDeckRepository::watchDirectoryRequestsReloadAfterFileChange() {
     f.repo.watchDirectory();
     QSignalSpy reloadSpy(&f.repo, &DeckRepository::reloadRequested);
 
-    QVERIFY(writeText(QDir(f.dir.filePath("decks")).filePath("Watched.txt"), "# Deck: Watched\n---\nQ: q\nA: a\n"));
+    QVERIFY(writeFile(QDir(f.dir.filePath("decks")).filePath("Watched.txt"), "# Deck: Watched\n---\nQ: q\nA: a\n"));
     QTRY_VERIFY_WITH_TIMEOUT(reloadSpy.count() > 0, 2000);
 }

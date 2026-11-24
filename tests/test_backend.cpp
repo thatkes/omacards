@@ -156,23 +156,6 @@ struct MainWindowHarness {
     QObject *window = nullptr;
 };
 
-// Points the window's Theme at a temporary colors.toml so a live theme change
-// can be tested without touching the real Omarchy theme.
-struct ThemeDirGuard {
-    QByteArray previous;
-
-    explicit ThemeDirGuard(const QString &path) : previous(qgetenv("OMACARDS_THEME_DIR")) {
-        qputenv("OMACARDS_THEME_DIR", path.toUtf8());
-    }
-
-    ~ThemeDirGuard() {
-        if (!previous.isNull())
-            qputenv("OMACARDS_THEME_DIR", previous);
-        else
-            qunsetenv("OMACARDS_THEME_DIR");
-    }
-};
-
 // Shared setup for the study-view tests. The window is still the real Main.qml
 // loaded by MainWindowHarness; this only owns the temp dir, Backend and card
 // setup that every study test used to repeat.
@@ -265,10 +248,10 @@ QString manyCardLines(int count) {
 } // namespace
 
 void TestBackend::defaultPathsIgnoreOrganizationName() {
-    const QByteArray oldDecks = qgetenv("OMACARDS_DECKS_DIR");
-    const QByteArray oldState = qgetenv("OMACARDS_STATE_DB");
-    qunsetenv("OMACARDS_DECKS_DIR");
-    qunsetenv("OMACARDS_STATE_DB");
+    // Scoped guards restore both variables even when an assertion below fails;
+    // a manual restore after QVERIFY would leak state into later suites.
+    ScopedEnv noDecks("OMACARDS_DECKS_DIR");
+    ScopedEnv noState("OMACARDS_STATE_DB");
 
     const QString oldOrg = QCoreApplication::organizationName();
     auto ownedWithoutOrg = Backend::fromEnvironment();
@@ -282,11 +265,6 @@ void TestBackend::defaultPathsIgnoreOrganizationName() {
 
     QCOMPARE(first, second);
     QVERIFY(!first.contains(QStringLiteral("omarchy")));
-
-    if (!oldDecks.isNull())
-        qputenv("OMACARDS_DECKS_DIR", oldDecks);
-    if (!oldState.isNull())
-        qputenv("OMACARDS_STATE_DB", oldState);
 }
 
 void TestBackend::backendCreatesCardAndRatesInCram() {
@@ -1780,7 +1758,7 @@ void TestBackend::qmlCramLeitnerBoxHighlightFollowsThemeChange() {
     QVERIFY(QDir(dir.path()).mkpath(QStringLiteral("theme")));
     const QString colors = dir.filePath(QStringLiteral("theme/colors.toml"));
     QVERIFY(writeFile(colors, "green = \"#112233\"\n"));
-    ThemeDirGuard guard(dir.path());
+    ScopedEnv guard("OMACARDS_THEME_DIR", dir.path());
 
     StudyViewFixture fixture;
     QVERIFY(fixture.initialize());
@@ -2061,8 +2039,7 @@ void TestBackend::backendAppliesNewCardLimit() {
 
 void TestBackend::backendKeepsPendingRepeatInSameSession() {
     QTemporaryDir dir;
-    const QByteArray previousDelay = qgetenv("OMACARDS_AGAIN_DELAY_MS");
-    qputenv("OMACARDS_AGAIN_DELAY_MS", "20");
+    ScopedEnv delay("OMACARDS_AGAIN_DELAY_MS", "20");
     {
         Backend backend(dir.path(), dir.filePath("state.db"));
         QString error;
@@ -2099,10 +2076,6 @@ void TestBackend::backendKeepsPendingRepeatInSameSession() {
         backend.rate(3);
         QVERIFY(!backend.hasCard());
     }
-    if (previousDelay.isNull())
-        qunsetenv("OMACARDS_AGAIN_DELAY_MS");
-    else
-        qputenv("OMACARDS_AGAIN_DELAY_MS", previousDelay);
 }
 
 void TestBackend::unreadableDeckKeepsSchedulingState() {
@@ -2223,8 +2196,7 @@ void TestBackend::deckCreationRejectsSanitizedPathCollision() {
 
 void TestBackend::refreshKeepsPendingAgainRepeat() {
     QTemporaryDir dir;
-    const QByteArray previousDelay = qgetenv("OMACARDS_AGAIN_DELAY_MS");
-    qputenv("OMACARDS_AGAIN_DELAY_MS", "50");
+    ScopedEnv delay("OMACARDS_AGAIN_DELAY_MS", "50");
     {
         Backend backend(dir.path(), dir.filePath("state.db"));
         QString error;
@@ -2243,16 +2215,11 @@ void TestBackend::refreshKeepsPendingAgainRepeat() {
         backend.rate(3);
         QTRY_VERIFY_WITH_TIMEOUT(backend.question().contains("Q1"), 2000);
     }
-    if (previousDelay.isNull())
-        qunsetenv("OMACARDS_AGAIN_DELAY_MS");
-    else
-        qputenv("OMACARDS_AGAIN_DELAY_MS", previousDelay);
 }
 
 void TestBackend::deckSwitchStartsFreshSession() {
     QTemporaryDir dir;
-    const QByteArray previousDelay = qgetenv("OMACARDS_AGAIN_DELAY_MS");
-    qputenv("OMACARDS_AGAIN_DELAY_MS", "500");
+    ScopedEnv delay("OMACARDS_AGAIN_DELAY_MS", "500");
     {
         Backend backend(dir.path(), dir.filePath("state.db"));
         QString error;
@@ -2280,10 +2247,6 @@ void TestBackend::deckSwitchStartsFreshSession() {
         QTest::qWait(700);
         QCOMPARE(backend.question(), freshQuestion);
     }
-    if (previousDelay.isNull())
-        qunsetenv("OMACARDS_AGAIN_DELAY_MS");
-    else
-        qputenv("OMACARDS_AGAIN_DELAY_MS", previousDelay);
 }
 
 void TestBackend::deckSwitchKeepsModeAndResetsLeitnerBox() {
@@ -2462,8 +2425,7 @@ void TestBackend::setModeBoundarySemantics() {
 
 void TestBackend::modeSwitchStopsRepeatTimerAndClearsPending() {
     QTemporaryDir dir;
-    const QByteArray previousDelay = qgetenv("OMACARDS_AGAIN_DELAY_MS");
-    qputenv("OMACARDS_AGAIN_DELAY_MS", "200");
+    ScopedEnv delay("OMACARDS_AGAIN_DELAY_MS", "200");
     {
         // Keep deck files out of the state-db directory so a SQLite write
         // cannot trigger the deck watcher's debounced reload mid-test. Create
@@ -2500,10 +2462,6 @@ void TestBackend::modeSwitchStopsRepeatTimerAndClearsPending() {
         QTest::qWait(400); // the old Review timer would have fired by now
         QCOMPARE(cardSpy.count(), 0);
     }
-    if (previousDelay.isNull())
-        qunsetenv("OMACARDS_AGAIN_DELAY_MS");
-    else
-        qputenv("OMACARDS_AGAIN_DELAY_MS", previousDelay);
 }
 
 void TestBackend::qmlCramInjectedOrderPresentsExactNextFlashcard() {
@@ -2955,7 +2913,7 @@ void TestBackend::qmlStudyShowsMathPlaceholderUntilSvgArrives() {
     QVERIFY(writeFakePdfToolchain(bin, svg, QStringLiteral("sleep 1\n")));
 
     TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
-    PathPrependGuard pathGuard(bin);
+    PathGuard pathGuard(bin);
     StudyViewFixture fixture;
     QVERIFY(fixture.initialize());
     QVERIFY(fixture.createDeck());
@@ -3014,7 +2972,7 @@ void TestBackend::qmlStudyRecolorsCachedSvgWhenThemeChanges() {
 
     TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
     TestSupport::ScopedEnv argsEnv("OMACARDS_TEST_ARGS", argsLog);
-    PathPrependGuard pathGuard(bin);
+    PathGuard pathGuard(bin);
     MathRenderer prewarm(cache);
     QVERIFY(prewarm.hasRenderer());
     QVERIFY(prewarm.renderExpression("x^2", QStringLiteral("#112233"), MathScale::kQuestion)
@@ -3062,7 +3020,7 @@ void TestBackend::qmlStudyUsesCachedSvgWithoutPlaceholder() {
     QVERIFY(writeFakePdfToolchain(bin, svg));
 
     TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
-    PathPrependGuard pathGuard(bin);
+    PathGuard pathGuard(bin);
     MathRenderer prewarm(cache);
     QVERIFY(prewarm.hasRenderer());
     QVERIFY(prewarm.renderExpression("x^2", QStringLiteral("#000000"), MathScale::kQuestion)

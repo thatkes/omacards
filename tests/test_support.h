@@ -3,12 +3,14 @@
 #include <QByteArray>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QHash>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QSize>
+#include <QStandardPaths>
 #include <QString>
 #include <QStringList>
 #include <QTextBlock>
@@ -159,27 +161,44 @@ private:
     mutable QString m_error;
 };
 
-struct EnvGuard {
-    QByteArray decks;
-    QByteArray state;
+// The single scoped environment guard. Construction saves the previous value
+// and installs the new one; destruction restores it on every exit path, including
+// a failed QVERIFY. Construct with a name alone to unset a variable for a test.
+class ScopedEnv {
+public:
+    explicit ScopedEnv(const char *name) : m_name(name) { unset(); }
 
-    EnvGuard(const QString &decksDir, const QString &stateDb) {
-        decks = qgetenv("OMACARDS_DECKS_DIR");
-        state = qgetenv("OMACARDS_STATE_DB");
-        qputenv("OMACARDS_DECKS_DIR", decksDir.toUtf8());
-        qputenv("OMACARDS_STATE_DB", stateDb.toUtf8());
+    ScopedEnv(const char *name, const QString &value) : m_name(name) { set(value.toUtf8()); }
+
+    ~ScopedEnv() {
+        if (m_present)
+            qputenv(m_name.constData(), m_previous);
+        else
+            qunsetenv(m_name.constData());
     }
 
-    ~EnvGuard() {
-        if (!decks.isNull())
-            qputenv("OMACARDS_DECKS_DIR", decks);
-        else
-            qunsetenv("OMACARDS_DECKS_DIR");
-        if (!state.isNull())
-            qputenv("OMACARDS_STATE_DB", state);
-        else
-            qunsetenv("OMACARDS_STATE_DB");
+    void set(const QByteArray &value) { qputenv(m_name.constData(), value); }
+    void unset() {
+        if (m_present)
+            qunsetenv(m_name.constData());
     }
+
+private:
+    QByteArray m_name;
+    QByteArray m_previous = qgetenv(m_name.constData());
+    bool m_present = !m_previous.isNull();
+};
+
+// Compound fixtures for the CLI suites: two Store overrides and a private HOME.
+// They own no restore logic of their own; each variable is a ScopedEnv.
+class EnvGuard {
+public:
+    EnvGuard(const QString &decksDir, const QString &stateDb)
+        : decks("OMACARDS_DECKS_DIR", decksDir), state("OMACARDS_STATE_DB", stateDb) {}
+
+private:
+    ScopedEnv decks;
+    ScopedEnv state;
 };
 
 // Isolates the home directory that QDir::homePath() resolves for the bundled
@@ -187,17 +206,10 @@ struct EnvGuard {
 // runCli*() inherits this HOME through the child process environment.
 class HomeGuard {
 public:
-    explicit HomeGuard(const QString &home) : m_previous(qgetenv("HOME")) { qputenv("HOME", home.toUtf8()); }
-
-    ~HomeGuard() {
-        if (!m_previous.isNull())
-            qputenv("HOME", m_previous);
-        else
-            qunsetenv("HOME");
-    }
+    explicit HomeGuard(const QString &home) : homeEnv("HOME", home) {}
 
 private:
-    QByteArray m_previous;
+    ScopedEnv homeEnv;
 };
 
 inline QString appBinary() {
@@ -250,45 +262,71 @@ inline QString runCliText(const QStringList &arguments, const QString &decksDir,
     return QString::fromUtf8(runCliRaw(arguments, decksDir, stateDb, exitCode, standardError));
 }
 
+// The single file writer used by every suite's fixtures.
 inline bool writeFile(const QString &path, const QByteArray &contents) {
     QFile file(path);
     return file.open(QIODevice::WriteOnly) && file.write(contents) == contents.size();
 }
 
-// Saves and restores any environment variable a test changes. Math tests use
-// it for PATH, XDG_CACHE_HOME and the fake toolchain's argument log.
-class ScopedEnv {
+// The single PATH guard. Prepend keeps the real tools available; Replace hides
+// them so QStandardPaths::findExecutable() can characterize fallback branches.
+// Destruction restores the original value, including an unset PATH.
+class PathGuard {
 public:
-    ScopedEnv(const char *name, const QString &value) : m_name(name) {
-        m_previous = qgetenv(name);
-        m_present = !m_previous.isNull();
-        qputenv(name, value.toUtf8());
+    enum class Mode { Replace, Prepend };
+
+    explicit PathGuard(const QString &directory, Mode mode = Mode::Prepend) : m_previous(qgetenv("PATH")) {
+        const QByteArray previous = m_previous.isNull() ? QByteArray() : m_previous;
+        const QString path =
+            mode == Mode::Replace ? directory : directory + QStringLiteral(":") + QString::fromLocal8Bit(previous);
+        qputenv("PATH", path.toLocal8Bit());
     }
 
-    ~ScopedEnv() {
-        if (m_present)
-            qputenv(m_name.constData(), m_previous);
+    ~PathGuard() {
+        if (!m_previous.isNull())
+            qputenv("PATH", m_previous);
         else
-            qunsetenv(m_name.constData());
+            qunsetenv("PATH");
     }
-
-private:
-    QByteArray m_name;
-    QByteArray m_previous;
-    bool m_present = false;
-};
-
-class PathPrependGuard {
-public:
-    explicit PathPrependGuard(const QString &directory) : m_previous(qgetenv("PATH")) {
-        qputenv("PATH", (directory + ":" + QString::fromLocal8Bit(m_previous)).toLocal8Bit());
-    }
-
-    ~PathPrependGuard() { qputenv("PATH", m_previous); }
 
 private:
     QByteArray m_previous;
 };
+
+inline const auto kExecutablePermissions = QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner | QFile::ReadGroup |
+                                           QFile::ExeGroup | QFile::ReadOther | QFile::ExeOther;
+
+inline bool writeExecutable(const QString &path, const QByteArray &script) {
+    return writeFile(path, script) && QFile::setPermissions(path, kExecutablePermissions);
+}
+
+// The single fake tool writer. Every generated shell tool logs its argv so a
+// test can count invocations from $OMACARDS_TEST_ARGS instead of measuring time.
+inline bool writeFakeTool(const QString &binDir, const QString &name, const QString &body) {
+    const QString script = QStringLiteral("#!/bin/sh\n"
+                                          "printf '%s' '") +
+                           name +
+                           QStringLiteral("' >> \"$OMACARDS_TEST_ARGS\"\n"
+                                          "for arg do printf ' %s' \"$arg\" >> \"$OMACARDS_TEST_ARGS\"; done\n"
+                                          "printf '\\n' >> \"$OMACARDS_TEST_ARGS\"\n") +
+                           body;
+    return writeExecutable(QDir(binDir).filePath(name), script.toUtf8());
+}
+
+// Toolchain predicates are shared because PATH guards and fake tools change
+// what is discoverable at runtime.
+inline bool hasTool(const QString &name) {
+    return !QStandardPaths::findExecutable(name).isEmpty();
+}
+
+inline bool hasPdfToolchain() {
+    return hasTool(QStringLiteral("tectonic")) || hasTool(QStringLiteral("pdflatex")) ||
+           hasTool(QStringLiteral("pdftocairo"));
+}
+
+inline bool hasPosixShell() {
+    return QFileInfo::exists(QStringLiteral("/bin/sh"));
+}
 
 // A deterministic TeX toolchain: tectonic writes a PDF, pdftocairo writes the
 // supplied SVG. Each invocation appends its argv to $OMACARDS_TEST_ARGS so a
@@ -296,19 +334,6 @@ private:
 inline bool writeFakePdfToolchain(const QString &binDir, const QString &svg, const QString &delayScript = {}) {
     if (!QDir().mkpath(binDir))
         return false;
-    const auto writeTool = [&](const QString &name, const QString &body) {
-        const QString path = QDir(binDir).filePath(name);
-        const QString script = QStringLiteral("#!/bin/sh\n"
-                                              "printf '%s' '") +
-                               name +
-                               QStringLiteral("' >> \"$OMACARDS_TEST_ARGS\"\n"
-                                              "for arg do printf ' %s' \"$arg\" >> \"$OMACARDS_TEST_ARGS\"; done\n"
-                                              "printf '\\n' >> \"$OMACARDS_TEST_ARGS\"\n") +
-                               body;
-        return writeFile(path, script.toUtf8()) &&
-               QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner | QFile::ReadGroup |
-                                               QFile::ExeGroup | QFile::ReadOther | QFile::ExeOther);
-    };
     const QString tectonic = QStringLiteral(R"sh(
 out=
 tex=
@@ -322,7 +347,8 @@ printf '%%PDF-1.4\n' > "$out/$base.pdf"
 )sh");
     const QString cairo = QStringLiteral("svg=\nfor arg do svg=\"$arg\"; done\n") + delayScript +
                           QStringLiteral("printf '%s\\n' '") + svg + QStringLiteral("' > \"$svg\"\n");
-    return writeTool(QStringLiteral("tectonic"), tectonic) && writeTool(QStringLiteral("pdftocairo"), cairo);
+    return writeFakeTool(binDir, QStringLiteral("tectonic"), tectonic) &&
+           writeFakeTool(binDir, QStringLiteral("pdftocairo"), cairo);
 }
 
 inline int toolchainRenders(const QString &logPath) {

@@ -5,75 +5,11 @@ set -eu
 # window, totals and chain waits are checked without live tracker data.
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 CHECKER="$ROOT/bin/wave-timing"
+. "$ROOT/tests/checker_test_support.sh"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 failures=0
-
-expect_result() {
-    name=$1
-    want_status=$2
-    want_text=$3
-    forbidden=${4:-}
-    shift 4
-    set +e
-    output="$("$CHECKER" "$@" 2>&1)"
-    got_status=$?
-    set -e
-    last_output=$output
-    if [ "$got_status" -ne "$want_status" ]; then
-        printf 'FAIL %s: status %s, wanted %s\n%s\n' \
-            "$name" "$got_status" "$want_status" "$output"
-        failures=$((failures + 1))
-        return
-    fi
-    case "$output" in
-        *"$want_text"*) ;;
-        *)
-            printf 'FAIL %s: output did not contain %s\n%s\n' \
-                "$name" "$want_text" "$output"
-            failures=$((failures + 1))
-            return
-            ;;
-    esac
-    if [ -n "$forbidden" ]; then
-        case "$output" in
-            *"$forbidden"*)
-                printf 'FAIL %s: output unexpectedly contained %s\n%s\n' \
-                    "$name" "$forbidden" "$output"
-                failures=$((failures + 1))
-                return
-                ;;
-        esac
-    fi
-    printf 'PASS %s\n' "$name"
-}
-
-expect_lines() {
-    name=$1
-    text=$2
-    case "$last_output" in
-        *"$text"*) printf 'PASS %s\n' "$name" ;;
-        *)
-            printf 'FAIL %s: output did not contain %s\n%s\n' \
-                "$name" "$text" "$last_output"
-            failures=$((failures + 1))
-            ;;
-    esac
-}
-
-expect_absent() {
-    name=$1
-    text=$2
-    case "$last_output" in
-        *"$text"*)
-            printf 'FAIL %s: output unexpectedly contained %s\n%s\n' \
-                "$name" "$text" "$last_output"
-            failures=$((failures + 1))
-            ;;
-        *) printf 'PASS %s\n' "$name" ;;
-    esac
-}
 
 cat > "$tmp/ledger.md" <<'EOF'
 Preamble outside the timing markers.
@@ -91,15 +27,15 @@ EOF
 
 expect_result window_and_totals 0 'WAVE window 16:29:21..17:04:12 (2091s)' \
     '' --ledger "$tmp/ledger.md"
-expect_lines agent_total 'AGENT total 1221s'
-expect_lines merge_lag_total 'MERGE_LAG total 478s'
+assert_has agent_total 'AGENT total 1221s' "$last_output"
+assert_has merge_lag_total 'MERGE_LAG total 478s' "$last_output"
 
 # Rows arrive out of chain order, so the checker must sort by chain/order
 # before comparing a link with its predecessor.
 expect_result chain_breach_is_reported 0 \
     'CHAIN math #45 waited 335s after #46 merged (threshold 120s)' \
     '' --ledger "$tmp/ledger.md"
-expect_absent short_chain_wait_is_quiet 'CHAIN math #44'
+assert_lacks short_chain_wait_is_quiet 'CHAIN math #44' "$last_output"
 expect_result check_mode_flags_breach 1 \
     'CHAIN math #45 waited 335s after #46 merged (threshold 120s)' \
     '' --ledger "$tmp/ledger.md" --check
@@ -119,8 +55,8 @@ cat > "$tmp/gaps.md" <<'EOF'
 EOF
 expect_result missing_times_are_skipped 0 'WAVE window 10:00:00..10:01:00 (60s)' \
     '' --ledger "$tmp/gaps.md"
-expect_lines missing_times_agent_total 'AGENT total 10s'
-expect_lines missing_times_merge_lag 'MERGE_LAG total 0s'
+assert_has missing_times_agent_total 'AGENT total 10s' "$last_output"
+assert_has missing_times_merge_lag 'MERGE_LAG total 0s' "$last_output"
 
 sed 's/16:36:04/99:36:04/' "$tmp/ledger.md" > "$tmp/bad-time.md"
 expect_result malformed_time_fails 1 'malformed wave timing' 'WAVE window' \

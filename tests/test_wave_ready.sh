@@ -7,75 +7,12 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 HELPER="$ROOT/bin/wave-ready"
 SYNC="$ROOT/bin/sync-worktree-local-docs"
 PARSER="$ROOT/bin/local-only-sync-paths.sh"
+. "$ROOT/tests/checker_test_support.sh"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 failures=0
-
-pass() {
-    printf 'PASS %s\n' "$1"
-}
-
-fail() {
-    printf 'FAIL %s: %s\n' "$1" "$2"
-    failures=$((failures + 1))
-}
-
-assert_status() {
-    if [ "$2" -eq "$3" ]; then
-        pass "$1"
-    else
-        fail "$1" "status $3, wanted $2: $4"
-    fi
-}
-
-assert_has() {
-    case "$3" in
-        *"$2"*) pass "$1" ;;
-        *) fail "$1" "output did not contain '$2': $3" ;;
-    esac
-}
-
-assert_lacks() {
-    case "$3" in
-        *"$2"*) fail "$1" "output unexpectedly contained '$2': $3" ;;
-        *) pass "$1" ;;
-    esac
-}
-
-assert_file() {
-    if [ -f "$2" ]; then
-        pass "$1"
-    else
-        fail "$1" "missing file: $2"
-    fi
-}
-
-assert_absent_file() {
-    if [ -e "$2" ]; then
-        fail "$1" "file should not exist: $2"
-    else
-        pass "$1"
-    fi
-}
-
-assert_equal() {
-    if [ "$2" = "$3" ]; then
-        pass "$1"
-    else
-        fail "$1" "got '$2', wanted '$3'"
-    fi
-}
-
-assert_line_count() {
-    if [ -z "$3" ]; then
-        count=0
-    else
-        count=$(printf '%s\n' "$3" | wc -l | tr -d '[:space:]')
-    fi
-    assert_equal "$1" "$count" "$2"
-}
 
 run_ready() {
     case_name=$1

@@ -2259,7 +2259,7 @@ void TestCli::previewJsonContracts() {
     QVERIFY(writeFakePdfToolchain(bin, kCliTinySvg));
     TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
     TestSupport::ScopedEnv argsEnv("OMACARDS_TEST_ARGS", dir.filePath("args.log"));
-    PathPrependGuard pathGuard(bin);
+    PathGuard pathGuard(bin);
     {
         auto owned = Backend::fromEnvironment();
         QString error;
@@ -2608,7 +2608,7 @@ accent = "#445566"
     TestSupport::ScopedEnv argsEnv("OMACARDS_TEST_ARGS", argsLog);
     TestSupport::ScopedEnv themeEnv("OMACARDS_THEME_DIR", themeDir);
     TestSupport::ScopedEnv hyprEnv("HYPRLAND_INSTANCE_SIGNATURE", {});
-    PathPrependGuard pathGuard(bin);
+    PathGuard pathGuard(bin);
 
     int code = -1;
     const QJsonObject first = runCli({"warm", "--deck", "Warm", "--json"}, decks, database, &code);

@@ -8,6 +8,7 @@ set -eu
 # environment, and the runner presents one combined summary. A CLI source edit
 # is checked against the app binary the fake CLI tests spawn.
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+. "$ROOT/tests/checker_test_support.sh"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
@@ -105,60 +106,6 @@ chmod +x "$repo/build/tests/omacards_tests"
 
 failures=0
 
-report_failure() {
-    printf 'FAIL %s: %s\n' "$1" "$2"
-    failures=$((failures + 1))
-}
-
-assert_status() {
-    name=$1
-    want=$2
-    got=$3
-    if [ "$got" -eq "$want" ]; then
-        printf 'PASS %s\n' "$name"
-    else
-        report_failure "$name" "status $got, wanted $want"
-    fi
-}
-
-assert_contains() {
-    name=$1
-    file=$2
-    text=$3
-    if grep -qF -- "$text" "$file"; then
-        printf 'PASS %s\n' "$name"
-    else
-        report_failure "$name" "output did not contain $text"
-    fi
-}
-
-assert_not_contains() {
-    name=$1
-    file=$2
-    text=$3
-    if grep -qF -- "$text" "$file"; then
-        report_failure "$name" "output unexpectedly contained $text"
-    else
-        printf 'PASS %s\n' "$name"
-    fi
-}
-
-assert_matches() {
-    name=$1
-    want=$2
-    got=$3
-    if [ "$got" = "$want" ]; then
-        printf 'PASS %s\n' "$name"
-    else
-        report_failure "$name" "value $got, wanted $want"
-    fi
-}
-
-count_matches() {
-    count=$(grep -cF -- "$2" "$1" || true)
-    printf '%s' "$count"
-}
-
 # Two overlapping runs in one checkout must each see only their own results,
 # and a plain run must show both of its groups and their combined summary.
 PATH="$fakebin:$PATH" "$repo/bin/test" run-a > "$tmp/out-a.log" 2>&1 &
@@ -174,18 +121,18 @@ set -e
 
 assert_status concurrent_run_a_status 0 "$status_a"
 assert_status concurrent_run_b_status 0 "$status_b"
-assert_contains run_a_own_marker "$tmp/out-a.log" 'MARKER: run-a'
-assert_contains run_b_own_marker "$tmp/out-b.log" 'MARKER: run-b'
-assert_not_contains run_a_has_no_other_marker "$tmp/out-a.log" 'MARKER: run-b'
-assert_not_contains run_b_has_no_other_marker "$tmp/out-b.log" 'MARKER: run-a'
-assert_matches run_a_has_two_groups 2 "$(count_matches "$tmp/out-a.log" 'GROUP: ')"
-assert_matches run_b_has_two_groups 2 "$(count_matches "$tmp/out-b.log" 'GROUP: ')"
-assert_contains run_a_has_cli_group "$tmp/out-a.log" 'GROUP: TestCli'
-assert_contains run_a_has_backend_group "$tmp/out-a.log" 'GROUP: TestBackend'
-assert_contains run_a_uses_binary_suite_list "$tmp/out-a.log" 'ALL_SUITES: TestBackend TestDynamic'
-assert_contains run_a_aggregated_announcement "$tmp/out-a.log" 'OMACARDS_TEST_SUITES: 5'
-assert_contains run_a_combined_summary "$tmp/out-a.log" 'across 5 suites'
-assert_contains run_b_combined_summary "$tmp/out-b.log" 'across 5 suites'
+assert_file_has_text run_a_own_marker "$tmp/out-a.log" 'MARKER: run-a'
+assert_file_has_text run_b_own_marker "$tmp/out-b.log" 'MARKER: run-b'
+assert_file_lacks_text run_a_has_no_other_marker "$tmp/out-a.log" 'MARKER: run-b'
+assert_file_lacks_text run_b_has_no_other_marker "$tmp/out-b.log" 'MARKER: run-a'
+assert_equal run_a_has_two_groups "$(count_matches "$tmp/out-a.log" 'GROUP: ')" 2
+assert_equal run_b_has_two_groups "$(count_matches "$tmp/out-b.log" 'GROUP: ')" 2
+assert_file_has_text run_a_has_cli_group "$tmp/out-a.log" 'GROUP: TestCli'
+assert_file_has_text run_a_has_backend_group "$tmp/out-a.log" 'GROUP: TestBackend'
+assert_file_has_text run_a_uses_binary_suite_list "$tmp/out-a.log" 'ALL_SUITES: TestBackend TestDynamic'
+assert_file_has_text run_a_aggregated_announcement "$tmp/out-a.log" 'OMACARDS_TEST_SUITES: 5'
+assert_file_has_text run_a_combined_summary "$tmp/out-a.log" 'across 5 suites'
+assert_file_has_text run_b_combined_summary "$tmp/out-b.log" 'across 5 suites'
 
 combined_log_count=0
 for log in "$repo"/build/tests/run.*; do
@@ -228,26 +175,26 @@ PATH="$fakebin:$PATH" "$repo/bin/test" --suite TestCli run-a > "$tmp/out-focused
 status_focused=$?
 set -e
 assert_status focused_status 0 "$status_focused"
-assert_matches focused_has_one_group 1 "$(count_matches "$tmp/out-focused.log" 'GROUP: ')"
-assert_contains focused_keeps_smaller_count "$tmp/out-focused.log" 'across 2 suites'
+assert_equal focused_has_one_group "$(count_matches "$tmp/out-focused.log" 'GROUP: ')" 1
+assert_file_has_text focused_keeps_smaller_count "$tmp/out-focused.log" 'across 2 suites'
 
 set +e
 PATH="$fakebin:$PATH" "$repo/bin/test" fail > "$tmp/out-fail.log" 2>&1
 status_fail=$?
 set -e
 assert_status failing_suite_status 1 "$status_fail"
-assert_contains failing_suite_reported "$tmp/out-fail.log" 'Failures:'
+assert_file_has_text failing_suite_reported "$tmp/out-fail.log" 'Failures:'
 
 set +e
 PATH="$fakebin:$PATH" "$repo/bin/test" partial > "$tmp/out-partial.log" 2>&1
 status_partial=$?
 set -e
 assert_status partial_run_status 1 "$status_partial"
-assert_contains partial_run_guard "$tmp/out-partial.log" 'expected 18'
+assert_file_has_text partial_run_guard "$tmp/out-partial.log" 'expected 18'
 
 PATH="$fakebin:$PATH" "$repo/bin/test" info > "$tmp/out-info.log" 2>&1
-assert_matches info_has_two_groups 2 "$(count_matches "$tmp/out-info.log" 'GROUP: ')"
-assert_contains info_mode_summary "$tmp/out-info.log" 'across 0 suites'
+assert_equal info_has_two_groups "$(count_matches "$tmp/out-info.log" 'GROUP: ')" 2
+assert_file_has_text info_mode_summary "$tmp/out-info.log" 'across 0 suites'
 
 # A CLI source edit must reach the app binary the CLI tests spawn. The fake
 # make stamps it only during the app build, so a runner that skips that build
@@ -258,8 +205,8 @@ PATH="$fakebin:$PATH" "$repo/bin/test" --suite TestCli edited > "$tmp/out-rebuil
 status_rebuild=$?
 set -e
 assert_status rebuild_after_cli_edit_status 0 "$status_rebuild"
-assert_contains rebuild_runs_app_build "$tmp/out-rebuild.log" "Built $repo/build/omacards"
-assert_contains rebuild_cli_tests_see_edited_source "$tmp/out-rebuild.log" \
+assert_file_has_text rebuild_runs_app_build "$tmp/out-rebuild.log" "Built $repo/build/omacards"
+assert_file_has_text rebuild_cli_tests_see_edited_source "$tmp/out-rebuild.log" \
     'APP_SOURCE: # app source: cli-source-edited'
 
 if [ "$failures" -ne 0 ]; then

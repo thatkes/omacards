@@ -201,7 +201,7 @@ void TestTheme::themeReloadEmitsChangedOnceOnPaletteChange() {
 }
 
 void TestTheme::themeRadiusFromHyprctl() {
-    if (!QFileInfo::exists("/bin/sh"))
+    if (!hasPosixShell())
         QSKIP("A POSIX shell is required for the fake hyprctl script");
 
     QTemporaryDir dir;
@@ -214,9 +214,7 @@ void TestTheme::themeRadiusFromHyprctl() {
         "else\n"
         "    printf '{}\\n'\n"
         "fi\n";
-    QVERIFY(writeFile(tool, script));
-    QVERIFY(QFile::setPermissions(tool, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner | QFile::ReadGroup |
-                                            QFile::ExeGroup | QFile::ReadOther | QFile::ExeOther));
+    QVERIFY(writeExecutable(tool, script));
 
     Theme theme(dir.path(), nullptr, tool);
     QSignalSpy spy(&theme, &Theme::changed);
@@ -227,17 +225,14 @@ void TestTheme::themeRadiusFromHyprctl() {
 }
 
 void TestTheme::themeRadiusIgnoresInvalidValues() {
-    if (!QFileInfo::exists("/bin/sh"))
+    if (!hasPosixShell())
         QSKIP("A POSIX shell is required for the fake hyprctl script");
 
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
     const QString tool = dir.filePath("hyprctl");
-    const auto permissions = QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner | QFile::ReadGroup |
-                             QFile::ExeGroup | QFile::ReadOther | QFile::ExeOther;
 
-    QVERIFY(writeFile(tool, "#!/bin/sh\nprintf '{\"int\":-5}\\n'\n"));
-    QVERIFY(QFile::setPermissions(tool, permissions));
+    QVERIFY(writeExecutable(tool, "#!/bin/sh\nprintf '{\"int\":-5}\\n'\n"));
     {
         Theme theme(dir.path(), nullptr, tool);
         QSignalSpy spy(&theme, &Theme::changed);
@@ -246,8 +241,7 @@ void TestTheme::themeRadiusIgnoresInvalidValues() {
         QCOMPARE(spy.count(), 0);
     }
 
-    QVERIFY(writeFile(tool, "#!/bin/sh\nprintf 'not json\\n'\n"));
-    QVERIFY(QFile::setPermissions(tool, permissions));
+    QVERIFY(writeExecutable(tool, "#!/bin/sh\nprintf 'not json\\n'\n"));
     {
         Theme theme(dir.path(), nullptr, tool);
         QSignalSpy spy(&theme, &Theme::changed);

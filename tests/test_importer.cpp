@@ -4,29 +4,17 @@
 #include <QProcess>
 #include <QSqlDatabase>
 #include <QSqlQuery>
-#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QVector>
 
 #include "test_importer.h"
+#include "test_support.h"
 #include "deck.h"
 #include "importer.h"
 
+using namespace TestSupport;
+
 namespace {
-
-bool writeText(const QString &path, const QByteArray &contents) {
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly))
-        return false;
-    return file.write(contents) == contents.size();
-}
-
-// QStandardPaths::findExecutable() reads PATH from the environment on demand,
-// so blanking PATH lets us characterize the "unzip is missing" branch.
-struct PathGuard {
-    QByteArray saved = qgetenv("PATH");
-    ~PathGuard() { qputenv("PATH", saved); }
-};
 
 struct AnkiNote {
     QString fields;
@@ -82,10 +70,10 @@ void TestImporter::csvSelectsDelimiterByExtension() {
     const QString tabs = dir.filePath("tabs.tsv");
     const QString tabInCsv = dir.filePath("tab.csv");
     const QString commaInTsv = dir.filePath("comma.tsv");
-    QVERIFY(writeText(commas, "qC,aC\n"));
-    QVERIFY(writeText(tabs, "qT\taT\n"));
-    QVERIFY(writeText(tabInCsv, "qW\taW\n"));
-    QVERIFY(writeText(commaInTsv, "qW,aW\n"));
+    QVERIFY(writeFile(commas, "qC,aC\n"));
+    QVERIFY(writeFile(tabs, "qT\taT\n"));
+    QVERIFY(writeFile(tabInCsv, "qW\taW\n"));
+    QVERIFY(writeFile(commaInTsv, "qW,aW\n"));
 
     QString error;
     DeckImport::Result result;
@@ -115,10 +103,10 @@ void TestImporter::csvDetectsHeaderCaseInsensitively() {
     const QString questionHeader = dir.filePath("question.csv");
     const QString questionAliasHeader = dir.filePath("question-alias.csv");
     const QString noHeader = dir.filePath("noheader.csv");
-    QVERIFY(writeText(questionHeader, "QUESTION,ANSWER\nq,a\n"));
+    QVERIFY(writeFile(questionHeader, "QUESTION,ANSWER\nq,a\n"));
     // "Front,Back" is an external Anki alias, so the literal stays as-is.
-    QVERIFY(writeText(questionAliasHeader, "Front,Back\nf,b\n"));
-    QVERIFY(writeText(noHeader, "Name,Value\nx,y\n"));
+    QVERIFY(writeFile(questionAliasHeader, "Front,Back\nf,b\n"));
+    QVERIFY(writeFile(noHeader, "Name,Value\nx,y\n"));
 
     QString error;
     DeckImport::Result result;
@@ -142,7 +130,7 @@ void TestImporter::csvDetectsHeaderCaseInsensitively() {
 void TestImporter::csvSkipsShortAndEmptyRows() {
     QTemporaryDir dir;
     const QString path = dir.filePath("rows.csv");
-    QVERIFY(writeText(path, "single\n,empty question\nquestion,\n   ,   \nok,fine\nx,y,z\n"));
+    QVERIFY(writeFile(path, "single\n,empty question\nquestion,\n   ,   \nok,fine\nx,y,z\n"));
 
     DeckImport::Result result;
     QString error;
@@ -157,7 +145,7 @@ void TestImporter::csvSkipsShortAndEmptyRows() {
 void TestImporter::csvSplitsTagsFromThirdColumn() {
     QTemporaryDir dir;
     const QString path = dir.filePath("tags.csv");
-    QVERIFY(writeText(path, "q1,a1,\"one,two\"\nq2,a2,solo\nq3,a3\n"));
+    QVERIFY(writeFile(path, "q1,a1,\"one,two\"\nq2,a2,solo\nq3,a3\n"));
 
     DeckImport::Result result;
     QString error;
@@ -171,7 +159,7 @@ void TestImporter::csvSplitsTagsFromThirdColumn() {
 void TestImporter::csvParsesQuotedFieldsWithEscapedQuotes() {
     QTemporaryDir dir;
     const QString path = dir.filePath("quotes.csv");
-    QVERIFY(writeText(path, "\"Say \"\"hello\"\"\",Answer,plain\n"
+    QVERIFY(writeFile(path, "\"Say \"\"hello\"\"\",Answer,plain\n"
                             "Q,\"a \"\"quoted\"\" answer\"\n"
                             "\"q, with comma\",last\n"));
 
@@ -191,7 +179,7 @@ void TestImporter::csvParsesQuotedFieldsWithEscapedQuotes() {
 void TestImporter::csvHandlesCrLf() {
     QTemporaryDir dir;
     const QString path = dir.filePath("crlf.csv");
-    QVERIFY(writeText(path, "Question,Answer\r\nq1,a1\r\nq2,a2\r\n"));
+    QVERIFY(writeFile(path, "Question,Answer\r\nq1,a1\r\nq2,a2\r\n"));
 
     DeckImport::Result result;
     QString error;
@@ -206,7 +194,7 @@ void TestImporter::csvHandlesCrLf() {
 void TestImporter::csvNamesDeckFromFileNameUnlessOverridden() {
     QTemporaryDir dir;
     const QString path = dir.filePath("My Deck.csv");
-    QVERIFY(writeText(path, "q,a\n"));
+    QVERIFY(writeFile(path, "q,a\n"));
 
     QString error;
     DeckImport::Result fallback;
@@ -222,8 +210,8 @@ void TestImporter::csvReportsEmptyAndUnreadableFiles() {
     QTemporaryDir dir;
     const QString empty = dir.filePath("empty.csv");
     const QString blank = dir.filePath("blank.csv");
-    QVERIFY(writeText(empty, ""));
-    QVERIFY(writeText(blank, "\n\n"));
+    QVERIFY(writeFile(empty, ""));
+    QVERIFY(writeFile(blank, "\n\n"));
 
     DeckImport::Result result;
     QString error;
@@ -242,11 +230,11 @@ void TestImporter::csvReportsEmptyAndUnreadableFiles() {
 void TestImporter::nullResultReturnsFalse() {
     QTemporaryDir dir;
     const QString csvPath = dir.filePath("cards.csv");
-    QVERIFY(writeText(csvPath, "q,a\n"));
+    QVERIFY(writeFile(csvPath, "q,a\n"));
     QVERIFY(!DeckImport::csv(csvPath, {}, nullptr, nullptr));
 
     const QString package = dir.filePath("sample.apkg");
-    QVERIFY(writeText(package, "junk"));
+    QVERIFY(writeFile(package, "junk"));
     // apkg() rejects a null result before looking for unzip.
     QVERIFY(!DeckImport::apkg(package, {}, dir.path(), nullptr, nullptr));
 }
@@ -257,10 +245,10 @@ void TestImporter::fileDispatchesExtensionsCaseInsensitively() {
     const QString txtUp = dir.filePath("notes.TXT");
     const QString tsvUp = dir.filePath("table.TSV");
     const QString apkgUp = dir.filePath("pack.ApKg");
-    QVERIFY(writeText(csvUp, "qC,aC\n"));
-    QVERIFY(writeText(txtUp, "qT,aT\n"));
-    QVERIFY(writeText(tsvUp, "qS\taS\n"));
-    QVERIFY(writeText(apkgUp, "not a zip"));
+    QVERIFY(writeFile(csvUp, "qC,aC\n"));
+    QVERIFY(writeFile(txtUp, "qT,aT\n"));
+    QVERIFY(writeFile(tsvUp, "qS\taS\n"));
+    QVERIFY(writeFile(apkgUp, "not a zip"));
 
     QString error;
     DeckImport::Result result;
@@ -295,12 +283,12 @@ void TestImporter::fileRejectsUnsupportedExtension() {
 }
 
 void TestImporter::apkgRejectsInvalidArchive() {
-    if (QStandardPaths::findExecutable(QStringLiteral("unzip")).isEmpty())
+    if (!hasTool(QStringLiteral("unzip")))
         QSKIP("unzip is required for .apkg tests");
 
     QTemporaryDir dir;
     const QString package = dir.filePath("broken.apkg");
-    QVERIFY(writeText(package, "not a zip file"));
+    QVERIFY(writeFile(package, "not a zip file"));
 
     DeckImport::Result result;
     QString error;
@@ -313,14 +301,15 @@ void TestImporter::apkgRejectsInvalidArchive() {
 }
 
 void TestImporter::apkgReportsMissingUnzip() {
-    PathGuard guard;
-    qputenv("PATH", "");
-    if (!QStandardPaths::findExecutable(QStringLiteral("unzip")).isEmpty())
+    // QStandardPaths reads PATH on demand, so an empty PATH characterizes the
+    // "unzip is missing" branch. The shared guard restores the original PATH.
+    PathGuard guard(QString(), PathGuard::Mode::Replace);
+    if (hasTool(QStringLiteral("unzip")))
         QSKIP("Cannot hide unzip from QStandardPaths by clearing PATH");
 
     QTemporaryDir dir;
     const QString package = dir.filePath("sample.apkg");
-    QVERIFY(writeText(package, "junk"));
+    QVERIFY(writeFile(package, "junk"));
 
     DeckImport::Result result;
     QString error;
@@ -329,8 +318,7 @@ void TestImporter::apkgReportsMissingUnzip() {
 }
 
 void TestImporter::apkgImportsHtmlClozeAndMedia() {
-    if (QStandardPaths::findExecutable(QStringLiteral("unzip")).isEmpty() ||
-        QStandardPaths::findExecutable(QStringLiteral("zip")).isEmpty())
+    if (!hasTool(QStringLiteral("unzip")) || !hasTool(QStringLiteral("zip")))
         QSKIP("zip and unzip are required for .apkg tests");
 
     QTemporaryDir dir;
@@ -344,8 +332,8 @@ void TestImporter::apkgImportsHtmlClozeAndMedia() {
          QStringLiteral(" misc "), 1},
     };
     QVERIFY(createAnkiDatabase(dir.filePath("collection.anki2"), notes));
-    QVERIFY(writeText(dir.filePath("media"), R"({"0":"image.png"})"));
-    QVERIFY(writeText(dir.filePath("0"), "png-bytes"));
+    QVERIFY(writeFile(dir.filePath("media"), R"({"0":"image.png"})"));
+    QVERIFY(writeFile(dir.filePath("0"), "png-bytes"));
     QVERIFY(zipPackage(package, dir.path(), {"collection.anki2", "media", "0"}));
 
     const QString decks = dir.filePath("decks");
@@ -391,8 +379,7 @@ void TestImporter::apkgImportsHtmlClozeAndMedia() {
 }
 
 void TestImporter::apkgImportsWithoutMedia() {
-    if (QStandardPaths::findExecutable(QStringLiteral("unzip")).isEmpty() ||
-        QStandardPaths::findExecutable(QStringLiteral("zip")).isEmpty())
+    if (!hasTool(QStringLiteral("unzip")) || !hasTool(QStringLiteral("zip")))
         QSKIP("zip and unzip are required for .apkg tests");
 
     QTemporaryDir dir;

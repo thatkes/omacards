@@ -13,19 +13,6 @@ trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 failures=0
 
-assert_contains_text() {
-    name=$1
-    text=$2
-    output=$3
-    case "$output" in
-        *"$text"*) printf 'PASS %s\n' "$name" ;;
-        *)
-            printf 'FAIL %s: output did not contain %s\n%s\n' "$name" "$text" "$output"
-            failures=$((failures + 1))
-            ;;
-    esac
-}
-
 cat > "$tmp/fake-omacards" <<'EOF'
 #!/bin/sh
 set -eu
@@ -57,15 +44,15 @@ linear_output=$(run_checker linear)
 linear_status=$?
 set -e
 expect_result linear_scaling_passes 0 'Scaling OK' "$linear_status" "$linear_output"
-assert_contains_text linear_reports_both_commands 'decks --json' "$linear_output"
+assert_has linear_reports_both_commands 'decks --json' "$linear_output"
 
 set +e
 check_output=$(run_checker quadratic-check)
 check_status=$?
 set -e
 expect_result quadratic_check_fails 1 'check --json scaling regression' "$check_status" "$check_output"
-assert_contains_text failure_reports_times '50 -> 200 cards took' "$check_output"
-assert_contains_text failure_reports_limit 'x, limit 8x' "$check_output"
+assert_has failure_reports_times '50 -> 200 cards took' "$check_output"
+assert_has failure_reports_limit 'x, limit 8x' "$check_output"
 
 set +e
 decks_output=$(run_checker quadratic-decks)
