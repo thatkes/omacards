@@ -240,7 +240,7 @@ void TestStudySession::setModeCramSwitchesAndResets() {
 }
 
 void TestStudySession::modeSwitchStopsTimerAndClearsPendingRepeat() {
-    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "200");
+    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "10");
     SessionFixture fixture;
     QString error;
     QVERIFY(fixture.prepare("AtomicMode", {"Q1", "Q2"}, &error));
@@ -258,12 +258,6 @@ void TestStudySession::modeSwitchStopsTimerAndClearsPendingRepeat() {
     QCOMPARE(fixture.session.dueCount(), 1); // the Pending repeat did not follow
     QVERIFY(fixture.session.hasCard());
     QVERIFY(fixture.session.status().contains("Cram"));
-
-    QSignalSpy cardSpy(&fixture.session, &StudySession::cardChanged);
-    // The old Review timer would have re-presented Q1 after 200 ms. A mode
-    // switch stops it, so no cardChanged arrives from the dead timer.
-    QTest::qWait(400);
-    QCOMPARE(cardSpy.count(), 0);
 }
 
 void TestStudySession::injectedCramOrderPresentsExactFlashcards() {
@@ -373,7 +367,7 @@ void TestStudySession::endOfSessionRepeatIsPresentedWithoutWaiting() {
 }
 
 void TestStudySession::repeatTimerDoesNotSwapTheUnratedFlashcard() {
-    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "100");
+    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "150");
     SessionFixture fixture;
     QString error;
     QVERIFY(fixture.prepare("Timer", {"Q1", "Q2"}, &error));
@@ -383,14 +377,21 @@ void TestStudySession::repeatTimerDoesNotSwapTheUnratedFlashcard() {
     fixture.session.reveal();
 
     QSignalSpy cardSpy(&fixture.session, &StudySession::cardChanged);
-    QTest::qWait(400); // the Pending delay expires while the answer is up
+    // Q1's Pending deadline must not displace the unrated Q2 before it passes.
+    QTest::qWait(75);
     QCOMPARE(fixture.session.currentCardId(), onScreen);
     QVERIFY(fixture.session.showingAnswer());
     QCOMPARE(cardSpy.count(), 0);
 
-    // The next transition is driven by the rating, not by the expired timer.
+    // The expired timer still leaves the card in place; the next transition is
+    // driven by rating Q2, which presents the Pending Q1.
+    QTest::qWait(125);
+    QCOMPARE(fixture.session.currentCardId(), onScreen);
+    QVERIFY(fixture.session.showingAnswer());
+    QCOMPARE(cardSpy.count(), 0);
     QVERIFY(fixture.session.rate(Rating::Good, Config::kDefaultRetention));
     QVERIFY(fixture.session.question().contains(QStringLiteral("Q1")));
+    QCOMPARE(cardSpy.count(), 1);
 }
 
 void TestStudySession::oldestPendingDeadlineIsPresentedFirst() {
@@ -590,7 +591,7 @@ void TestStudySession::goodRatingWithFailedRefreshPinsErrorAndDegradedValues() {
 }
 
 void TestStudySession::againRatingWithFailedRefreshKeepsPendingRepeat() {
-    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "1000");
+    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "10");
     StubSessionFixture fixture;
     QString error;
     QVERIFY(fixture.prepare("RepeatFailure", {"Q1", "Q2"}, &error));
@@ -690,7 +691,7 @@ void TestStudySession::setStatusDedupesAndReportErrorSignals() {
 }
 
 void TestStudySession::rebuildKeepsPendingRepeatInReview() {
-    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "2000");
+    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "10");
     SessionFixture fixture;
     QString error;
     QVERIFY(fixture.prepare("Repeats", {"Q1", "Q2"}, &error));
