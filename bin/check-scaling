@@ -15,6 +15,11 @@ export LC_ALL
 # prints both timings and the ratio, so a slow machine shows up as data rather
 # than a silent pass.
 #
+# The self-test injects timings with OMACARDS_SCALING_INJECT_CHECK and
+# OMACARDS_SCALING_INJECT_DECKS ("small,large" milliseconds) to exercise the
+# same ratio calculation and limits without spawning the CLI. Production
+# leaves both unset.
+#
 # Decks, state and the XDG cache live under one mktemp root outside the
 # checkout and are removed on exit. Synthetic Cards contain no math, so the
 # cold cache never triggers a Tectonic bundle download.
@@ -26,10 +31,6 @@ fi
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 binary=${1:-"$ROOT/build/omacards"}
-if [ ! -x "$binary" ]; then
-    printf 'No executable CLI binary at %s; run ./bin/build first\n' "$binary" >&2
-    exit 2
-fi
 
 small=${OMACARDS_SCALING_SMALL:-2000}
 large=${OMACARDS_SCALING_LARGE:-8000}
@@ -49,13 +50,6 @@ fi
 
 check_limit=8
 decks_limit=6
-
-tmp="$(mktemp -d "${TMPDIR:-/tmp}/omacards-scaling.XXXXXX")"
-trap 'rm -rf "$tmp"' EXIT HUP INT TERM
-mkdir -p "$tmp/decks" "$tmp/cache"
-export OMACARDS_DECKS_DIR="$tmp/decks"
-export OMACARDS_STATE_DB="$tmp/state.db"
-export XDG_CACHE_HOME="$tmp/cache"
 
 write_deck() {
     awk -v count="$1" '
@@ -106,6 +100,37 @@ measure() {
     printf '%s\n' "$best"
 }
 
+injected_ms() {
+    im_label=$1
+    im_pair=$2
+    im_which=$3
+    case "$im_pair" in
+        *,*) ;;
+        *)
+            printf 'Injected %s timings must be small,large milliseconds\n' \
+                "$im_label" >&2
+            exit 2
+            ;;
+    esac
+    im_value=${im_pair%%,*}
+    if [ "$im_which" = large ]; then
+        im_value=${im_pair#*,}
+    fi
+    case "$im_value" in
+        ''|*[!0-9]*)
+            printf 'Injected %s timings must be positive integers\n' \
+                "$im_label" >&2
+            exit 2
+            ;;
+    esac
+    if [ "$im_value" -eq 0 ]; then
+        printf 'Injected %s timings must be positive integers\n' \
+            "$im_label" >&2
+        exit 2
+    fi
+    printf '%s\n' "$im_value"
+}
+
 report() {
     label=$1
     limit=$2
@@ -124,14 +149,38 @@ report() {
     fi
 }
 
-status=0
-write_deck "$small"
-small_check=$(measure 'check --json' check --json)
-small_decks=$(measure 'decks --json' decks --json)
-write_deck "$large"
-large_check=$(measure 'check --json' check --json)
-large_decks=$(measure 'decks --json' decks --json)
+inject_check=${OMACARDS_SCALING_INJECT_CHECK:-}
+inject_decks=${OMACARDS_SCALING_INJECT_DECKS:-}
+if [ -n "$inject_check" ] || [ -n "$inject_decks" ]; then
+    if [ -z "$inject_check" ] || [ -z "$inject_decks" ]; then
+        printf 'Injected scaling timings need both check and decks pairs\n' >&2
+        exit 2
+    fi
+    small_check=$(injected_ms check "$inject_check" small)
+    large_check=$(injected_ms check "$inject_check" large)
+    small_decks=$(injected_ms decks "$inject_decks" small)
+    large_decks=$(injected_ms decks "$inject_decks" large)
+else
+    if [ ! -x "$binary" ]; then
+        printf 'No executable CLI binary at %s; run ./bin/build first\n' "$binary" >&2
+        exit 2
+    fi
+    tmp="$(mktemp -d "${TMPDIR:-/tmp}/omacards-scaling.XXXXXX")"
+    trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+    mkdir -p "$tmp/decks" "$tmp/cache"
+    export OMACARDS_DECKS_DIR="$tmp/decks"
+    export OMACARDS_STATE_DB="$tmp/state.db"
+    export XDG_CACHE_HOME="$tmp/cache"
 
+    write_deck "$small"
+    small_check=$(measure 'check --json' check --json)
+    small_decks=$(measure 'decks --json' decks --json)
+    write_deck "$large"
+    large_check=$(measure 'check --json' check --json)
+    large_decks=$(measure 'decks --json' decks --json)
+fi
+
+status=0
 report 'check --json' "$check_limit" "$small_check" "$large_check"
 check_line=$last_line
 report 'decks --json' "$decks_limit" "$small_decks" "$large_decks"

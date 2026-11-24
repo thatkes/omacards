@@ -2,10 +2,12 @@
 set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
-# --timing is observational only. Remove it before forwarding arguments so
-# QtTest never sees an unknown positional argument; rebuild "$@" one quoted
-# word at a time to keep suite names and test-function selectors intact.
+# --timing and --scaling are runner flags, not QtTest arguments. Remove both
+# before forwarding arguments so QtTest never sees an unknown positional
+# argument; rebuild "$@" one quoted word at a time to keep suite names and
+# test-function selectors intact.
 timing=0
+scaling=0
 remaining=$#
 while [ "$remaining" -gt 0 ]; do
     arg=$1
@@ -13,6 +15,8 @@ while [ "$remaining" -gt 0 ]; do
     remaining=$((remaining - 1))
     if [ "$arg" = "--timing" ]; then
         timing=1
+    elif [ "$arg" = "--scaling" ]; then
+        scaling=1
     else
         set -- "$@" "$arg"
     fi
@@ -87,13 +91,15 @@ fi
 if [ "$timing" -eq 1 ]; then
     record_phase app-build "$build_start" "$(now_ms)"
 fi
-# The CLI scaling guard needs the built binary and runs once per test run,
-# including focused suites. It keeps Deck files and the cold XDG cache outside
-# the checkout, so it does not disturb the per-group environments below.
+# The scaling guard needs the built binary but is opt-in: local runs skip it,
+# and CI adds --scaling so the #131 regression check runs once there. A skipped
+# guard still emits its phase line, keeping the --timing output shape intact.
 if [ "$timing" -eq 1 ]; then
     scaling_start=$(now_ms)
 fi
-"$ROOT/bin/check-scaling"
+if [ "$scaling" -eq 1 ]; then
+    "$ROOT/bin/check-scaling"
+fi
 if [ "$timing" -eq 1 ]; then
     record_phase scaling-guard "$scaling_start" "$(now_ms)"
 fi
