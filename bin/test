@@ -4,6 +4,10 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 if [ ! -x "$ROOT/build/omacards" ]; then
     "$ROOT/bin/build"
 fi
+# The CLI scaling guard needs the built binary and runs once per test run,
+# including focused suites. It keeps Deck files and the cold XDG cache outside
+# the checkout, so it does not disturb the per-group environments below.
+"$ROOT/bin/check-scaling"
 mkdir -p "$ROOT/build/tests"
 cd "$ROOT/build/tests"
 qmake6 "$ROOT/tests/omacards_tests.pro"

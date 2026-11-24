@@ -21,6 +21,7 @@ run_elsewhere() {
     case "$1" in
         bin/check-commit-scope|bin/check-commit-subject) return 0 ;;
         bin/check-test-summary) return 0 ;;
+        bin/check-scaling) return 0 ;;
         bin/check-ledger-open-ids|bin/check-wiki-index-bullets) return 0 ;;
         *) return 1 ;;
     esac

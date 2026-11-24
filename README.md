@@ -29,6 +29,16 @@ install` is the alternative for refreshing only the skill after you edit its
 source. The `omarchy pkg add` and `sudo pacman -S` commands in the LaTeX math
 section install optional math dependencies, not omacards.
 
+`bin/test` runs `bin/check-scaling` before the Qt suites. It writes a synthetic
+Deck at 2000 and 8000 Cards, times `check --json` and `decks --json`, and fails
+if the larger Deck costs more than 8x or 6x as much for those commands. A 4x
+Deck costing 16x is the regression it catches. Every run prints both timings
+and the ratio, so a slow machine shows up as data instead of a silent pass.
+Deck files, state and the XDG cache live in a temporary directory outside the
+checkout. For a local probe, set `OMACARDS_SCALING_SMALL` and
+`OMACARDS_SCALING_LARGE`, or call `bin/check-scaling` directly with a binary
+path.
+
 Enable the local pre-commit format check with `git config core.hooksPath .githooks`. It checks staged C++ files; CI checks the whole tree. That setting also turns on a `commit-msg` check of line length, subject and scope, a `post-commit` issue reminder, a `pre-push` local-only-path guard, and extra `pre-commit` checks for local-only paths and staged CLI snapshots.
 
 Requirements: Qt 6 (base, declarative, svg, wayland, SQL), qmake6, gcc/make, `xdg-desktop-portal` and `desktop-file-utils`.

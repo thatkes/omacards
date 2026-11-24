@@ -32,3 +32,4 @@ cd "$ROOT"
 ./tests/test_check_cli_contract.sh
 ./bin/check-lint-coverage
 ./tests/test_check_lint_coverage.sh
+./tests/test_check_scaling.sh
