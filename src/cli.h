@@ -9,8 +9,8 @@ QStringList commandPaths();
 QStringList headlessCommands();
 // True for the registry's help paths (`help`, `--help`, `-h`).
 bool isHelpCommand(const QString &command);
-// Headless commands run offscreen, so the platform must be set before
-// QGuiApplication is constructed.
+// Headless commands run offscreen under QCoreApplication, so the platform must
+// be set before any application object is constructed.
 bool needsOffscreen(const QStringList &arguments);
 int run(const QStringList &arguments);
 } // namespace Cli
