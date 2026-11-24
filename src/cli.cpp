@@ -825,11 +825,14 @@ int run(const QStringList &arguments) {
     // Commands that act on an existing Deck ask the shared resolver for its
     // id. Empty input stays with the caller's all-Decks or Current-deck
     // fallback; the error text stays here while the resolver returns a reason.
-    const auto resolveDeckId = [&](const QString &requested) -> std::optional<QString> {
+    // A caller that defines a new Deck keeps its unresolved, raw name.
+    const auto resolveDeckId = [&](const QString &requested, bool allowNewDeck = false) -> std::optional<QString> {
         if (requested.isEmpty())
             return QString();
         const DeckIdResolver::Result resolved = DeckIdResolver::resolve(decks, backend.decksDirectory(), requested);
         if (!resolved.deckId) {
+            if (allowNewDeck)
+                return requested;
             fail(QObject::tr("No such deck: %1").arg(requested), json);
             return std::nullopt;
         }
@@ -1110,6 +1113,10 @@ int run(const QStringList &arguments) {
     if (options.command == "add-cards") {
         if (options.deck.isEmpty())
             return fail(QObject::tr("Use --deck / -d"), json);
+        // A new Deck keeps the requested name; an existing one keeps its id.
+        const std::optional<QString> writeDeck = resolveDeckId(options.deck.trimmed(), true);
+        if (!writeDeck)
+            return 1;
         QByteArray bytes;
         if (!readCardInput(options, &bytes, &error))
             return fail(error, json);
@@ -1118,7 +1125,7 @@ int run(const QStringList &arguments) {
         if (!parseCardDrafts(bytes, options.description, &drafts, &description, &error))
             return fail(error, json);
         QStringList ids;
-        if (!backend.createCards(options.deck, drafts, &description, &ids, &error))
+        if (!backend.createCards(*writeDeck, drafts, &description, &ids, &error))
             return fail(error, json);
 
         // Reloaded after the write so an implicitly created Deck has the same
@@ -1148,13 +1155,16 @@ int run(const QStringList &arguments) {
             return fail(QObject::tr("Use --question / -q"), json);
         if (options.answer.trimmed().isEmpty())
             return fail(QObject::tr("Use --answer / -a"), json);
+        const std::optional<QString> writeDeck = resolveDeckId(options.deck.trimmed(), true);
+        if (!writeDeck)
+            return 1;
         CardDraft draft;
         draft.question = options.question;
         draft.answer = options.answer;
         draft.type = options.type;
         draft.tags = options.tags.split(',', Qt::SkipEmptyParts);
         QStringList ids;
-        if (!backend.createCards(options.deck, {draft}, nullptr, &ids, &error))
+        if (!backend.createCards(*writeDeck, {draft}, nullptr, &ids, &error))
             return fail(error, json);
         const Card *created = nullptr;
         for (const Deck &deck : backend.allDecks())
@@ -1176,7 +1186,10 @@ int run(const QStringList &arguments) {
     if (options.command == "edit-card") {
         if (options.card.isEmpty())
             return fail(QObject::tr("Use --card / -c"), json);
-        const QVector<Card> cards = allCards(decks, options.deck);
+        const std::optional<QString> lookupDeck = resolveDeckId(options.deck, true);
+        if (!lookupDeck)
+            return 1;
+        const QVector<Card> cards = allCards(decks, *lookupDeck);
         const Card *target = nullptr;
         for (const Card &card : cards)
             if (card.id == options.card)
@@ -1193,7 +1206,7 @@ int run(const QStringList &arguments) {
         } else {
             tags = target->tags.join(", ");
         }
-        const QString deckName = options.deck.isEmpty() ? target->deck : options.deck;
+        const QString deckName = options.deck.isEmpty() ? target->deck : *lookupDeck;
         QString finalId;
         if (!backend.modifyCard(deckName, options.card, question, answer, type, tags, &error, &finalId))
             return fail(error, json);
@@ -1218,7 +1231,10 @@ int run(const QStringList &arguments) {
     if (options.command == "delete-card") {
         if (options.card.isEmpty())
             return fail(QObject::tr("Use --card / -c"), json);
-        QString deckName = options.deck;
+        const std::optional<QString> deckId = resolveDeckId(options.deck, true);
+        if (!deckId)
+            return 1;
+        QString deckName = *deckId;
         if (deckName.isEmpty()) {
             for (const Deck &deck : decks)
                 for (const Card &card : deck.cards)
@@ -1271,11 +1287,18 @@ int run(const QStringList &arguments) {
             return fail(QObject::tr("Give a deck name"), json);
         if (!options.descriptionSet)
             return fail(QObject::tr("Use --description TEXT"), json);
-        const std::optional<QString> resolvedPath = requireDeck(name);
-        if (!resolvedPath)
+        const std::optional<QString> deckId = resolveDeckId(name);
+        if (!deckId)
             return 1;
-        const QString targetPath = *resolvedPath;
-        if (!backend.setDeckDescription(name, options.description, &error))
+        const QString targetId = *deckId;
+        QString targetPath;
+        for (const Deck &deck : decks) {
+            if (deck.name == targetId) {
+                targetPath = deck.path;
+                break;
+            }
+        }
+        if (!backend.setDeckDescription(targetId, options.description, &error))
             return fail(error, json);
 
         // backend refreshes after the write, so the stored Deck supplies the
