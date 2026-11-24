@@ -792,3 +792,110 @@ void TestStudyPlanner::statsSummaryNumericContract() {
     QCOMPARE(empty.value("totalRatings").toInt(), 0);
     QCOMPARE(empty.value("retention").toInt(), 90);
 }
+
+void TestStudyPlanner::availabilityMemoisesPerDeckNameAndGeneration() {
+    QTemporaryDir dir;
+    Store store(dir.filePath("state.db"));
+    QString error;
+    QVERIFY(store.open(&error));
+
+    const Card alpha1 = makeCard("alpha-1", "First", "a", "Memo");
+    const Card alpha2 = makeCard("alpha-2", "Second", "a", "Memo");
+    const Card beta1 = makeCard("beta-1", "Third", "b", "Memo");
+    const Card beta2 = makeCard("beta-2", "Fourth", "b", "Memo");
+    Deck alpha;
+    alpha.name = "Alpha";
+    alpha.cards << alpha1 << alpha2;
+    Deck beta;
+    beta.name = "Beta";
+    beta.cards << beta1 << beta2;
+    QVector<Deck> decks{alpha, beta};
+
+    PlannerWithStore planner(store);
+    planner.setDecks(decks);
+    planner.configure(2, 0);
+    QVERIFY(planner.refresh(&error));
+
+    // The filtered key keeps its own New-card budget: alternating it with
+    // the unfiltered key must not carry over the allowance spent on Alpha.
+    QCOMPARE(idsOf(planner.availability().newCards), QStringList({"alpha-1", "alpha-2"}));
+    QCOMPARE(idsOf(planner.availability("Beta").newCards), QStringList({"beta-1", "beta-2"}));
+    QCOMPARE(idsOf(planner.availability().newCards), QStringList({"alpha-1", "alpha-2"}));
+    QCOMPARE(planner.newCount(), 2);
+    QCOMPARE(planner.deckNew(0), 2);
+    QCOMPARE(planner.deckNew(1), 0);
+    QCOMPARE(planner.countDue("Beta"), 2);
+    QCOMPARE(planner.availableCount("Beta"), 2);
+
+    // Editing the supplied vector is not a setDecks() call. The memo survives
+    // until the decks generation changes.
+    decks[0].cards.clear();
+    decks[1].cards.clear();
+    QCOMPARE(planner.newCount(), 2);
+    QCOMPARE(planner.availableCount("Beta"), 2);
+
+    planner.setDecks(decks);
+    QCOMPARE(planner.newCount(), 0);
+    QCOMPARE(planner.availableCount("Beta"), 0);
+
+    decks = QVector<Deck>{alpha, beta};
+    planner.setDecks(decks);
+    QCOMPARE(planner.newCount(), 2);
+
+    // configure() changes the interpretation of the snapshot and
+    // updateNewBudget() recomputes the allowance; both drop the memo.
+    planner.configure(4, 0);
+    planner.updateNewBudget(&error);
+    QVERIFY(error.isEmpty());
+    QCOMPARE(planner.newCount(), 4);
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const FsrsState state = Fsrs::review(Fsrs::initial(), 3, now).state;
+    store.recordRating(alpha1.id, 3, now, state, 1, true);
+    planner.updateNewBudget(&error);
+    QVERIFY(error.isEmpty());
+    QCOMPARE(planner.newCount(), 3);
+    QCOMPARE(planner.availableCount("Beta"), 2);
+
+    QVERIFY(planner.refresh(&error));
+    QCOMPARE(planner.newCount(), 3);
+}
+
+void TestStudyPlanner::stateForKeepsStaleHashGuardWithCachedHashes() {
+    QTemporaryDir dir;
+    Store store(dir.filePath("state.db"));
+    QString error;
+    QVERIFY(store.open(&error));
+
+    const Card stored = makeCard("stored", "Same", "content", "Guard");
+    const Card twin = makeCard("twin", "Same", "content", "Guard");
+    const Card absent = makeCard("absent", "Other", "content", "Guard");
+    Deck deck;
+    deck.name = "Guard";
+    deck.cards << stored << twin << absent;
+    const QVector<Deck> decks{deck};
+
+    FsrsState saved;
+    saved.reps = 2;
+    saved.due = QDateTime::currentMSecsSinceEpoch() - 86400000LL;
+    saved.lastReview = saved.due - 86400000LL;
+    saved.stability = 5.0;
+    saved.difficulty = 5.0;
+    store.save(stored.id, DeckIO::contentHash(stored), saved);
+
+    PlannerWithStore planner(store);
+    planner.setDecks(decks);
+    planner.configure(1, 0);
+    QVERIFY(planner.refresh(&error));
+
+    QCOMPARE(planner.stateFor(stored).reps, saved.reps);
+    QCOMPARE(planner.stateFor(stored).reps, saved.reps); // cached hash still guards
+    verifyEmptyState(planner.stateFor(twin));            // content matches, id has no hash
+    verifyEmptyState(planner.stateFor(absent));          // no stored hash at all
+
+    Card edited = stored;
+    edited.answer = QStringLiteral("Changed");
+    verifyEmptyState(planner.stateFor(edited));
+    QCOMPARE(planner.stateFor(stored).reps, saved.reps); // the edited card did not poison the cache
+    QCOMPARE(planner.newCount(), 1);
+}
