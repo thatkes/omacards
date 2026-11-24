@@ -17,8 +17,13 @@
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTextImageFormat>
+#include <QTemporaryFile>
 #include <QVector>
 
+#include <cstdio>
+#include <unistd.h>
+
+#include "cli.h"
 #include "deck.h"
 #include "ratingrecording.h"
 #include "studyplanner.h"
@@ -226,9 +231,12 @@ inline QProcessEnvironment cliProcessEnvironment(const QString &decksDir, const 
     return environment;
 }
 
-inline QByteArray runCliRaw(const QStringList &arguments, const QString &decksDir, const QString &stateDb,
-                            int *exitCode = nullptr, QByteArray *standardError = nullptr,
-                            const QByteArray *standardInput = nullptr) {
+// The process form stays for tests that need startup, exit status, an
+// inherited or replaced environment, stdin, stderr separation or offscreen
+// selection. Every other CLI contract calls Cli::run() in this process.
+inline QByteArray runCliProcessRaw(const QStringList &arguments, const QString &decksDir, const QString &stateDb,
+                                   int *exitCode = nullptr, QByteArray *standardError = nullptr,
+                                   const QByteArray *standardInput = nullptr) {
     QProcess process;
     process.setProcessEnvironment(cliProcessEnvironment(decksDir, stateDb));
     process.start(appBinary(), arguments);
@@ -250,6 +258,88 @@ inline QByteArray runCliRaw(const QStringList &arguments, const QString &decksDi
     return process.readAllStandardOutput();
 }
 
+// Cli::run() writes JSON and text through C stdio, so capture the file
+// descriptors rather than Qt streams. Flush the test runner's own output on
+// both sides of the swap; restore before reading so nothing else appends to
+// the captured files.
+class CliStdioCapture {
+public:
+    explicit CliStdioCapture(const QByteArray *standardInput) {
+        std::fflush(nullptr);
+        const bool outOpened = m_out.open();
+        const bool errOpened = m_err.open();
+        if (!outOpened || !errOpened)
+            return;
+        m_savedOut = ::dup(STDOUT_FILENO);
+        m_savedErr = ::dup(STDERR_FILENO);
+        ::dup2(m_out.handle(), STDOUT_FILENO);
+        ::dup2(m_err.handle(), STDERR_FILENO);
+        if (standardInput && m_input.open()) {
+            m_input.write(*standardInput);
+            m_input.seek(0);
+            m_savedIn = ::dup(STDIN_FILENO);
+            ::dup2(m_input.handle(), STDIN_FILENO);
+        }
+        m_active = true;
+    }
+
+    ~CliStdioCapture() { restore(); }
+
+    QByteArray output() {
+        restore();
+        return contents(m_out);
+    }
+
+    QByteArray errors() {
+        restore();
+        return contents(m_err);
+    }
+
+private:
+    void restore() {
+        if (!m_active)
+            return;
+        m_active = false;
+        std::fflush(nullptr);
+        ::dup2(m_savedOut, STDOUT_FILENO);
+        ::dup2(m_savedErr, STDERR_FILENO);
+        ::close(m_savedOut);
+        ::close(m_savedErr);
+        if (m_savedIn != -1) {
+            ::dup2(m_savedIn, STDIN_FILENO);
+            ::close(m_savedIn);
+        }
+    }
+
+    static QByteArray contents(QTemporaryFile &file) {
+        file.seek(0);
+        return file.readAll();
+    }
+
+    QTemporaryFile m_out;
+    QTemporaryFile m_err;
+    QTemporaryFile m_input;
+    int m_savedOut = -1;
+    int m_savedErr = -1;
+    int m_savedIn = -1;
+    bool m_active = false;
+};
+
+inline QByteArray runCliRaw(const QStringList &arguments, const QString &decksDir, const QString &stateDb,
+                            int *exitCode = nullptr, QByteArray *standardError = nullptr,
+                            const QByteArray *standardInput = nullptr) {
+    ScopedEnv decksEnv("OMACARDS_DECKS_DIR", decksDir);
+    ScopedEnv stateEnv("OMACARDS_STATE_DB", stateDb);
+    CliStdioCapture capture(standardInput);
+    const int code = Cli::run(arguments);
+    if (exitCode)
+        *exitCode = code;
+    const QByteArray output = capture.output();
+    if (standardError)
+        *standardError = capture.errors();
+    return output;
+}
+
 inline QJsonObject runCli(const QStringList &arguments, const QString &decksDir, const QString &stateDb,
                           int *exitCode = nullptr, QByteArray *standardError = nullptr,
                           const QByteArray *standardInput = nullptr) {
@@ -260,6 +350,19 @@ inline QJsonObject runCli(const QStringList &arguments, const QString &decksDir,
 inline QString runCliText(const QStringList &arguments, const QString &decksDir, const QString &stateDb,
                           int *exitCode = nullptr, QByteArray *standardError = nullptr) {
     return QString::fromUtf8(runCliRaw(arguments, decksDir, stateDb, exitCode, standardError));
+}
+
+inline QJsonObject runCliProcess(const QStringList &arguments, const QString &decksDir, const QString &stateDb,
+                                 int *exitCode = nullptr, QByteArray *standardError = nullptr,
+                                 const QByteArray *standardInput = nullptr) {
+    return QJsonDocument::fromJson(
+               runCliProcessRaw(arguments, decksDir, stateDb, exitCode, standardError, standardInput))
+        .object();
+}
+
+inline QString runCliProcessText(const QStringList &arguments, const QString &decksDir, const QString &stateDb,
+                                 int *exitCode = nullptr, QByteArray *standardError = nullptr) {
+    return QString::fromUtf8(runCliProcessRaw(arguments, decksDir, stateDb, exitCode, standardError));
 }
 
 // The single file writer used by every suite's fixtures.
