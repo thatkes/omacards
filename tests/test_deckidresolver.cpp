@@ -1,5 +1,8 @@
 #include <QtTest>
 
+#include <QDir>
+#include <QFile>
+#include <QTemporaryDir>
 #include <QVector>
 
 #include "deck.h"
@@ -27,6 +30,7 @@ void TestDeckIdResolver::exactDeckNameWins() {
     QVERIFY(result.deckId.has_value());
     QCOMPARE(*result.deckId, QStringLiteral("Notes"));
     QCOMPARE(result.failureReason, DeckIdResolver::FailureReason::None);
+    QCOMPARE(result.deckPath, QStringLiteral("/decks/Notes.txt"));
 }
 
 void TestDeckIdResolver::fileNameFallbackReturnsWrittenName() {
@@ -38,6 +42,7 @@ void TestDeckIdResolver::fileNameFallbackReturnsWrittenName() {
     QVERIFY(result.deckId.has_value());
     QCOMPARE(*result.deckId, QStringLiteral("Written Name"));
     QCOMPARE(result.failureReason, DeckIdResolver::FailureReason::None);
+    QCOMPARE(result.deckPath, QStringLiteral("/decks/Study-Guide.txt"));
 }
 
 void TestDeckIdResolver::deckFileExtensionFallback() {
@@ -80,4 +85,20 @@ void TestDeckIdResolver::unknownRequestReturnsStructuredReason() {
 
     QVERIFY(!result.deckId.has_value());
     QCOMPARE(result.failureReason, DeckIdResolver::FailureReason::UnknownDeck);
+    QVERIFY(result.deckPath.isEmpty());
+}
+
+void TestDeckIdResolver::unloadedDeckFileCarriesCandidatePath() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = QDir(dir.path()).filePath(QStringLiteral("Skipped.txt"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.close();
+
+    const DeckIdResolver::Result result = DeckIdResolver::resolve({}, dir.path(), QStringLiteral("Skipped"));
+
+    QVERIFY(!result.deckId.has_value());
+    QCOMPARE(result.failureReason, DeckIdResolver::FailureReason::UnloadedDeckFile);
+    QCOMPARE(result.deckPath, path);
 }
