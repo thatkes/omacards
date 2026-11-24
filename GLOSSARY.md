@@ -196,6 +196,18 @@ _Avoid_: percent correct, Good rate
 The overlay opened with `S` that shows Study statistics for the current Study day and Study session.
 _Avoid_: stats view, stats overlay, stats screen
 
+**Forecast**:
+The distribution of Cards by their next scheduled return, shown in the Stats panel or reported by the `forecast` Headless command.
+_Avoid_: future reviews, review forecast
+
+**Schedule heatmap**:
+The grid in the Stats panel that shows how many Cards are scheduled to return on each upcoming Study day, with darker cells for busier days.
+_Avoid_: activity graph, calendar heatmap
+
+**Card composition chart**:
+The pie in the Stats panel that splits Cards into New, Learning, Young and Mature groups.
+_Avoid_: pie chart, maturity pie
+
 **Review history**:
 The record of ratings given to cards over time.
 _Avoid_: review log, activity
@@ -235,6 +247,18 @@ _Avoid_: calendar day, today
 **New card**:
 A card whose current content has never been rated.
 _Avoid_: fresh card, unseen card
+
+**Learning card**:
+A rated Card whose next scheduled return falls on the current Study day.
+_Avoid_: short-term card
+
+**Young card**:
+A Card whose next scheduled return falls one to twenty Study days from the current Study day.
+_Avoid_: familiar card
+
+**Mature card**:
+A Card whose next scheduled return falls twenty-one or more Study days from the current Study day.
+_Avoid_: mastered card
 
 **Due card**:
 A Card that will be shown in the current Study session: one whose scheduled return falls on or before the current Study day, a New card within the New-card allowance, or a Pending repeat.
