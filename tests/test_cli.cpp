@@ -128,6 +128,14 @@ void TestCli::helpIsHeadless() {
     QVERIFY2(addCardsHelp.contains(QStringLiteral("[{\"question\":\"...\",\"answer\":\"...\"}]")),
              qPrintable(addCardsHelp));
 
+    // Preview help names the supported math delimiters before a user guesses
+    // Markdown-style single-dollar math.
+    int previewCode = -1;
+    const QString previewHelp = QString::fromUtf8(runCliRaw({"preview", "--help"}, decks, database, &previewCode));
+    QCOMPARE(previewCode, 0);
+    QVERIFY2(previewHelp.contains(QStringLiteral("Math: supported $$...$$ and \\(...\\); $...$ stays literal.")),
+             qPrintable(previewHelp));
+
     QVERIFY2(!QFileInfo::exists(decks) || QDir(decks).entryList(QDir::NoDotAndDotDot).isEmpty(),
              "Help probes must not create a Deck");
     QVERIFY2(!QFileInfo::exists(database), "Help probes must not create the state database");
