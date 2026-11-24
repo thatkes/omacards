@@ -6,7 +6,9 @@ set -eu
 # so a fixed log path shows up as mixed or missing summaries. A plain run now
 # splits the suites into two concurrent groups; each group gets its own log and
 # environment, and the runner presents one combined summary. A CLI source edit
-# is checked against the app binary the fake CLI tests spawn.
+# is checked against the app binary the fake CLI tests spawn. A --timing run
+# must strip the flag before the test binary sees it and name each phase and
+# registered suite without turning any elapsed value into a gate.
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$ROOT/tests/checker_test_support.sh"
 tmp="$(mktemp -d)"
@@ -61,7 +63,7 @@ for arg in "$@"; do
         exit 0
     fi
     case "$arg" in
-        run-a|run-b|fail|partial|info|edited) mode=$arg ;;
+        run-a|run-b|fail|partial|info|edited|timing) mode=$arg ;;
         Test*)
             all_suites="$all_suites $arg"
             if [ -z "$group" ]; then group=$arg; fi
@@ -70,6 +72,9 @@ for arg in "$@"; do
 done
 printf 'GROUP: %s\n' "$group"
 printf 'ALL_SUITES:%s\n' "$all_suites"
+printf 'ARGS:'
+for arg in "$@"; do printf ' %s' "$arg"; done
+printf '\n'
 printf 'ENV: HOME=%s XDG_CACHE_HOME=%s OMACARDS_STATE_DB=%s TMPDIR=%s\n' \
     "${HOME:-unset}" "${XDG_CACHE_HOME:-unset}" "${OMACARDS_STATE_DB:-unset}" "${TMPDIR:-unset}"
 printf 'APP_SOURCE: %s\n' "$(sed -n '2p' "$(dirname -- "$0")/../omacards")"
@@ -77,12 +82,15 @@ if [ "$mode" = info ]; then
     printf 'OMACARDS_TEST_MODE: info\n'
     exit 0
 fi
+suite_count=0
+for suite in $all_suites; do
+    suite_count=$((suite_count + 1))
+done
 case "$group" in
-    TestCli) suites=2; totals=2; marked=1 ;;
-    TestBackend) suites=3; totals=3; marked=1 ;;
+    TestCli|TestBackend) suites=$suite_count totals=$suite_count marked=1 ;;
 esac
 case "$mode" in
-    run-a|run-b|edited) ;;
+    run-a|run-b|edited|timing) ;;
     fail) suites=1; totals=1; marked=0 ;;
     partial) suites=9; totals=2; marked=0 ;;
     *) exit 2 ;;
@@ -94,7 +102,7 @@ fi
 printf 'OMACARDS_TEST_SUITES: %s\n' "$suites"
 i=1
 while [ "$i" -le "$totals" ]; do
-    printf 'Totals: 1 passed, 0 failed, 0 skipped, 0 blacklisted\n'
+    printf 'Totals: 1 passed, 0 failed, 0 skipped, 0 blacklisted, 25ms\n'
     i=$((i + 1))
 done
 if [ "$mode" = fail ]; then
@@ -130,9 +138,9 @@ assert_equal run_b_has_two_groups "$(count_matches "$tmp/out-b.log" 'GROUP: ')" 
 assert_file_has_text run_a_has_cli_group "$tmp/out-a.log" 'GROUP: TestCli'
 assert_file_has_text run_a_has_backend_group "$tmp/out-a.log" 'GROUP: TestBackend'
 assert_file_has_text run_a_uses_binary_suite_list "$tmp/out-a.log" 'ALL_SUITES: TestBackend TestDynamic'
-assert_file_has_text run_a_aggregated_announcement "$tmp/out-a.log" 'OMACARDS_TEST_SUITES: 5'
-assert_file_has_text run_a_combined_summary "$tmp/out-a.log" 'across 5 suites'
-assert_file_has_text run_b_combined_summary "$tmp/out-b.log" 'across 5 suites'
+assert_file_has_text run_a_aggregated_announcement "$tmp/out-a.log" 'OMACARDS_TEST_SUITES: 3'
+assert_file_has_text run_a_combined_summary "$tmp/out-a.log" 'across 3 suites'
+assert_file_has_text run_b_combined_summary "$tmp/out-b.log" 'across 3 suites'
 
 combined_log_count=0
 for log in "$repo"/build/tests/run.*; do
@@ -176,7 +184,38 @@ status_focused=$?
 set -e
 assert_status focused_status 0 "$status_focused"
 assert_equal focused_has_one_group "$(count_matches "$tmp/out-focused.log" 'GROUP: ')" 1
-assert_file_has_text focused_keeps_smaller_count "$tmp/out-focused.log" 'across 2 suites'
+assert_file_has_text focused_keeps_smaller_count "$tmp/out-focused.log" 'across 1 suites'
+
+# --timing is observational: five phase lines and one line per registered
+# suite, with the flag stripped before the test binary sees the arguments.
+set +e
+PATH="$fakebin:$PATH" "$repo/bin/test" --timing timing > "$tmp/out-timing.log" 2>&1
+status_timing=$?
+set -e
+assert_status timing_status 0 "$status_timing"
+assert_equal timing_has_five_phases \
+    "$(count_matches "$tmp/out-timing.log" 'TIMING phase ')" 5
+assert_file_has_text timing_phase_app "$tmp/out-timing.log" \
+    'TIMING phase app-build: '
+assert_file_has_text timing_phase_scaling "$tmp/out-timing.log" \
+    'TIMING phase scaling-guard: '
+assert_file_has_text timing_phase_test_build "$tmp/out-timing.log" \
+    'TIMING phase test-binary-build: '
+assert_file_has_text timing_phase_cli_group "$tmp/out-timing.log" \
+    'TIMING phase cli-group: '
+assert_file_has_text timing_phase_other_group "$tmp/out-timing.log" \
+    'TIMING phase other-group: '
+assert_equal timing_has_three_suite_lines \
+    "$(count_matches "$tmp/out-timing.log" 'TIMING suite ')" 3
+assert_file_has_text timing_suite_cli "$tmp/out-timing.log" \
+    'TIMING suite TestCli: 25 ms'
+assert_file_has_text timing_suite_backend "$tmp/out-timing.log" \
+    'TIMING suite TestBackend: 25 ms'
+assert_file_has_text timing_suite_dynamic "$tmp/out-timing.log" \
+    'TIMING suite TestDynamic: 25 ms'
+assert_file_lacks_text timing_flag_stripped "$tmp/out-timing.log" '--timing'
+assert_file_has_text timing_keeps_combined_summary "$tmp/out-timing.log" \
+    'across 3 suites'
 
 set +e
 PATH="$fakebin:$PATH" "$repo/bin/test" fail > "$tmp/out-fail.log" 2>&1
