@@ -1662,6 +1662,36 @@ void TestCli::readCommandJsonContracts() {
              config.value(QStringLiteral("newCardAllowance")).toInt() - 1);
 }
 
+void TestCli::cardsResolvesDeckFileNameWithDifferentWrittenName() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    const QString path = QDir(decks).filePath("Lesson-Notes.txt");
+    QVERIFY(writeFile(path, "# Deck: Written Name\n---\nQ: One?\nA: A\n"));
+
+    int code = -1;
+    const QJsonObject byFile = runCli({"cards", "--deck", "Lesson Notes", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(sortedKeys(byFile), QStringList({"cards", "ok"}));
+    QVERIFY(byFile.value(QStringLiteral("ok")).toBool());
+    const QJsonArray cards = byFile.value(QStringLiteral("cards")).toArray();
+    QCOMPARE(cards.size(), 1);
+    QCOMPARE(cards.at(0).toObject().value(QStringLiteral("deck")).toString(), QStringLiteral("Written Name"));
+
+    const QJsonObject byName = runCli({"cards", "--deck", "Written Name", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(byName.value(QStringLiteral("cards")).toArray(), cards);
+
+    const QString text = runCliText({"cards", "--deck", "Lesson Notes"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY(text.contains(QStringLiteral("One?")));
+
+    const QJsonObject missing = runCli({"cards", "--deck", "Unknown", "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QCOMPARE(missing.value(QStringLiteral("error")).toString(), QStringLiteral("No such deck: Unknown"));
+}
+
 void TestCli::useDeckCommandContract() {
     QTemporaryDir dir;
     const QString decks = dir.filePath("decks");

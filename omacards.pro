@@ -10,6 +10,7 @@ HEADERS += \
     src/config.h \
     src/deckrepository.h \
     src/deck.h \
+    src/deckidresolver.h \
     src/domain.h \
     src/filehistory.h \
     src/fsrs.h \
@@ -29,6 +30,7 @@ SOURCES += \
     src/backend.cpp \
     src/cli.cpp \
     src/deck.cpp \
+    src/deckidresolver.cpp \
     src/deckrepository.cpp \
     src/domain.cpp \
     src/filehistory.cpp \

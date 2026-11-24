@@ -36,6 +36,7 @@ private slots:
     void summaryContractAcrossThreeStudyDays();
     void checkDeckScoping();
     void readCommandJsonContracts();
+    void cardsResolvesDeckFileNameWithDifferentWrittenName();
     void useDeckCommandContract();
     void decksCurrentCommandContract();
     void reviewCommandContract();
