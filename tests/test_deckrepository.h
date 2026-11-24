@@ -40,4 +40,5 @@ private slots:
     void emptyHistoryUndoRedoReportErrors();
     void undoRedoEmitHistoryChanged();
     void watchDirectoryRequestsReloadAfterFileChange();
+    void watchDirectoryIgnoresRepositoryWrites();
 };

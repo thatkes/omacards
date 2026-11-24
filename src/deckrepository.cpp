@@ -57,9 +57,32 @@ QString validationError(const DeckIssue &issue) {
     return message;
 }
 
-QSet<QString> baselineErrors(const QString &path) {
-    return QFileInfo::exists(path) ? errorSignatures(DeckIO::lintFile(path)) : QSet<QString>();
+QSet<QString> baselineErrors(const QString &path, const QByteArray &bytes, bool existed) {
+    return existed ? errorSignatures(DeckIO::lintBytes(path, bytes)) : QSet<QString>();
 }
+
+// A write made by this process must not echo back as a reload request. The
+// repository watches one directory, so dropping that watch around a write
+// suppresses only its own event; external changes keep the watch the rest of
+// the time and still reach the debounce timer.
+class WatcherPause {
+public:
+    WatcherPause(QFileSystemWatcher &watcher, const QString &path)
+        : m_watcher(watcher), m_path(path), m_watched(watcher.directories().contains(path)) {
+        if (m_watched)
+            m_watcher.removePath(path);
+    }
+    ~WatcherPause() {
+        if (m_watched)
+            m_watcher.addPath(m_path);
+    }
+    Q_DISABLE_COPY(WatcherPause)
+
+private:
+    QFileSystemWatcher &m_watcher;
+    QString m_path;
+    bool m_watched;
+};
 } // namespace
 
 DeckRepository::DeckRepository(const QString &decksDirectory, Store &store, FileHistory &history, QObject *parent)
@@ -81,6 +104,7 @@ bool DeckRepository::initialize(QString *error) {
         return false;
     }
     if (fresh) {
+        WatcherPause pause(m_watcher, m_decksDir);
         Deck welcome;
         welcome.name = trBackend("Welcome");
         welcome.path = QDir(m_decksDir).filePath("Welcome.txt");
@@ -214,6 +238,12 @@ void DeckRepository::recordHistory(const QString &path, const QByteArray &before
         emit historyChanged();
 }
 
+void DeckRepository::recordHistory(const QString &path, const QByteArray &before, bool existedBefore,
+                                   const QByteArray &after, const QString &description) {
+    if (m_history.record(path, before, existedBefore, after, description))
+        emit historyChanged();
+}
+
 void DeckRepository::recordRename(const QString &from, const QByteArray &before, const QString &to,
                                   const QByteArray &after, const QString &description) {
     if (m_history.recordRename(from, before, to, after, description))
@@ -222,14 +252,16 @@ void DeckRepository::recordRename(const QString &from, const QByteArray &before,
 
 bool DeckRepository::commitDeckEdit(Deck *deck, const Deck &original, const QByteArray &before,
                                     const QString &description, QString *error) {
-    const QSet<QString> baseline = baselineErrors(deck->path);
-    if (!DeckIO::save(*deck, error)) {
+    const QSet<QString> baseline = baselineErrors(deck->path, before, true);
+    WatcherPause pause(m_watcher, m_decksDir);
+    QByteArray written;
+    if (!DeckIO::save(*deck, &written, error)) {
         *deck = original;
         rebuildCardIndex();
         return false;
     }
 
-    const QVector<DeckIssue> issues = DeckIO::lintFile(deck->path);
+    const QVector<DeckIssue> issues = DeckIO::lintBytes(deck->path, written);
     if (const DeckIssue *invalid = firstNewError(issues, baseline)) {
         QString restoreError;
         if (!FileHistory::restore(deck->path, before, true, &restoreError)) {
@@ -244,12 +276,13 @@ bool DeckRepository::commitDeckEdit(Deck *deck, const Deck &original, const QByt
         return false;
     }
 
-    recordHistory(deck->path, before, true, description);
+    recordHistory(deck->path, before, true, written, description);
     rebuildCardIndex();
     return true;
 }
 
 bool DeckRepository::undo(QString *error, QString *description) {
+    WatcherPause pause(m_watcher, m_decksDir);
     if (!m_history.undo(error, description)) {
         emit errorOccurred(*error);
         return false;
@@ -259,6 +292,7 @@ bool DeckRepository::undo(QString *error, QString *description) {
 }
 
 bool DeckRepository::redo(QString *error, QString *description) {
+    WatcherPause pause(m_watcher, m_decksDir);
     if (!m_history.redo(error, description)) {
         emit errorOccurred(*error);
         return false;
@@ -297,11 +331,13 @@ bool DeckRepository::createDeck(const QString &name, QString *currentDeck, QStri
         return false;
     }
     const bool existed = false;
-    const QByteArray before = existed ? FileHistory::readBytes(deck.path) : QByteArray();
-    if (!DeckIO::save(deck, error))
+    const QByteArray before;
+    WatcherPause pause(m_watcher, m_decksDir);
+    QByteArray written;
+    if (!DeckIO::save(deck, &written, error))
         return false;
 
-    const QVector<DeckIssue> issues = DeckIO::lintFile(deck.path);
+    const QVector<DeckIssue> issues = DeckIO::lintBytes(deck.path, written);
     if (const DeckIssue *invalid = firstNewError(issues, QSet<QString>())) {
         QString restoreError;
         if (!FileHistory::restore(deck.path, before, existed, &restoreError))
@@ -311,7 +347,7 @@ bool DeckRepository::createDeck(const QString &name, QString *currentDeck, QStri
         return false;
     }
 
-    recordHistory(deck.path, before, existed, trBackend("creating deck %1").arg(clean));
+    recordHistory(deck.path, before, existed, written, trBackend("creating deck %1").arg(clean));
     // The old Backend::createDeck() called refresh() here, so callers could
     // immediately look the new deck up (createCards(), imports, CLI). Reload
     // our own view; Backend still reloads and selects it afterwards.
@@ -363,7 +399,7 @@ bool DeckRepository::renameDeck(const QString &oldName, const QString &newName, 
 
     const Deck original = *deck;
     const QByteArray before = FileHistory::readBytes(oldPath);
-    const QSet<QString> baseline = baselineErrors(oldPath);
+    const QSet<QString> baseline = baselineErrors(oldPath, before, true);
     Deck updated = original;
     updated.name = to;
     updated.path = newPath;
@@ -390,13 +426,14 @@ bool DeckRepository::renameDeck(const QString &oldName, const QString &newName, 
         return false;
     };
 
-    if (!DeckIO::save(updated, error))
+    WatcherPause pause(m_watcher, m_decksDir);
+    QByteArray written;
+    if (!DeckIO::save(updated, &written, error))
         return false;
-    const QVector<DeckIssue> issues = DeckIO::lintFile(newPath);
+    const QVector<DeckIssue> issues = DeckIO::lintBytes(newPath, written);
     if (const DeckIssue *invalid = firstNewError(issues, baseline))
         return rollback(validationError(*invalid));
 
-    const QByteArray after = FileHistory::readBytes(newPath);
     if (!samePath && !QFile::remove(oldPath))
         return rollback(trBackend("Cannot remove deck file: %1").arg(oldPath));
 
@@ -411,9 +448,9 @@ bool DeckRepository::renameDeck(const QString &oldName, const QString &newName, 
     if (!m_store.moveDeckSettings(from, to) || !m_store.lastError().isEmpty())
         emit errorOccurred(trBackend("Cannot move deck settings for %1: %2").arg(to, m_store.lastError()));
     if (samePath)
-        recordHistory(newPath, before, true, action);
+        recordHistory(newPath, before, true, written, action);
     else
-        recordRename(oldPath, before, newPath, after, action);
+        recordRename(oldPath, before, newPath, written, action);
 
     if (result) {
         result->name = to;
@@ -626,6 +663,7 @@ bool DeckRepository::removeDeck(const QString &name, QString *currentDeck, QStri
     }
     const QString path = deck->path;
     const QByteArray before = FileHistory::readBytes(path);
+    WatcherPause pause(m_watcher, m_decksDir);
     if (!QFile::remove(path)) {
         if (error)
             *error = trBackend("Cannot remove deck file: %1").arg(path);

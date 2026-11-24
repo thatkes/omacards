@@ -86,6 +86,8 @@ private:
 
     void rebuildCardIndex();
     void recordHistory(const QString &path, const QByteArray &before, bool existedBefore, const QString &description);
+    void recordHistory(const QString &path, const QByteArray &before, bool existedBefore, const QByteArray &after,
+                       const QString &description);
     void recordRename(const QString &from, const QByteArray &before, const QString &to, const QByteArray &after,
                       const QString &description);
     bool commitDeckEdit(Deck *deck, const Deck &original, const QByteArray &before, const QString &description,

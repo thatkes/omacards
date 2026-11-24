@@ -10,6 +10,19 @@
 
 using namespace TestSupport;
 
+namespace {
+bool sameIssues(const QVector<DeckIssue> &a, const QVector<DeckIssue> &b) {
+    if (a.size() != b.size())
+        return false;
+    for (int i = 0; i < a.size(); ++i) {
+        if (a.at(i).path != b.at(i).path || a.at(i).card != b.at(i).card || a.at(i).line != b.at(i).line ||
+            a.at(i).severity != b.at(i).severity || a.at(i).message != b.at(i).message || a.at(i).hint != b.at(i).hint)
+            return false;
+    }
+    return true;
+}
+} // namespace
+
 void TestDeck::deckParsesAndSerializes() {
     QTemporaryDir dir;
     const QString path = dir.filePath("Spanish.txt");
@@ -449,6 +462,53 @@ void TestDeck::deckLintFlagsMalformedContinuationAsError() {
     QString commentError;
     QVERIFY(!DeckIO::load(commented, &commentError).cards.isEmpty());
     QVERIFY2(commentError.isEmpty(), qPrintable(commentError));
+}
+
+void TestDeck::deckLintBytesMatchesLintFileWithoutReading() {
+    QTemporaryDir dir;
+    const QString path = dir.filePath("Bytes.txt");
+    const QByteArray bytes = "# Deck: Bytes\n"
+                             "---\n"
+                             "Q: Same\n"
+                             "A: one\n"
+                             "---\n"
+                             "Q: Same\n"
+                             "A: \\(\\foo{x}\\)\n"
+                             "oops: bad\n"
+                             "   too much indent\n";
+    QVERIFY(writeFile(path, bytes));
+    const QVector<DeckIssue> fromFile = DeckIO::lintFile(path);
+    QVERIFY(!fromFile.isEmpty());
+    QVERIFY(sameIssues(DeckIO::lintBytes(path, bytes), fromFile));
+
+    // lintBytes() uses only the bytes it was given: it produces the same
+    // issues after the file has gone away.
+    QVERIFY(QFile::remove(path));
+    QVERIFY(sameIssues(DeckIO::lintBytes(path, bytes), fromFile));
+}
+
+void TestDeck::deckSaveReportsCommittedBytes() {
+    QTemporaryDir dir;
+    Deck deck;
+    deck.name = QStringLiteral("Bytes");
+    deck.path = dir.filePath(QStringLiteral("Bytes.txt"));
+    deck.description = QStringLiteral("Desc");
+    Card card;
+    card.deck = deck.name;
+    card.question = QStringLiteral("First line\nSecond line");
+    card.answer = QStringLiteral("Answer");
+    card.type = Domain::parseCardType(QStringLiteral("basic"));
+    card.id = DeckIO::cardId(card);
+    deck.cards << card;
+
+    QByteArray written;
+    QString error;
+    QVERIFY(DeckIO::save(deck, &written, &error));
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QFile file(deck.path);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll(), written);
+    QVERIFY(written.contains("  Second line"));
 }
 
 void TestDeck::deckClozeEdgeCases() {

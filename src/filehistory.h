@@ -23,6 +23,10 @@ public:
 
     // Returns false when the file did not actually change.
     bool record(const QString &path, const QByteArray &before, bool existedBefore, const QString &description);
+    // The caller already holds the after bytes (the bytes the write committed),
+    // so this overload never re-reads the file.
+    bool record(const QString &path, const QByteArray &before, bool existedBefore, const QByteArray &after,
+                const QString &description);
     // A rename is one undo step across both paths; `after` is the bytes at `to`.
     bool recordRename(const QString &from, const QByteArray &before, const QString &to, const QByteArray &after,
                       const QString &description);
@@ -34,6 +38,8 @@ public:
 
 private:
     static bool apply(const Snapshot &snapshot, bool restoreBefore, QString *error);
+    bool recordSnapshot(const QString &path, const QByteArray &before, bool existedBefore, const QByteArray &after,
+                        bool existsAfter, const QString &description);
     void pushSnapshot(const Snapshot &snapshot);
 
     QVector<Snapshot> m_undoStack;
