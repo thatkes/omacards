@@ -230,6 +230,65 @@ void TestCli::helpIsHeadless() {
     QCOMPARE(topLevelWithFlag, topLevel);
 }
 
+void TestCli::helpCommandDispatchesToCommandHelp() {
+    if (!QFileInfo::exists(appBinary()))
+        QSKIP("Build the app before running CLI integration tests.");
+
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+
+    int code = -1;
+    QByteArray errors;
+    const QString addCardHelp = QString::fromUtf8(runCliRaw({"help", "add-card"}, decks, database, &code, &errors));
+    QCOMPARE(code, 0);
+    QVERIFY2(errors.isEmpty(), qPrintable(errors));
+    QVERIFY2(addCardHelp.contains(QStringLiteral("Purpose: Add a Card to a Deck.")), qPrintable(addCardHelp));
+    QVERIFY2(!addCardHelp.contains(QStringLiteral("Usage:")), qPrintable(addCardHelp));
+
+    // Every registry path reached through `help` matches its own help flag.
+    for (const QString &path : Cli::commandPaths()) {
+        if (Cli::isHelpCommand(path.section(QLatin1Char(' '), 0, 0)))
+            continue;
+        QStringList helpArguments = {QStringLiteral("help")};
+        helpArguments << path.split(QLatin1Char(' '));
+        QStringList flagArguments = path.split(QLatin1Char(' '));
+        flagArguments << QStringLiteral("--help");
+        int helpCode = -1;
+        int flagCode = -1;
+        QByteArray helpErrors;
+        const QByteArray viaHelp = runCliRaw(helpArguments, decks, database, &helpCode, &helpErrors);
+        const QByteArray viaFlag = runCliRaw(flagArguments, decks, database, &flagCode);
+        QCOMPARE(helpCode, 0);
+        QVERIFY2(helpErrors.isEmpty(), qPrintable(path + ": " + QString::fromUtf8(helpErrors)));
+        QCOMPARE(flagCode, 0);
+        QCOMPARE(QString::fromUtf8(viaHelp), QString::fromUtf8(viaFlag));
+    }
+    QVERIFY2(!QFileInfo::exists(database), "Help dispatch must not create the state database");
+}
+
+void TestCli::skillUnknownActionMentionsBothPaths() {
+    if (!QFileInfo::exists(appBinary()))
+        QSKIP("Build the app before running CLI integration tests.");
+
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+
+    int code = -1;
+    QByteArray errors;
+    runCliRaw({"skill", "bogus"}, decks, database, &code, &errors);
+    QCOMPARE(code, 1);
+    QVERIFY2(errors.contains("Usage: omacards skill install"), qPrintable(errors));
+    QVERIFY2(errors.contains("omacards skill status"), qPrintable(errors));
+
+    const QJsonObject failure = runCli({"skill", "bogus", "--json"}, decks, database, &code, &errors);
+    QCOMPARE(code, 1);
+    const QString message = failure.value(QStringLiteral("error")).toString();
+    QVERIFY2(message.contains("skill install"), qPrintable(message));
+    QVERIFY2(message.contains("skill status"), qPrintable(message));
+}
+
 void TestCli::missingSkillNudge() {
     if (!QFileInfo::exists(appBinary()))
         QSKIP("Build the app before running CLI integration tests.");

@@ -7,6 +7,8 @@ class TestCli : public QObject {
 
 private slots:
     void helpIsHeadless();
+    void helpCommandDispatchesToCommandHelp();
+    void skillUnknownActionMentionsBothPaths();
     void missingSkillNudge();
     void skillStatusReportsInstallState();
     void addCardsCreatesDeckBulk();
