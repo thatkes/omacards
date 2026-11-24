@@ -115,6 +115,7 @@ private:
     QString m_currentId;
     QString m_deckName;
     QSet<QString> m_sessionRatedIds;
+    QStringList m_sessionAddedIds;
     bool m_showingAnswer = false;
     bool m_waitingForRepeat = false;
 };

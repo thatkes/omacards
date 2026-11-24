@@ -36,6 +36,7 @@ void StudySession::setMode(const QString &mode) {
     m_repeatTimer.stop();
     m_progression.clear();
     m_sessionRatedIds.clear();
+    m_sessionAddedIds.clear();
     m_reviewed = 0;
     m_good = 0;
     emit modeChanged();
@@ -48,6 +49,8 @@ void StudySession::rebuild(const QString &deckName) {
 }
 
 void StudySession::rebuildQueue(const QString &deckName, bool notifyStats) {
+    if (deckName != m_deckName)
+        m_sessionAddedIds.clear();
     m_deckName = deckName;
     // A watcher refresh can rebuild the queue while a repeat is pending. Keep
     // those deadlines for cards that are still available; a cram queue is
@@ -67,6 +70,16 @@ void StudySession::rebuildQueue(const QString &deckName, bool notifyStats) {
         QStringList newIds;
         m_planner.reviewIds(deckName, &dueIds, &newIds);
         m_progression.buildReview(dueIds, newIds, pending);
+        // Add 5 cards live only in this sitting. A watcher refresh rebuilds
+        // the queue from the Store, so put unrated session cards back in their
+        // original order. Rated cards stay out; their Pending repeats, if
+        // any, were restored above from the progression's deadlines.
+        QStringList restored;
+        for (const QString &id : m_sessionAddedIds) {
+            if (!m_sessionRatedIds.contains(id) && !m_progression.contains(id))
+                restored << id;
+        }
+        m_progression.appendReview(restored);
     } else {
         m_progression.clear();
     }
@@ -81,6 +94,7 @@ void StudySession::startFresh(const QString &deckName) {
     m_repeatTimer.stop();
     m_progression.clear();
     m_sessionRatedIds.clear();
+    m_sessionAddedIds.clear();
     m_reviewed = 0;
     m_good = 0;
     rebuild(deckName);
@@ -198,6 +212,7 @@ bool StudySession::addAdditionalNew(int count) {
     }
     if (added.isEmpty())
         return false;
+    m_sessionAddedIds << added;
 
     // No Store write: these cards are queue content for this sitting only.
     m_progression.appendReview(added);
