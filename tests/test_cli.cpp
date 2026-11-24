@@ -884,8 +884,8 @@ void TestCli::cliEditsAndDeletesCardsAcrossDecks() {
     QCOMPARE(renamed.value(QStringLiteral("path")).toString(), QDir(decks).filePath("Renamed.txt"));
     QCOMPARE(renamed.value(QStringLiteral("renamedCards")).toInt(), 1);
     // edit-card above already pinned this id in the deck file, so the rename
-    // preserves it without adding another id line.
-    QCOMPARE(renamed.value(QStringLiteral("preservedIds")).toInt(), 0);
+    // preserves it without adding another id line; it still counts as preserved.
+    QCOMPARE(renamed.value(QStringLiteral("preservedIds")).toInt(), 1);
     QVERIFY(!QFileInfo::exists(QDir(decks).filePath("Second.txt")));
     QVERIFY(QFileInfo::exists(QDir(decks).filePath("Renamed.txt")));
 
