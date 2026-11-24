@@ -3040,3 +3040,84 @@ void TestBackend::qmlStudyUsesCachedSvgWithoutPlaceholder() {
     QVERIFY(text.contains(QStringLiteral("<img src='data:image/svg+xml;base64,")));
     QVERIFY(!text.contains(QStringLiteral("<!--omacards-math:")));
 }
+
+void TestBackend::cachedBackendListsFollowMutations() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString decksDir = dir.filePath("decks");
+    QVERIFY(QDir().mkpath(decksDir));
+    Backend backend(decksDir, dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Alpha", &error));
+    QVERIFY(backend.createCard("Alpha", "Q1", "A1", "basic", {}, &error));
+    QVERIFY(backend.createCard("Alpha", "Q2", "A2", "basic", {}, &error));
+    backend.selectDeck("Alpha");
+
+    const auto namesOf = [](const QVariantList &entries) {
+        QStringList names;
+        for (const QVariant &entry : entries)
+            names << entry.toMap().value(QStringLiteral("name")).toString();
+        return names;
+    };
+
+    QCOMPARE(backend.cardList().size(), 2);
+    QCOMPARE(namesOf(backend.deckSummaries()), QStringList({"Alpha"}));
+    QCOMPARE(namesOf(backend.deckSelector()), QStringList({"Alpha"}));
+
+    backend.setCardFilter("Q2");
+    QCOMPARE(backend.cardList().size(), 1);
+    QCOMPARE(backend.cardList().first().toMap().value("question").toString(), QString("Q2"));
+    QCOMPARE(namesOf(backend.deckSelector()), QStringList({"Alpha"}));
+
+    QVERIFY(backend.createCard("Alpha", "Q3", "A3", "basic", {}, &error));
+    backend.setCardFilter({});
+    QCOMPARE(backend.cardList().size(), 3);
+
+    QVERIFY(backend.createDeck("Beta", &error));
+    QVERIFY(backend.createCard("Beta", "B1", "B answer", "basic", {}, &error));
+    backend.selectDeck("Beta");
+    QCOMPARE(backend.currentDeck(), QString("Beta"));
+    QCOMPARE(backend.cardList().size(), 1);
+    QCOMPARE(namesOf(backend.deckSelector()), QStringList({"Beta", "Alpha"}));
+
+    const QString cardId = backend.cardList().first().toMap().value("id").toString();
+    backend.updateCard(cardId, "B1 edited", "B answer", "basic", {});
+    QCOMPARE(backend.cardList().first().toMap().value("question").toString(), QString("B1 edited"));
+    backend.removeCard(cardId);
+    QCOMPARE(backend.cardList().size(), 0);
+}
+
+void TestBackend::ratingRefreshesCachedBoxCountsBeforeStats() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString decksDir = dir.filePath("decks");
+    QVERIFY(QDir().mkpath(decksDir));
+    Backend backend(decksDir, dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Cram", &error));
+    QVERIFY(backend.createCard("Cram", "Q1", "A1", "basic", {}, &error));
+    QVERIFY(backend.createCard("Cram", "Q2", "A2", "basic", {}, &error));
+    backend.selectDeck("Cram");
+    backend.setMode("cram");
+    backend.refresh();
+    QCOMPARE(backend.boxDistribution(), QVariantList({2, 0, 0, 0, 0}));
+
+    QSignalSpy statsChanged(&backend, &Backend::statsChanged);
+    QSignalSpy cardsChanged(&backend, &Backend::cardsChanged);
+    QSignalSpy decksChanged(&backend, &Backend::decksChanged);
+    QList<QVariantList> seenDistributions;
+    QObject::connect(&backend, &Backend::statsChanged, &backend,
+                     [&] { seenDistributions << backend.boxDistribution(); });
+
+    backend.reveal();
+    backend.rate(3);
+
+    QCOMPARE(statsChanged.count(), 1);
+    QCOMPARE(cardsChanged.count(), 1);
+    QCOMPARE(decksChanged.count(), 1);
+    QCOMPARE(seenDistributions.size(), 1);
+    QCOMPARE(seenDistributions.first(), QVariantList({1, 1, 0, 0, 0}));
+    QCOMPARE(backend.boxDistribution(), seenDistributions.first());
+}

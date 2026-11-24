@@ -67,4 +67,6 @@ private slots:
     void qmlStudyShowsMathPlaceholderUntilSvgArrives();
     void qmlStudyRecolorsCachedSvgWhenThemeChanges();
     void qmlStudyUsesCachedSvgWithoutPlaceholder();
+    void cachedBackendListsFollowMutations();
+    void ratingRefreshesCachedBoxCountsBeforeStats();
 };
