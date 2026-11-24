@@ -145,11 +145,11 @@ A rating that means recall failed and creates a pending repeat later in the same
 _Avoid_: fail, retry
 
 **Pending repeat**:
-A card rated Again that returns later in the same study session.
+A Card rated Again that has not been shown again in the same Study session.
 _Avoid_: retry, requeued card
 
 **Pending-repeat delay**:
-The time a Card rated Again waits before it can be shown again in the same Study session.
+The time a Pending repeat waits before it can be shown again while other cards remain available in the same Study session.
 _Avoid_: again delay, retry delay, wait time
 
 **Good**:
