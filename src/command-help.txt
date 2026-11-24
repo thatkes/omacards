@@ -9,7 +9,7 @@ Flags: -q Q, -a A, [-d D], [--type T], [--tags a,b], [--json], --help, -h
 Example: omacards add-card -q "Two plus two?" -a four --json
 
 Path: add-cards
-Purpose: Add Cards from JSON or stdin.
+Purpose: Add Cards from JSON or stdin, e.g. [{"question":"...","answer":"..."}].
 Flags: --deck D, [--description TEXT], [--input FILE|-], [--json], --help, -h
 Example: omacards add-cards --deck Calculus --input cards.json --json
 
