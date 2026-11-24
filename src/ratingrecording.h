@@ -5,7 +5,6 @@
 #include "fsrs.h"
 #include "store.h"
 
-#include <QHash>
 #include <QString>
 
 // Owns the hash guard, Fsrs call and both writes that make up Rating
@@ -18,11 +17,12 @@ public:
         virtual ~StoreAdapter() = default;
 
         virtual void clearError() = 0;
-        virtual QHash<QString, FsrsState> states() const = 0;
-        virtual QHash<QString, QString> hashes() const = 0;
+        virtual SchedulingRecord schedulingRecord(const QString &cardId) const = 0;
         virtual void save(const QString &cardId, const QString &hash, const FsrsState &state) = 0;
         virtual void recordRating(const QString &cardId, int rating, qint64 at, const FsrsState &state,
                                   int intervalDays, bool wasNew) = 0;
+        virtual bool beginRatingWrite() = 0;
+        virtual bool finishRatingWrite() = 0;
         virtual QString lastError() const = 0;
     };
 
@@ -50,11 +50,12 @@ public:
     explicit StoreRatingAdapter(Store &store);
 
     void clearError() override;
-    QHash<QString, FsrsState> states() const override;
-    QHash<QString, QString> hashes() const override;
+    SchedulingRecord schedulingRecord(const QString &cardId) const override;
     void save(const QString &cardId, const QString &hash, const FsrsState &state) override;
     void recordRating(const QString &cardId, int rating, qint64 at, const FsrsState &state, int intervalDays,
                       bool wasNew) override;
+    bool beginRatingWrite() override;
+    bool finishRatingWrite() override;
     QString lastError() const override;
 
 private:

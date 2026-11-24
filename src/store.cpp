@@ -35,9 +35,11 @@ Store::Store(const QString &path)
 
 Store::~Store() {
     if (m_db.isValid()) {
-        // Drop the cached query before removing its connection.
+        // Drop the cached queries before removing their connection.
         m_schedulingQuery = QSqlQuery();
+        m_cardQuery = QSqlQuery();
         m_schedulingPrepared = false;
+        m_cardPrepared = false;
         m_db.close();
         m_db = QSqlDatabase();
         QSqlDatabase::removeDatabase(m_connection);
@@ -168,6 +170,37 @@ QHash<QString, SchedulingRecord> Store::schedulingRecords() const {
     return result;
 }
 
+SchedulingRecord Store::schedulingRecord(const QString &cardId) const {
+    if (!m_db.isOpen())
+        return {};
+
+    // Prepared once per Store; one rating binds its Card id and reads at most
+    // that one cards row.
+    if (!m_cardPrepared) {
+        m_cardQuery = QSqlQuery(m_db);
+        if (!m_cardQuery.prepare("SELECT id, hash, stability, difficulty, due, last_review, reps, lapses "
+                                 "FROM cards WHERE id = :id")) {
+            m_lastError = m_cardQuery.lastError().text();
+            return {};
+        }
+        m_cardPrepared = true;
+    }
+    m_cardQuery.bindValue(QStringLiteral(":id"), cardId);
+    if (!m_cardQuery.exec()) {
+        m_lastError = m_cardQuery.lastError().text();
+        // Schema drift can invalidate a prepared statement; reprepare next time.
+        m_cardQuery = QSqlQuery();
+        m_cardPrepared = false;
+        return {};
+    }
+
+    SchedulingRecord result;
+    if (m_cardQuery.next())
+        result = SchedulingRecord{stateFromQuery(m_cardQuery, 2), m_cardQuery.value(1).toString()};
+    m_cardQuery.finish();
+    return result;
+}
+
 void Store::save(const QString &cardId, const QString &hash, const FsrsState &state) {
     if (!m_db.isOpen())
         return;
@@ -208,6 +241,35 @@ void Store::recordRating(const QString &cardId, int rating, qint64 at, const Fsr
     query.bindValue(":new_card", wasNew ? 1 : 0);
     if (!query.exec())
         m_lastError = query.lastError().text();
+}
+
+bool Store::beginRatingWrite() {
+    if (!m_db.isOpen()) {
+        if (m_lastError.isEmpty())
+            m_lastError = QStringLiteral("State database is not open");
+        return false;
+    }
+    if (!m_db.transaction()) {
+        m_lastError = m_db.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool Store::finishRatingWrite() {
+    if (!m_db.isOpen())
+        return false;
+    if (!m_lastError.isEmpty()) {
+        // Keep the raw write error; a failed rollback must not mask it.
+        m_db.rollback();
+        return false;
+    }
+    if (!m_db.commit()) {
+        m_lastError = m_db.lastError().text();
+        m_db.rollback();
+        return false;
+    }
+    return true;
 }
 
 void Store::removeExcept(const QSet<QString> &ids) {
