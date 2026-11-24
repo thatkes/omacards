@@ -9,6 +9,7 @@ HEADERS += \
     $$PWD/../src/cli.h \
     $$PWD/../src/config.h \
     $$PWD/../src/deck.h \
+    $$PWD/../src/deckidresolver.h \
     $$PWD/../src/deckrepository.h \
     $$PWD/../src/domain.h \
     $$PWD/../src/filehistory.h \
@@ -27,6 +28,7 @@ SOURCES += \
     $$PWD/../src/backend.cpp \
     $$PWD/../src/cli.cpp \
     $$PWD/../src/deck.cpp \
+    $$PWD/../src/deckidresolver.cpp \
     $$PWD/../src/deckrepository.cpp \
     $$PWD/../src/domain.cpp \
     $$PWD/../src/filehistory.cpp \

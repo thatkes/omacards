@@ -6,6 +6,7 @@
 #include "backend.h"
 #include "config.h"
 #include "deck.h"
+#include "deckidresolver.h"
 #include "deckrepository.h"
 #include "domain.h"
 #include "insessionprogression.h"
@@ -821,6 +822,20 @@ int run(const QStringList &arguments) {
         return path;
     };
 
+    // Commands that act on an existing Deck ask the shared resolver for its
+    // id. Empty input stays with the caller's all-Decks or Current-deck
+    // fallback; the error text stays here while the resolver returns a reason.
+    const auto resolveDeckId = [&](const QString &requested) -> std::optional<QString> {
+        if (requested.isEmpty())
+            return QString();
+        const DeckIdResolver::Result resolved = DeckIdResolver::resolve(decks, backend.decksDirectory(), requested);
+        if (!resolved.deckId) {
+            fail(QObject::tr("No such deck: %1").arg(requested), json);
+            return std::nullopt;
+        }
+        return resolved.deckId;
+    };
+
     if (options.command == "check") {
         const QString targetPath =
             options.deck.isEmpty() ? QString() : resolveDeckPath(decks, backend.decksDirectory(), options.deck);
@@ -1045,16 +1060,18 @@ int run(const QStringList &arguments) {
     }
 
     if (options.command == "cards") {
-        if (!requireDeck(options.deck))
+        const std::optional<QString> deckId = resolveDeckId(options.deck);
+        if (!deckId)
             return 1;
+        const QString targetDeck = deckId.value_or(QString());
         QJsonArray array;
-        for (const Card &card : allCards(decks, options.deck))
+        for (const Card &card : allCards(decks, targetDeck))
             array << cardJson(card);
         QJsonObject object;
         object.insert("ok", true);
         object.insert("cards", array);
         QStringList lines;
-        for (const Card &card : allCards(decks, options.deck))
+        for (const Card &card : allCards(decks, targetDeck))
             lines << QString("[%1] %2 → %3").arg(card.id, card.question, card.answer);
         write(object, json, lines.join('\n'));
         return 0;

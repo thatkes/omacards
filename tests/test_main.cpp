@@ -20,6 +20,7 @@
 #include "test_studyplanner.h"
 #include "test_studysession.h"
 #include "test_ratingrecording.h"
+#include "test_deckidresolver.h"
 #include "test_importer.h"
 #include "test_deckrepository.h"
 #include "test_translator.h"
@@ -95,7 +96,7 @@ void printSuiteNames(QTextStream &out, const QVector<Suite> &suites) {
 
 // Update this when registering a suite; the runtime check keeps the vector
 // and the announced suite count from drifting apart.
-constexpr int kExpectedSuiteCount = 17;
+constexpr int kExpectedSuiteCount = 18;
 
 bool isInformationalMode(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
@@ -127,6 +128,7 @@ int main(int argc, char **argv) {
     TestStudyPlanner studyplanner;
     TestStudySession studysession;
     TestRatingRecording ratingrecording;
+    TestDeckIdResolver deckidresolver;
     TestImporter importer;
     TestDeckRepository deckrepository;
     TestTranslator translator;
@@ -146,6 +148,7 @@ int main(int argc, char **argv) {
         {QStringLiteral("TestStudyPlanner"), &studyplanner},
         {QStringLiteral("TestStudySession"), &studysession},
         {QStringLiteral("TestRatingRecording"), &ratingrecording},
+        {QStringLiteral("TestDeckIdResolver"), &deckidresolver},
         {QStringLiteral("TestImporter"), &importer},
         {QStringLiteral("TestDeckRepository"), &deckrepository},
         {QStringLiteral("TestTranslator"), &translator},
