@@ -125,30 +125,6 @@ QStringList expressionsIn(const QString &text) {
     return result;
 }
 
-QSize svgPixelSize(const QString &path);
-
-// The reserved box is the one size a formula occupies from placeholder through
-// finished image. A cached SVG already knows its logical size, so scaling that
-// by `scale` keeps its aspect ratio. While the file is missing, TeX has not run
-// yet: the box comes from the bounds of the Unicode fallback text in Noto Sans
-// Math at 10px * scale, plus a small margin, rounded to even pixels. If the
-// finished SVG reports a different logical size, the reserved box still wins;
-// the SVG is drawn into that box instead of resizing the <img> and moving the
-// surrounding text.
-QSize reservedMathSize(const QString &expression, double scale, const QString &svgPath = {}) {
-    if (!svgPath.isEmpty()) {
-        const QSize logical = svgPixelSize(svgPath);
-        if (!logical.isEmpty())
-            return QSize(qRound(logical.width() * scale), qRound(logical.height() * scale));
-    }
-    QFont font(QStringLiteral("Noto Sans Math"));
-    font.setPixelSize(qMax(1, qRound(10.0 * scale)));
-    const QFontMetricsF metrics(font);
-    const QRectF glyphs = metrics.boundingRect(unicodeMath(expression));
-    const auto evenPixels = [](qreal value) { return qMax(2, 2 * qCeil(value / 2.0)); };
-    return QSize(evenPixels(glyphs.width() + 4.0), evenPixels(glyphs.height() + 4.0));
-}
-
 QString mathPlaceholderTag(const QString &key, const QSize &size) {
     // An inline image is the same rich-text layout primitive as the finished
     // SVG, so a transparent pixel scaled to the reserved box holds the slot
@@ -163,38 +139,6 @@ QString mathPlaceholderTag(const QString &key, const QSize &size) {
 
 const QRegularExpression &blackFillPattern();
 QString normalizeInk(const QString &ink);
-
-// The cached file stays a neutral master. Recoloring happens on the bytes that
-// go into the rich-text <img> src, so no themed file is ever written.
-QString colorizedSvgUri(const QString &path, const QString &ink) {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly))
-        return {};
-    QString svg = QString::fromUtf8(file.readAll());
-    svg.replace(blackFillPattern(), normalizeInk(ink));
-    return QStringLiteral("data:image/svg+xml;base64,") + QString::fromLatin1(svg.toUtf8().toBase64());
-}
-
-QString mathImageHtml(const QString &path, const QString &expression, const QString &ink, double scale,
-                      const QSize &reservedSize = {}) {
-    const QString source = colorizedSvgUri(path, ink);
-    if (source.isEmpty())
-        return {};
-    // A queued request carries the box its placeholder reserved. Keep that box
-    // even when the new SVG's logical size disagrees: Qt draws the SVG into the
-    // element using its viewBox, while the surrounding layout keeps the box.
-    // Renders with no placeholder (cached display, preview, warming) size from
-    // the SVG, which preserves its aspect ratio.
-    const QSize pixels = reservedSize.isEmpty() ? reservedMathSize(expression, scale, path) : reservedSize;
-    // toHtmlEscaped() leaves apostrophes literal, which would close this
-    // single-quoted attribute. Qt then loses the width and height that follow.
-    const QString alt = expression.toHtmlEscaped().replace(QLatin1Char('\''), QStringLiteral("&#39;"));
-    return QStringLiteral("<img src='%1' alt='%2' width='%3' height='%4' align='middle' "
-                          "style='vertical-align: middle;'>")
-        .arg(source, alt)
-        .arg(pixels.width())
-        .arg(pixels.height());
-}
 
 // One render per cache key, shared by live presentation, prefetching and the
 // warming command. A second caller skips the key instead of waiting for the
@@ -247,8 +191,8 @@ public:
             return;
         const QString path = owner->renderRequest(m_request);
         const QString html = path.isEmpty() ? QString()
-                                            : mathImageHtml(path, m_request.expression, m_request.ink, m_request.scale,
-                                                            m_request.reservedSize);
+                                            : owner->mathImageHtml(path, m_request.expression, m_request.ink,
+                                                                   m_request.scale, m_request.reservedSize);
         QMetaObject::invokeMethod(
             owner,
             [owner, key = m_request.key, html, generation = m_generation] {
@@ -382,9 +326,12 @@ QString MathRenderer::renderWithPlaceholders(const QString &text, const QString 
             const QString path = mathSvgPath(expression);
             const QString key = QFileInfo(path).completeBaseName();
             if (QFileInfo::exists(path)) {
-                // The SVG is ready, so no worker is started here. An older
-                // worker may still be holding this key: give it the ink that
-                // is about to be displayed before its result arrives.
+                // The SVG is ready, so no worker is started here. Read its
+                // bytes once: the data URI and the reserved box share them,
+                // and renderLatex can skip a second existence check.
+                cachedSvg(path);
+                // An older worker may still be holding this key: give it the
+                // ink that is about to be displayed before its result arrives.
                 refreshActiveRequestInk(key, ink, scale);
                 return renderExpression(expression, ink, scale);
             }
@@ -572,31 +519,126 @@ void normalizeCachedSvg(const QString &path) {
         file.write(svg.toUtf8());
 }
 
-QSize svgPixelSize(const QString &path) {
+} // namespace
+
+MathRenderer::CachedSvg MathRenderer::cachedSvg(const QString &path) const {
+    QMutexLocker lock(&m_svgCacheMutex);
+    const auto found = m_svgCache.constFind(path);
+    if (found != m_svgCache.constEnd())
+        return found.value();
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly))
         return {};
-    const QString tag = svgRootTag(QString::fromUtf8(file.readAll()));
-    if (tag.isEmpty())
-        return {};
-    const auto dimension = [&tag](const QString &name) {
-        const QRegularExpression pattern("\\b" + name + R"re(="([0-9]*\.?[0-9]+)(pt|px)")re");
-        const QRegularExpressionMatch match = pattern.match(tag);
-        if (!match.hasMatch())
-            return 0;
-        const double factor = match.captured(2) == QLatin1String("pt") ? 4.0 / 3.0 : 1.0;
-        return qRound(match.captured(1).toDouble() * factor / kSvgSupersample);
-    };
-    return QSize(dimension("width"), dimension("height"));
+    CachedSvg cached;
+    cached.bytes = file.readAll();
+    cached.hasBytes = true;
+    m_svgCache.insert(path, cached);
+    return cached;
 }
-} // namespace
+
+bool MathRenderer::hasCachedSvg(const QString &path) const {
+    QMutexLocker lock(&m_svgCacheMutex);
+    const auto found = m_svgCache.constFind(path);
+    return found != m_svgCache.constEnd() && found->hasBytes;
+}
+
+void MathRenderer::forgetSvg(const QString &path) const {
+    QMutexLocker lock(&m_svgCacheMutex);
+    m_svgCache.remove(path);
+}
+
+// The cached file stays a neutral master. Recoloring happens on the bytes that
+// go into the rich-text <img> src, so no themed file is ever written.
+QString MathRenderer::colorizedSvgUri(const QString &path, const QString &ink) const {
+    const CachedSvg cached = cachedSvg(path);
+    if (!cached.hasBytes)
+        return {};
+    QString svg = QString::fromUtf8(cached.bytes);
+    svg.replace(blackFillPattern(), normalizeInk(ink));
+    return QStringLiteral("data:image/svg+xml;base64,") + QString::fromLatin1(svg.toUtf8().toBase64());
+}
+
+QSize MathRenderer::svgPixelSize(const QString &path) const {
+    {
+        QMutexLocker lock(&m_svgCacheMutex);
+        const auto found = m_svgCache.constFind(path);
+        if (found != m_svgCache.constEnd() && found->hasSize)
+            return found->size;
+    }
+    const CachedSvg cached = cachedSvg(path);
+    if (!cached.hasBytes)
+        return {};
+    const QString tag = svgRootTag(QString::fromUtf8(cached.bytes));
+    QSize size;
+    if (!tag.isEmpty()) {
+        const auto dimension = [&tag](const QString &name) {
+            const QRegularExpression pattern("\\b" + name + R"re(="([0-9]*\.?[0-9]+)(pt|px)")re");
+            const QRegularExpressionMatch match = pattern.match(tag);
+            if (!match.hasMatch())
+                return 0;
+            const double factor = match.captured(2) == QLatin1String("pt") ? 4.0 / 3.0 : 1.0;
+            return qRound(match.captured(1).toDouble() * factor / kSvgSupersample);
+        };
+        size = QSize(dimension("width"), dimension("height"));
+    }
+    QMutexLocker lock(&m_svgCacheMutex);
+    auto found = m_svgCache.find(path);
+    if (found != m_svgCache.end()) {
+        found->size = size;
+        found->hasSize = true;
+    }
+    return size;
+}
+
+// The reserved box is the one size a formula occupies from placeholder through
+// finished image. A cached SVG already knows its logical size, so scaling that
+// by `scale` keeps its aspect ratio. While the file is missing, TeX has not run
+// yet: the box comes from the bounds of the Unicode fallback text in Noto Sans
+// Math at 10px * scale, plus a small margin, rounded to even pixels. If the
+// finished SVG reports a different logical size, the reserved box still wins;
+// the SVG is drawn into that box instead of resizing the <img> and moving the
+// surrounding text.
+QSize MathRenderer::reservedMathSize(const QString &expression, double scale, const QString &svgPath) const {
+    if (!svgPath.isEmpty()) {
+        const QSize logical = svgPixelSize(svgPath);
+        if (!logical.isEmpty())
+            return QSize(qRound(logical.width() * scale), qRound(logical.height() * scale));
+    }
+    QFont font(QStringLiteral("Noto Sans Math"));
+    font.setPixelSize(qMax(1, qRound(10.0 * scale)));
+    const QFontMetricsF metrics(font);
+    const QRectF glyphs = metrics.boundingRect(unicodeMath(expression));
+    const auto evenPixels = [](qreal value) { return qMax(2, 2 * qCeil(value / 2.0)); };
+    return QSize(evenPixels(glyphs.width() + 4.0), evenPixels(glyphs.height() + 4.0));
+}
+
+QString MathRenderer::mathImageHtml(const QString &path, const QString &expression, const QString &ink, double scale,
+                                    const QSize &reservedSize) const {
+    const QString source = colorizedSvgUri(path, ink);
+    if (source.isEmpty())
+        return {};
+    // A queued request carries the box its placeholder reserved. Keep that box
+    // even when the new SVG's logical size disagrees: Qt draws the SVG into the
+    // element using its viewBox, while the surrounding layout keeps the box.
+    // Renders with no placeholder (cached display, preview, warming) size from
+    // the SVG, which preserves its aspect ratio.
+    const QSize pixels = reservedSize.isEmpty() ? reservedMathSize(expression, scale, path) : reservedSize;
+    // toHtmlEscaped() leaves apostrophes literal, which would close this
+    // single-quoted attribute. Qt then loses the width and height that follow.
+    const QString alt = expression.toHtmlEscaped().replace(QLatin1Char('\''), QStringLiteral("&#39;"));
+    return QStringLiteral("<img src='%1' alt='%2' width='%3' height='%4' align='middle' "
+                          "style='vertical-align: middle;'>")
+        .arg(source, alt)
+        .arg(pixels.width())
+        .arg(pixels.height());
+}
 
 QString MathRenderer::renderLatex(const QString &expression) const {
     if (detect() != Engine::LatexSvg)
         return {};
 
     const QString svgPath = mathSvgPath(expression);
-    if (QFileInfo::exists(svgPath))
+    if (hasCachedSvg(svgPath) || QFileInfo::exists(svgPath))
         return svgPath;
 
     RenderClaim claim{svgPath, false};
@@ -608,6 +650,7 @@ QString MathRenderer::renderLatex(const QString &expression) const {
     const QString texDir = m_cache + "/tex";
     QDir().mkpath(texDir);
     QFile::remove(svgPath);
+    forgetSvg(svgPath);
     const QString stem = texDir + "/" + base;
     // Typeset directly into a page sized to the expression. Shipout bypasses
     // the article output routine, so pdftocairo gets a tight page instead of a
@@ -675,6 +718,9 @@ QString MathRenderer::renderLatex(const QString &expression) const {
     }
     if (ok && QFileInfo::exists(svgPath)) {
         normalizeCachedSvg(svgPath);
+        // A display during the render may have cached the converter's bytes
+        // before the root was scaled. The next read must see the final master.
+        forgetSvg(svgPath);
         return svgPath;
     }
     return {};

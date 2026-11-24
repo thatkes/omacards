@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QHash>
 #include <QMutex>
 #include <QObject>
@@ -92,6 +93,24 @@ private:
         quint64 generation = 0;
     };
 
+    // One immutable SVG master per cache path. Both the themed data URI and
+    // the reserved box read these bytes, so neither reopens the file.
+    struct CachedSvg {
+        QByteArray bytes;
+        QSize size;
+        bool hasBytes = false;
+        bool hasSize = false;
+    };
+
+    CachedSvg cachedSvg(const QString &path) const;
+    bool hasCachedSvg(const QString &path) const;
+    void forgetSvg(const QString &path) const;
+    QString colorizedSvgUri(const QString &path, const QString &ink) const;
+    QSize svgPixelSize(const QString &path) const;
+    QSize reservedMathSize(const QString &expression, double scale, const QString &svgPath = {}) const;
+    QString mathImageHtml(const QString &path, const QString &expression, const QString &ink, double scale,
+                          const QSize &reservedSize = {}) const;
+
     void enqueueExpression(const RenderRequest &request);
     // A cached expression needs no new worker, but an active one still has to
     // record the ink now on screen before its old worker finishes.
@@ -102,6 +121,8 @@ private:
                              const QSize &reservedSize) const;
 
     QString m_cache;
+    mutable QMutex m_svgCacheMutex;
+    mutable QHash<QString, CachedSvg> m_svgCache;
     mutable QMutex m_detectMutex;
     mutable Engine m_engine = Engine::None;
     mutable Toolchain m_toolchain = Toolchain::None;

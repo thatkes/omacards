@@ -43,6 +43,10 @@ ApplicationWindow {
     property string lastPresentedStudyState: ""
     readonly property bool cramDistributionVisible: backend.mode === "cram" && cramQueueHasCards()
 
+    // Each arriving math result notifies both rich-text bindings. Keep the
+    // scaled markup so an unchanged html/width pair is scanned only once.
+    property var imageScaleCache: ({})
+
     function withAlpha(color, alpha) {
         return Qt.rgba(color.r, color.g, color.b, alpha)
     }
@@ -131,8 +135,12 @@ ApplicationWindow {
     function scaleImagesToWidth(html, maxWidth) {
         if (!html || maxWidth <= 0)
             return html || ""
+        const cache = win.imageScaleCache
+        const key = maxWidth + "\u0000" + html
+        if (Object.prototype.hasOwnProperty.call(cache, key))
+            return cache[key]
         const imageTags = /<img\b[^>]*>/gi
-        return html.replace(imageTags, function(tag) {
+        const scaled = html.replace(imageTags, function(tag) {
             const widthMatch = /\bwidth\s*=\s*["']?([0-9]*\.?[0-9]+)["']?/i.exec(tag)
             const heightMatch = /\bheight\s*=\s*["']?([0-9]*\.?[0-9]+)["']?/i.exec(tag)
             const srcMatch = /\bsrc\s*=\s*["']([^"']+)["']/i.exec(tag)
@@ -168,6 +176,11 @@ ApplicationWindow {
             const size = " width=\"" + targetWidth + "\" height=\"" + targetHeight + "\""
             return closing === "/>" ? body + size + " />" : body + size + ">"
         })
+        const keys = Object.keys(cache)
+        if (keys.length >= 32)
+            delete cache[keys[0]]
+        cache[key] = scaled
+        return scaled
     }
 
     function resetStudyScroll() {
