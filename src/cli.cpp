@@ -310,7 +310,7 @@ QJsonObject issueCountsJson(const DeckIssueReport &report) {
     return counts;
 }
 
-QString checkCommandHint(const QString &deckName) {
+QString deckCommandHint(const QString &command, const QString &deckName) {
     bool needsQuotes = false;
     for (const QChar ch : deckName) {
         if (ch.isSpace()) {
@@ -319,14 +319,36 @@ QString checkCommandHint(const QString &deckName) {
         }
     }
     if (!needsQuotes)
-        return QStringLiteral("omacards check --deck %1").arg(deckName);
+        return QStringLiteral("omacards %1 --deck %2").arg(command, deckName);
     QString escaped = deckName;
     escaped.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
-    return QStringLiteral("omacards check --deck '%1'").arg(escaped);
+    return QStringLiteral("omacards %1 --deck '%2'").arg(command, escaped);
 }
 
-int failEmptyDeck(const QString &deckName, const DeckIssueReport &report, bool json) {
-    const QString message = QObject::tr("Deck %1 has no Cards").arg(deckName);
+QString checkCommandHint(const QString &deckName) {
+    return deckCommandHint(QStringLiteral("check"), deckName);
+}
+
+QString missingDeckMessage() {
+    return QObject::tr("Name a Deck with --deck NAME (or -d NAME).");
+}
+
+QString unknownDeckMessage(const QString &requested) {
+    return QObject::tr("No Deck named %1. Run 'omacards decks' to see available Decks.").arg(requested);
+}
+
+QString unreadableDeckMessage(const QString &requested, const QString &path) {
+    return QObject::tr("Cannot read the Deck file at %1. Run '%2' to see Deck issues.")
+        .arg(path, checkCommandHint(requested));
+}
+
+QString emptyDeckMessage(const QString &deckName) {
+    return QObject::tr("Deck %1 has no Cards. Add a Card to it before using this command.").arg(deckName);
+}
+
+int failEmptyDeck(const QString &deckName, const DeckIssueReport &report, bool json,
+                  const QString &messageOverride = {}) {
+    const QString message = messageOverride.isEmpty() ? emptyDeckMessage(deckName) : messageOverride;
     const QString hint = checkCommandHint(deckName);
     if (json) {
         QJsonObject object;
@@ -675,7 +697,7 @@ int run(const QStringList &arguments) {
     if (options.command == "warm") {
         const bool json = options.json;
         if (options.deck.isEmpty())
-            return fail(QObject::tr("Use --deck / -d"), json);
+            return fail(missingDeckMessage(), json);
         const QVector<Deck> warmDecks = DeckIO::loadAll(backend.decksDirectory());
         const DeckIdResolver::Result resolved =
             DeckIdResolver::resolve(warmDecks, backend.decksDirectory(), options.deck);
@@ -688,13 +710,12 @@ int run(const QStringList &arguments) {
             }
             targetPath = resolved.deckPath;
         } else if (resolved.failureReason == DeckIdResolver::FailureReason::UnloadedDeckFile) {
-            // A file that load() skipped has no Deck id, but keeps warm's
-            // empty-Deck report for that file.
-            targetPath = resolved.deckPath;
-            QString loadError;
-            targets << DeckIO::load(targetPath, &loadError);
+            // Keep the file-scoped report and failure keys, but name the read
+            // failure instead of claiming the Deck has no Cards.
+            return failEmptyDeck(options.deck, deckIssueReportForFile(resolved.deckPath), json,
+                                 unreadableDeckMessage(options.deck, resolved.deckPath));
         } else {
-            return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
+            return fail(unknownDeckMessage(options.deck), json);
         }
         const QVector<Card> cards = allCards(targets, {});
         if (cards.isEmpty())
@@ -729,16 +750,20 @@ int run(const QStringList &arguments) {
     if (options.command == "preview") {
         const bool json = options.json;
         if (options.deck.isEmpty())
-            return fail(QObject::tr("Use --deck / -d"), json);
+            return fail(missingDeckMessage(), json);
         if (options.format != QLatin1String("text") && options.format != QLatin1String("html") &&
             options.format != QLatin1String("markdown"))
             return fail(QObject::tr("--format must be text, html or markdown"), json);
         const QVector<Deck> previewDecks = DeckIO::loadAll(backend.decksDirectory());
         const DeckIdResolver::Result resolved =
             DeckIdResolver::resolve(previewDecks, backend.decksDirectory(), options.deck);
-        // An unknown request keeps preview's old no-cards and --card errors;
-        // a known Deck is scoped by its resolved id.
-        const QString previewDeck = resolved.deckId.value_or(options.deck);
+        if (resolved.failureReason == DeckIdResolver::FailureReason::UnloadedDeckFile)
+            return failEmptyDeck(options.deck, deckIssueReportForFile(resolved.deckPath), json,
+                                 unreadableDeckMessage(options.deck, resolved.deckPath));
+        if (resolved.failureReason == DeckIdResolver::FailureReason::UnknownDeck)
+            return fail(unknownDeckMessage(options.deck), json);
+        // A known Deck is scoped by its resolved id.
+        const QString previewDeck = *resolved.deckId;
         QVector<Card> cards = allCards(previewDecks, previewDeck);
         const bool deckHasNoCards = cards.isEmpty();
         if (!options.card.isEmpty()) {
@@ -749,15 +774,11 @@ int run(const QStringList &arguments) {
             cards = filtered;
         }
         if (cards.isEmpty()) {
-            // An existing Deck file that yields no Cards gets the empty-Deck
-            // diagnostic; other misses name a stale --card id when supplied.
-            const bool deckFileFound = resolved.failureReason == DeckIdResolver::FailureReason::None ||
-                                       resolved.failureReason == DeckIdResolver::FailureReason::UnloadedDeckFile;
-            if (deckHasNoCards && deckFileFound && QFileInfo::exists(resolved.deckPath))
+            // A known Deck with no Cards gets the empty-Deck diagnostic; a
+            // filtered miss on a Deck with Cards names the stale --card id.
+            if (deckHasNoCards && QFileInfo::exists(resolved.deckPath))
                 return failEmptyDeck(options.deck, deckIssueReportForFile(resolved.deckPath), json);
-            if (!options.card.isEmpty())
-                return fail(QObject::tr("No such card: %1").arg(options.card), json);
-            return fail(QObject::tr("No cards to preview"), json);
+            return fail(QObject::tr("No such card: %1").arg(options.card), json);
         }
 
         constexpr double previewMathScale = 1.6;              // Match the review answer label size.
@@ -803,6 +824,11 @@ int run(const QStringList &arguments) {
     // id. Empty input stays with the caller's all-Decks or Current-deck
     // fallback; the error text stays here while the resolver returns a reason.
     // A caller that defines a new Deck keeps its unresolved, raw name.
+    const auto failDeckResolution = [&](const QString &requested, const DeckIdResolver::Result &resolved) {
+        if (resolved.failureReason == DeckIdResolver::FailureReason::UnloadedDeckFile)
+            return fail(unreadableDeckMessage(requested, resolved.deckPath), json);
+        return fail(unknownDeckMessage(requested), json);
+    };
     const auto resolveDeckId = [&](const QString &requested, bool allowNewDeck = false) -> std::optional<QString> {
         if (requested.isEmpty())
             return QString();
@@ -810,7 +836,7 @@ int run(const QStringList &arguments) {
         if (resolved.failureReason != DeckIdResolver::FailureReason::None) {
             if (allowNewDeck)
                 return requested;
-            fail(QObject::tr("No such deck: %1").arg(requested), json);
+            failDeckResolution(requested, resolved);
             return std::nullopt;
         }
         return resolved.deckId;
@@ -842,7 +868,7 @@ int run(const QStringList &arguments) {
             QString loadError;
             checkedDecks << DeckIO::load(targetPath, &loadError);
         } else {
-            return fail(QObject::tr("No such deck: %1").arg(options.deck), json);
+            return fail(unknownDeckMessage(options.deck), json);
         }
 
         // Counts follow the resolved id, or the raw request when no loaded
@@ -995,10 +1021,10 @@ int run(const QStringList &arguments) {
 
     if (options.command == "use-deck") {
         if (options.path.isEmpty())
-            return fail(QObject::tr("Usage: omacards use-deck NAME"), json);
+            return fail(QObject::tr("Name a Deck: omacards use-deck NAME."), json);
         const DeckIdResolver::Result resolved = DeckIdResolver::resolve(decks, backend.decksDirectory(), options.path);
         if (!resolved.deckId)
-            return fail(QObject::tr("No such deck: %1").arg(options.path), json);
+            return failDeckResolution(options.path, resolved);
         backend.selectDeck(*resolved.deckId);
         QJsonObject object;
         object.insert("ok", true);
@@ -1094,7 +1120,7 @@ int run(const QStringList &arguments) {
 
     if (options.command == "add-cards") {
         if (options.deck.isEmpty())
-            return fail(QObject::tr("Use --deck / -d"), json);
+            return fail(missingDeckMessage(), json);
         // A new Deck keeps the requested name; an existing one keeps its id.
         const std::optional<QString> writeDeck = resolveDeckId(options.deck.trimmed(), true);
         if (!writeDeck)
@@ -1393,12 +1419,16 @@ int run(const QStringList &arguments) {
     }
 
     if (options.command == "cram") {
-        // An unresolved name keeps the old empty-Deck error; a Deck file name
-        // resolves to the same Card set as the written Deck name.
+        // A Deck file name resolves to the same Card set as the written Deck
+        // name. Failures name their cause instead of an empty Card set.
         const DeckIdResolver::Result resolved = DeckIdResolver::resolve(decks, backend.decksDirectory(), options.deck);
+        if (resolved.failureReason == DeckIdResolver::FailureReason::UnloadedDeckFile)
+            return fail(unreadableDeckMessage(options.deck, resolved.deckPath), json);
+        if (resolved.failureReason == DeckIdResolver::FailureReason::UnknownDeck)
+            return fail(unknownDeckMessage(options.deck), json);
         const QVector<Card> cards = allCards(decks, resolved.deckId.value_or(options.deck));
         if (cards.isEmpty())
-            return fail(QObject::tr("No cards in this deck"), json);
+            return fail(emptyDeckMessage(options.deck), json);
         QVector<Card> ordered = cards;
         std::sort(ordered.begin(), ordered.end(), [](const Card &a, const Card &b) { return a.id < b.id; });
         InSessionProgression progression;

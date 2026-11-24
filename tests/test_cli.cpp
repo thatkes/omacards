@@ -34,6 +34,11 @@ QStringList sortedKeys(const QJsonObject &object) {
     return keys;
 }
 
+QString expectedUnreadableDeckError(const QString &deckName, const QString &path) {
+    return QStringLiteral("Cannot read the Deck file at %1. Run 'omacards check --deck %2' to see Deck issues.")
+        .arg(path, deckName);
+}
+
 const QString kCliTinySvg = QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10pt\" height=\"5pt\" "
                                            "viewBox=\"0 0 10 5\"><g fill=\"rgb(0%, 0%, 0%)\"/></svg>");
 
@@ -833,7 +838,8 @@ void TestCli::addDeckDescriptionAndJsonImport() {
     const QJsonObject missing = runCli({"edit-deck", "Ghost", "--description", "x", "--json"}, decks, database, &code);
     QCOMPARE(code, 1);
     QCOMPARE(sortedKeys(missing), QStringList({"error", "ok"}));
-    QCOMPARE(missing.value(QStringLiteral("error")).toString(), QString("No such deck: Ghost"));
+    QCOMPARE(missing.value(QStringLiteral("error")).toString(),
+             QString("No Deck named Ghost. Run 'omacards decks' to see available Decks."));
     QVERIFY(!missing.value(QStringLiteral("ok")).toBool());
     QVERIFY(deckFile.open(QIODevice::ReadOnly));
     QCOMPARE(deckFile.readAll(), before);
@@ -1415,7 +1421,8 @@ void TestCli::checkDeckScoping() {
 
     const QJsonObject missing = runCli({"check", "--deck", "Unknown", "--json"}, decks, database, &code);
     QCOMPARE(code, 1);
-    QCOMPARE(missing.value(QStringLiteral("error")).toString(), QString("No such deck: Unknown"));
+    QCOMPARE(missing.value(QStringLiteral("error")).toString(),
+             QString("No Deck named Unknown. Run 'omacards decks' to see available Decks."));
 
     const QJsonObject all = runCli({"check", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
@@ -1489,14 +1496,16 @@ void TestCli::checkPreviewWarmIssueReportsOnlyTargetDeck() {
     QCOMPARE(code, 1);
     QVERIFY(errors.isEmpty());
     QCOMPARE(sortedKeys(preview), failureKeys);
-    QCOMPARE(preview.value(QStringLiteral("error")).toString(), QStringLiteral("Deck EmptyTarget has no Cards"));
+    QCOMPARE(preview.value(QStringLiteral("error")).toString(),
+             expectedUnreadableDeckError(QStringLiteral("EmptyTarget"), deckDir.filePath("EmptyTarget.txt")));
     QCOMPARE(preview.value(QStringLiteral("hint")).toString(), QStringLiteral("omacards check --deck EmptyTarget"));
     QCOMPARE(QJsonDocument(preview.value(QStringLiteral("issues")).toArray()).toJson(QJsonDocument::Compact),
              QJsonDocument(emptyIssues).toJson(QJsonDocument::Compact));
     QCOMPARE(QJsonDocument(preview.value(QStringLiteral("issueCounts")).toObject()).toJson(),
              QJsonDocument(emptyCheck.value(QStringLiteral("issueCounts")).toObject()).toJson());
 
-    QStringList emptyLines{"Deck EmptyTarget has no Cards"};
+    QStringList emptyLines{
+        expectedUnreadableDeckError(QStringLiteral("EmptyTarget"), deckDir.filePath("EmptyTarget.txt"))};
     for (const QJsonValue &value : emptyIssues)
         emptyLines << checkDeckIssueLine(value.toObject());
     emptyLines << QStringLiteral("omacards check --deck EmptyTarget");
@@ -1509,7 +1518,8 @@ void TestCli::checkPreviewWarmIssueReportsOnlyTargetDeck() {
     QCOMPARE(code, 1);
     QVERIFY(errors.isEmpty());
     QCOMPARE(sortedKeys(warm), failureKeys);
-    QCOMPARE(warm.value(QStringLiteral("error")).toString(), QStringLiteral("Deck EmptyTarget has no Cards"));
+    QCOMPARE(warm.value(QStringLiteral("error")).toString(),
+             expectedUnreadableDeckError(QStringLiteral("EmptyTarget"), deckDir.filePath("EmptyTarget.txt")));
     QCOMPARE(QJsonDocument(warm.value(QStringLiteral("issues")).toArray()).toJson(QJsonDocument::Compact),
              QJsonDocument(emptyIssues).toJson(QJsonDocument::Compact));
     const QString warmText = runCliText({"warm", "--deck", "EmptyTarget"}, decks, database, &code, &errors);
@@ -1522,7 +1532,8 @@ void TestCli::checkPreviewWarmIssueReportsOnlyTargetDeck() {
     const QJsonObject filtered =
         runCli({"preview", "--deck", "EmptyTarget", "--card", "nope", "--json"}, decks, database, &code, &errors);
     QCOMPARE(code, 1);
-    QCOMPARE(filtered.value(QStringLiteral("error")).toString(), QStringLiteral("Deck EmptyTarget has no Cards"));
+    QCOMPARE(filtered.value(QStringLiteral("error")).toString(),
+             expectedUnreadableDeckError(QStringLiteral("EmptyTarget"), deckDir.filePath("EmptyTarget.txt")));
     QCOMPARE(QJsonDocument(filtered.value(QStringLiteral("issues")).toArray()).toJson(QJsonDocument::Compact),
              QJsonDocument(emptyIssues).toJson(QJsonDocument::Compact));
     const QJsonObject cardMiss =
@@ -1533,7 +1544,8 @@ void TestCli::checkPreviewWarmIssueReportsOnlyTargetDeck() {
     const QJsonObject missing = runCli({"preview", "--deck", "Missing", "--json"}, decks, database, &code, &errors);
     QCOMPARE(code, 1);
     QCOMPARE(sortedKeys(missing), QStringList({"error", "ok"}));
-    QCOMPARE(missing.value(QStringLiteral("error")).toString(), QStringLiteral("No cards to preview"));
+    QCOMPARE(missing.value(QStringLiteral("error")).toString(),
+             QStringLiteral("No Deck named Missing. Run 'omacards decks' to see available Decks."));
 
     const QJsonObject warmed = runCli({"warm", "--deck", "Target", "--json"}, decks, database, &code, &errors);
     QCOMPARE(code, 0);
@@ -1626,20 +1638,23 @@ void TestCli::readCommandJsonContracts() {
     QCOMPARE(code, 1);
     QCOMPARE(sortedKeys(missingCards), QStringList({"error", "ok"}));
     QVERIFY(!missingCards.value(QStringLiteral("ok")).toBool());
-    QCOMPARE(missingCards.value(QStringLiteral("error")).toString(), QString("No such deck: Missing"));
+    QCOMPARE(missingCards.value(QStringLiteral("error")).toString(),
+             QString("No Deck named Missing. Run 'omacards decks' to see available Decks."));
 
     const QJsonObject missingSearch =
         runCli({"search", "alpha", "--deck", "Missing", "--json"}, decks, database, &code);
     QCOMPARE(code, 1);
     QCOMPARE(sortedKeys(missingSearch), QStringList({"error", "ok"}));
     QVERIFY(!missingSearch.value(QStringLiteral("ok")).toBool());
-    QCOMPARE(missingSearch.value(QStringLiteral("error")).toString(), QString("No such deck: Missing"));
+    QCOMPARE(missingSearch.value(QStringLiteral("error")).toString(),
+             QString("No Deck named Missing. Run 'omacards decks' to see available Decks."));
 
     const QJsonObject missingDue = runCli({"due", "--deck", "Missing", "--json"}, decks, database, &code);
     QCOMPARE(code, 1);
     QCOMPARE(sortedKeys(missingDue), QStringList({"error", "ok"}));
     QVERIFY(!missingDue.value(QStringLiteral("ok")).toBool());
-    QCOMPARE(missingDue.value(QStringLiteral("error")).toString(), QString("No such deck: Missing"));
+    QCOMPARE(missingDue.value(QStringLiteral("error")).toString(),
+             QString("No Deck named Missing. Run 'omacards decks' to see available Decks."));
 
     runCli({"review", "-c", cardId, "-r", "3", "--json"}, decks, database, &code);
     QCOMPARE(code, 0);
@@ -1714,7 +1729,8 @@ void TestCli::cardsResolvesDeckFileNameWithDifferentWrittenName() {
 
     const QJsonObject missing = runCli({"cards", "--deck", "Unknown", "--json"}, decks, database, &code);
     QCOMPARE(code, 1);
-    QCOMPARE(missing.value(QStringLiteral("error")).toString(), QStringLiteral("No such deck: Unknown"));
+    QCOMPARE(missing.value(QStringLiteral("error")).toString(),
+             QStringLiteral("No Deck named Unknown. Run 'omacards decks' to see available Decks."));
 }
 
 void TestCli::searchAndDueResolveDeckFileNameWithDifferentWrittenName() {
@@ -1958,7 +1974,8 @@ void TestCli::useDeckCommandContract() {
     QCOMPARE(code, 1);
     QCOMPARE(sortedKeys(unknown), QStringList({"error", "ok"}));
     QVERIFY(!unknown.value(QStringLiteral("ok")).toBool());
-    QCOMPARE(unknown.value(QStringLiteral("error")).toString(), QString("No such deck: Missing"));
+    QCOMPARE(unknown.value(QStringLiteral("error")).toString(),
+             QString("No Deck named Missing. Run 'omacards decks' to see available Decks."));
 
     QByteArray standardError;
     const QJsonObject missing = runCli({"use-deck", "--json"}, decks, database, &code, &standardError);
@@ -2234,7 +2251,8 @@ void TestCli::cramCommandContract() {
 
     const QJsonObject none = runCli({"cram", "--deck", "Unknown", "--json"}, decks, database, &code);
     QCOMPARE(code, 1);
-    QCOMPARE(none.value(QStringLiteral("error")).toString(), QString("No cards in this deck"));
+    QCOMPARE(none.value(QStringLiteral("error")).toString(),
+             QString("No Deck named Unknown. Run 'omacards decks' to see available Decks."));
 }
 
 void TestCli::addCardJsonContracts() {
@@ -2427,6 +2445,7 @@ void TestCli::editDeleteErrorContracts() {
     QCOMPARE(noDeck.value(QStringLiteral("error")).toString(), QString("Give a deck name"));
     const QJsonObject missingDeck = runCli({"delete-deck", "Unknown", "--json"}, decks, database, &code);
     QCOMPARE(code, 1);
+    // delete-deck's error is owned by DeckRepository, outside this ticket.
     QCOMPARE(missingDeck.value(QStringLiteral("error")).toString(), QString("No such deck: Unknown"));
 }
 
@@ -2503,7 +2522,7 @@ void TestCli::previewJsonContracts() {
     int code = -1;
     const QJsonObject noDeck = runCli({"preview", "--json"}, decks, database, &code);
     QCOMPARE(code, 1);
-    QCOMPARE(noDeck.value(QStringLiteral("error")).toString(), QString("Use --deck / -d"));
+    QCOMPARE(noDeck.value(QStringLiteral("error")).toString(), QString("Name a Deck with --deck NAME (or -d NAME)."));
 
     const QJsonObject badFormat =
         runCli({"preview", "--deck", "P", "--format", "xml", "--json"}, decks, database, &code);
@@ -2512,7 +2531,8 @@ void TestCli::previewJsonContracts() {
 
     const QJsonObject noCards = runCli({"preview", "--deck", "Missing", "--json"}, decks, database, &code);
     QCOMPARE(code, 1);
-    QCOMPARE(noCards.value(QStringLiteral("error")).toString(), QString("No cards to preview"));
+    QCOMPARE(noCards.value(QStringLiteral("error")).toString(),
+             QString("No Deck named Missing. Run 'omacards decks' to see available Decks."));
 
     QString firstId;
     {
@@ -2659,7 +2679,8 @@ oops: not a key
     QVERIFY(stderrOutput.isEmpty());
     QCOMPARE(sortedKeys(broken), failureKeys);
     QVERIFY(!broken.value(QStringLiteral("ok")).toBool());
-    QCOMPARE(broken.value(QStringLiteral("error")).toString(), QStringLiteral("Deck Broken has no Cards"));
+    QCOMPARE(broken.value(QStringLiteral("error")).toString(),
+             expectedUnreadableDeckError(QStringLiteral("Broken"), deckDir.filePath("Broken.txt")));
     QCOMPARE(broken.value(QStringLiteral("deck")).toString(), QStringLiteral("Broken"));
     QCOMPARE(broken.value(QStringLiteral("hint")).toString(), QStringLiteral("omacards check --deck Broken"));
     QCOMPARE(QJsonDocument(broken.value(QStringLiteral("issues")).toArray()).toJson(QJsonDocument::Compact),
@@ -2691,7 +2712,7 @@ oops: not a key
     const QString brokenText = runCliText({"preview", "--deck", "Broken"}, decks, database, &code, &stderrOutput);
     QCOMPARE(code, 1);
     QVERIFY(brokenText.isEmpty());
-    QStringList expectedLines{"Deck Broken has no Cards"};
+    QStringList expectedLines{expectedUnreadableDeckError(QStringLiteral("Broken"), deckDir.filePath("Broken.txt"))};
     for (const QJsonValue &value : checkIssues)
         expectedLines << checkDeckIssueLine(value.toObject());
     expectedLines << QStringLiteral("omacards check --deck Broken");
@@ -2702,7 +2723,8 @@ oops: not a key
     QCOMPARE(code, 1);
     QVERIFY(stderrOutput.isEmpty());
     QCOMPARE(sortedKeys(empty), failureKeys);
-    QCOMPARE(empty.value(QStringLiteral("error")).toString(), QStringLiteral("Deck Empty has no Cards"));
+    QCOMPARE(empty.value(QStringLiteral("error")).toString(),
+             QStringLiteral("Deck Empty has no Cards. Add a Card to it before using this command."));
     QCOMPARE(empty.value(QStringLiteral("deck")).toString(), QStringLiteral("Empty"));
     QVERIFY(empty.value(QStringLiteral("issues")).toArray().isEmpty());
     const QJsonObject emptyCounts = empty.value(QStringLiteral("issueCounts")).toObject();
@@ -2713,7 +2735,10 @@ oops: not a key
     const QString emptyText = runCliText({"preview", "--deck", "Empty"}, decks, database, &code, &stderrOutput);
     QCOMPARE(code, 1);
     QVERIFY(emptyText.isEmpty());
-    QCOMPARE(QString::fromUtf8(stderrOutput), QStringLiteral("Deck Empty has no Cards\nomacards check --deck Empty\n"));
+    QCOMPARE(
+        QString::fromUtf8(stderrOutput),
+        QStringLiteral(
+            "Deck Empty has no Cards. Add a Card to it before using this command.\nomacards check --deck Empty\n"));
 
     // A --card filter does not hide an existing zero-Card Deck's Deck issues.
     const QJsonObject emptyFiltered =
@@ -2722,7 +2747,8 @@ oops: not a key
     QVERIFY(stderrOutput.isEmpty());
     QCOMPARE(sortedKeys(emptyFiltered), failureKeys);
     QVERIFY(!emptyFiltered.value(QStringLiteral("ok")).toBool());
-    QCOMPARE(emptyFiltered.value(QStringLiteral("error")).toString(), QStringLiteral("Deck Empty has no Cards"));
+    QCOMPARE(emptyFiltered.value(QStringLiteral("error")).toString(),
+             QStringLiteral("Deck Empty has no Cards. Add a Card to it before using this command."));
     QCOMPARE(emptyFiltered.value(QStringLiteral("deck")).toString(), QStringLiteral("Empty"));
     QVERIFY(emptyFiltered.value(QStringLiteral("issues")).toArray().isEmpty());
     const QJsonObject emptyFilteredCounts = emptyFiltered.value(QStringLiteral("issueCounts")).toObject();
@@ -2734,7 +2760,10 @@ oops: not a key
         runCliText({"preview", "--deck", "Empty", "--card", "nope"}, decks, database, &code, &stderrOutput);
     QCOMPARE(code, 1);
     QVERIFY(emptyFilteredText.isEmpty());
-    QCOMPARE(QString::fromUtf8(stderrOutput), QStringLiteral("Deck Empty has no Cards\nomacards check --deck Empty\n"));
+    QCOMPARE(
+        QString::fromUtf8(stderrOutput),
+        QStringLiteral(
+            "Deck Empty has no Cards. Add a Card to it before using this command.\nomacards check --deck Empty\n"));
 
     // The hint uses the supplied name, quoted only when it has whitespace,
     // even when the Deck file and header use different names.
@@ -2755,11 +2784,13 @@ oops: not a key
     QVERIFY(stderrOutput.isEmpty());
     QCOMPARE(sortedKeys(missing), QStringList({"error", "ok"}));
     QVERIFY(!missing.value(QStringLiteral("ok")).toBool());
-    QCOMPARE(missing.value(QStringLiteral("error")).toString(), QStringLiteral("No cards to preview"));
+    QCOMPARE(missing.value(QStringLiteral("error")).toString(),
+             QStringLiteral("No Deck named Missing. Run 'omacards decks' to see available Decks."));
     const QString missingText = runCliText({"preview", "--deck", "Missing"}, decks, database, &code, &stderrOutput);
     QCOMPARE(code, 1);
     QVERIFY(missingText.isEmpty());
-    QCOMPARE(QString::fromUtf8(stderrOutput), QStringLiteral("No cards to preview\n"));
+    QCOMPARE(QString::fromUtf8(stderrOutput),
+             QStringLiteral("No Deck named Missing. Run 'omacards decks' to see available Decks.\n"));
 
     // A --card miss on a Deck with Cards names the stale id in both modes.
     const QJsonObject filtered =
@@ -2964,24 +2995,92 @@ void TestCli::warmRejectsUnknownAndEmptyDecks() {
     QCOMPARE(code, 1);
     QVERIFY(stderrOutput.isEmpty());
     QCOMPARE(sortedKeys(missing), QStringList({"error", "ok"}));
-    QCOMPARE(missing.value(QStringLiteral("error")).toString(), QStringLiteral("No such deck: Missing"));
+    QCOMPARE(missing.value(QStringLiteral("error")).toString(),
+             QStringLiteral("No Deck named Missing. Run 'omacards decks' to see available Decks."));
 
     const QString missingText = runCliText({"warm", "--deck", "Missing"}, decks, database, &code, &stderrOutput);
     QCOMPARE(code, 1);
     QVERIFY(missingText.isEmpty());
-    QCOMPARE(QString::fromUtf8(stderrOutput), QStringLiteral("No such deck: Missing\n"));
+    QCOMPARE(QString::fromUtf8(stderrOutput),
+             QStringLiteral("No Deck named Missing. Run 'omacards decks' to see available Decks.\n"));
 
     const QJsonObject empty = runCli({"warm", "--deck", "Empty", "--json"}, decks, database, &code, &stderrOutput);
     QCOMPARE(code, 1);
     QVERIFY(stderrOutput.isEmpty());
     QCOMPARE(sortedKeys(empty), QStringList({"deck", "error", "hint", "issueCounts", "issues", "ok"}));
-    QCOMPARE(empty.value(QStringLiteral("error")).toString(), QStringLiteral("Deck Empty has no Cards"));
+    QCOMPARE(empty.value(QStringLiteral("error")).toString(),
+             QStringLiteral("Deck Empty has no Cards. Add a Card to it before using this command."));
     QCOMPARE(empty.value(QStringLiteral("hint")).toString(), QStringLiteral("omacards check --deck Empty"));
 
     const QString emptyText = runCliText({"warm", "--deck", "Empty"}, decks, database, &code, &stderrOutput);
     QCOMPARE(code, 1);
     QVERIFY(emptyText.isEmpty());
-    QCOMPARE(QString::fromUtf8(stderrOutput), QStringLiteral("Deck Empty has no Cards\nomacards check --deck Empty\n"));
+    QCOMPARE(
+        QString::fromUtf8(stderrOutput),
+        QStringLiteral(
+            "Deck Empty has no Cards. Add a Card to it before using this command.\nomacards check --deck Empty\n"));
+}
+
+void TestCli::deckFailureMessagesNameCauseAndNextStep() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    // One leading space makes loadAll() skip this Deck file. The resolver
+    // still sees the file, so this is an unreadable Deck file, not a typo.
+    const QString skipped = QDir(decks).filePath("Skipped.txt");
+    QVERIFY(writeFile(skipped, R"deck(# Deck: Skipped
+---
+Q: First line
+ second line
+A: answer
+)deck"));
+    QVERIFY(writeFile(QDir(decks).filePath("Empty.txt"), "# Deck: Empty\n"));
+
+    int code = -1;
+    QByteArray errors;
+    const QJsonObject unknown =
+        runCliProcess({"cards", "--deck", "Missing", "--json"}, decks, database, &code, &errors);
+    QCOMPARE(code, 1);
+    QVERIFY(errors.isEmpty());
+    QCOMPARE(sortedKeys(unknown), QStringList({"error", "ok"}));
+    QCOMPARE(unknown.value(QStringLiteral("error")).toString(),
+             QStringLiteral("No Deck named Missing. Run 'omacards decks' to see available Decks."));
+
+    const QJsonObject missing = runCliProcess({"warm", "--json"}, decks, database, &code, &errors);
+    QCOMPARE(code, 1);
+    QCOMPARE(missing.value(QStringLiteral("error")).toString(),
+             QStringLiteral("Name a Deck with --deck NAME (or -d NAME)."));
+
+    const QJsonObject unreadable =
+        runCliProcess({"cards", "--deck", "Skipped", "--json"}, decks, database, &code, &errors);
+    QCOMPARE(code, 1);
+    QCOMPARE(unreadable.value(QStringLiteral("error")).toString(),
+             QStringLiteral("Cannot read the Deck file at %1. Run 'omacards check --deck Skipped' to see Deck issues.")
+                 .arg(skipped));
+
+    const QJsonObject empty = runCliProcess({"cram", "--deck", "Empty", "--json"}, decks, database, &code, &errors);
+    QCOMPARE(code, 1);
+    QCOMPARE(empty.value(QStringLiteral("error")).toString(),
+             QStringLiteral("Deck Empty has no Cards. Add a Card to it before using this command."));
+
+    const auto expectTextError = [&](const QStringList &arguments, const QString &expected) {
+        QByteArray textErrors;
+        const QString text = runCliProcessText(arguments, decks, database, &code, &textErrors);
+        QCOMPARE(code, 1);
+        QVERIFY(text.isEmpty());
+        QCOMPARE(QString::fromUtf8(textErrors), expected + QStringLiteral("\n"));
+    };
+    expectTextError({"cards", "--deck", "Missing"},
+                    QStringLiteral("No Deck named Missing. Run 'omacards decks' to see available Decks."));
+    expectTextError({"warm"}, QStringLiteral("Name a Deck with --deck NAME (or -d NAME)."));
+    expectTextError({"cards", "--deck", "Skipped"},
+                    QStringLiteral("Cannot read the Deck file at %1. Run 'omacards check --deck Skipped' "
+                                   "to see Deck issues.")
+                        .arg(skipped));
+    expectTextError({"cram", "--deck", "Empty"},
+                    QStringLiteral("Deck Empty has no Cards. Add a Card to it before using this command."));
 }
 
 void TestCli::flagEqualsFormsMatchSeparateArgs() {

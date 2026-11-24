@@ -59,4 +59,5 @@ private slots:
     void flagEqualsFormsMatchSeparateArgs();
     void warmReportsRenderedAndCached();
     void warmRejectsUnknownAndEmptyDecks();
+    void deckFailureMessagesNameCauseAndNextStep();
 };
