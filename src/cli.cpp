@@ -25,6 +25,7 @@
 #include <QStandardPaths>
 #include <algorithm>
 #include <cstdio>
+#include <optional>
 #include <unistd.h>
 
 namespace {
@@ -725,18 +726,17 @@ int run(const QStringList &arguments) {
     const bool json = options.json;
 
     // Shared lookup and validation for read-only command branches. An empty
-    // name means all Decks here, so only a named Deck is validated.
-    const auto requireDeck = [&](const QString &deckName, QString *resolvedPath = nullptr) -> bool {
+    // name means all Decks here, so it resolves to an empty path. A missing
+    // Deck fails and has no value; callers that only validate ignore the path.
+    const auto requireDeck = [&](const QString &deckName) -> std::optional<QString> {
         if (deckName.isEmpty())
-            return true;
+            return QString();
         const QString path = resolveDeckPath(decks, backend.decksDirectory(), deckName);
         if (path.isEmpty()) {
             fail(QObject::tr("No such deck: %1").arg(deckName), json);
-            return false;
+            return std::nullopt;
         }
-        if (resolvedPath)
-            *resolvedPath = path;
-        return true;
+        return path;
     };
 
     if (options.command == "check") {
@@ -1233,9 +1233,10 @@ int run(const QStringList &arguments) {
             return fail(QObject::tr("Give a deck name"), json);
         if (!options.descriptionSet)
             return fail(QObject::tr("Use --description TEXT"), json);
-        QString targetPath;
-        if (!requireDeck(name, &targetPath))
+        const std::optional<QString> resolvedPath = requireDeck(name);
+        if (!resolvedPath)
             return 1;
+        const QString targetPath = *resolvedPath;
         if (!backend.setDeckDescription(name, options.description, &error))
             return fail(error, json);
 
