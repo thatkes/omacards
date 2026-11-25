@@ -122,12 +122,14 @@ for arg in "$@"; do
     fi
 done
 
-# The test binary owns the suite registry. TestCli is the long pole, so every
-# suite with that prefix runs alone and all the others share the second group.
-# A suite registered in tests/test_main.cpp lands in a group without an edit
-# here; focused runs keep their single-group contract. A timing run also reads
-# the registry in focused mode so per-suite lines use the registered names.
+# The test binary owns the suite registry. TestCli and TestBackend are the long
+# poles, so every suite with either prefix runs alone and the rest share the
+# third group. A suite registered in tests/test_main.cpp lands in a group
+# without an edit here; focused runs keep their single-group contract. A timing
+# run also reads the registry in focused mode so per-suite lines use the
+# registered names.
 cli_suites=
+backend_suites=
 other_suites=
 suite_names=
 if [ "$focused" -eq 0 ] || [ "$timing" -eq 1 ]; then
@@ -151,11 +153,12 @@ if [ "$focused" -eq 0 ]; then
     for suite in $suite_names; do
         case "$suite" in
             TestCli*) cli_suites="$cli_suites $suite" ;;
+            TestBackend*) backend_suites="$backend_suites $suite" ;;
             *) other_suites="$other_suites $suite" ;;
         esac
     done
-    if [ -z "$cli_suites" ] || [ -z "$other_suites" ]; then
-        printf 'ERROR: test suites did not form two groups\n' >&2
+    if [ -z "$cli_suites" ] || [ -z "$backend_suites" ] || [ -z "$other_suites" ]; then
+        printf 'ERROR: test suites did not form three groups\n' >&2
         exit 1
     fi
 fi
@@ -227,6 +230,7 @@ if [ "$focused" -eq 1 ]; then
     launch_group focused-group "$focused_suites" "$@"
 else
     launch_group cli-group "$cli_suites" $cli_suites "$@"
+    launch_group backend-group "$backend_suites" $backend_suites "$@"
     launch_group other-group "$other_suites" $other_suites "$@"
 fi
 
