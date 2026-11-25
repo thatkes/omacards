@@ -37,3 +37,4 @@ cd "$ROOT"
 ./bin/check-ledger-states
 ./tests/test_check_ledger_states.sh
 ./tests/test_wave_boundary_report.sh
+./tests/test_dispatch_note.sh

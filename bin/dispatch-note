@@ -1,0 +1,153 @@
+#!/bin/sh
+set -eu
+
+# Write a paste-ready ticket dispatch to stdout. The fixed contract is kept
+# here; the issue's acceptance section is copied from the issue body without
+# rewriting it. Fixtures use --issue-file so the self-test needs no tracker.
+
+usage() {
+    printf '%s\n' \
+        'Usage: dispatch-note <issue-number> [--suites <list>] [--worktree <dir>] [--issue-file <path>]' >&2
+}
+
+if [ "$#" -eq 0 ]; then
+    usage
+    exit 2
+fi
+case "$1" in
+    ''|*[!0-9]*) usage; exit 2 ;;
+esac
+issue=$1
+shift
+
+suites=
+worktree=
+issue_file=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --suites)
+            shift
+            suites=
+            while [ "$#" -gt 0 ]; do
+                case "$1" in
+                    --*) break ;;
+                esac
+                if [ -z "$suites" ]; then
+                    suites=$1
+                else
+                    suites="$suites $1"
+                fi
+                shift
+            done
+            if [ -z "$suites" ]; then
+                usage
+                exit 2
+            fi
+            ;;
+        --worktree)
+            if [ "$#" -lt 2 ]; then
+                usage
+                exit 2
+            fi
+            case "$2" in
+                --*) usage; exit 2 ;;
+            esac
+            worktree=$2
+            shift 2
+            ;;
+        --issue-file)
+            if [ "$#" -lt 2 ]; then
+                usage
+                exit 2
+            fi
+            case "$2" in
+                --*) usage; exit 2 ;;
+            esac
+            issue_file=$2
+            shift 2
+            ;;
+        *)
+            usage
+            exit 2
+            ;;
+    esac
+done
+
+if [ -z "$worktree" ]; then
+    usage
+    exit 2
+fi
+case "$worktree" in
+    /*) ;;
+    *) usage; exit 2 ;;
+esac
+
+# A dispatch that names no suites still states the runner rule: no suite is
+# in scope until the chief names one.
+if [ -z "$suites" ]; then
+    suites='(none named)'
+fi
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+
+if [ -n "$issue_file" ]; then
+    if [ ! -f "$issue_file" ]; then
+        printf 'ERROR no such issue file: %s\n' "$issue_file" >&2
+        exit 1
+    fi
+    issue_source=$issue_file
+else
+    issue_source="$tmp/issue.json"
+    if ! gh issue view "$issue" --json number,title,body > "$issue_source"; then
+        printf 'ERROR could not read issue #%s\n' "$issue" >&2
+        exit 1
+    fi
+fi
+
+if ! jq -e 'type == "object" and (.body | type == "string")' \
+    "$issue_source" > /dev/null; then
+    printf 'ERROR issue #%s has no JSON body\n' "$issue" >&2
+    exit 1
+fi
+
+jq -j '.body' "$issue_source" > "$tmp/body"
+title=$(jq -r '.title // ""' "$issue_source" | tr '\r\n' '  ')
+
+awk '
+    $0 == "## Acceptance criteria" { found = 1; print; next }
+    found && /^## / { exit }
+    found { print }
+' "$tmp/body" > "$tmp/acceptance"
+
+if [ ! -s "$tmp/acceptance" ]; then
+    printf 'ERROR no acceptance criteria in issue #%s\n' "$issue" >&2
+    exit 1
+fi
+
+if [ -n "$title" ]; then
+    printf 'You are the ticket implementer for omacards issue #%s (%s).\n\n' \
+        "$issue" "$title"
+else
+    printf 'You are the ticket implementer for omacards issue #%s.\n\n' "$issue"
+fi
+
+printf '%s\n' \
+    'Every edit, commit and check stays in the worktree.' \
+    'Never run a check or commit in the integration checkout.' \
+    'Report a failing focused suite with evidence, without widening scope or expanding to a full `./bin/test`.' \
+    'The issue stays open until the chief closes it after merge.' \
+    'Read the full command inventory literally.' \
+    'A build-system change needs a rebuild-after-edit test.'
+printf 'The commit body ends with `Closes #%s`.\n' "$issue"
+printf 'The focused suites named in this dispatch are the only suites to run: %s.\n' \
+    "$suites"
+printf 'Name every suite whose tests you may edit: %s.\n' "$suites"
+printf '%s\n' \
+    '`bin/test` strips only the first `--suite` pair, and QtTest needs explicit function names rather than wildcards.' \
+    'Ask the chief when the issue body and the existing tests disagree.'
+printf 'Every command against the worktree passes an explicit `workdir: %s`, and `git -C %s rev-parse --show-toplevel` must print exactly `%s`.\n' \
+    "$worktree" "$worktree" "$worktree"
+
+printf '\nAcceptance criteria from issue #%s, copied verbatim:\n\n' "$issue"
+cat "$tmp/acceptance"
