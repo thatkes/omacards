@@ -98,6 +98,10 @@ bool isHeadlessCommand(const QString &command) {
     return Cli::headlessCommands().contains(command);
 }
 
+QString clozeMarkerRequiredMessage() {
+    return QObject::tr("Use a cloze marker like {{c1::answer}} in the question");
+}
+
 Options parse(const QStringList &arguments) {
     Options options;
     QStringList rest = arguments;
@@ -1198,7 +1202,14 @@ int run(const QStringList &arguments) {
     if (options.command == "add-card") {
         if (options.question.isEmpty())
             return fail(QObject::tr("Use --question / -q"), json);
-        if (options.answer.trimmed().isEmpty())
+        // A marker is enough to choose Cloze, but an explicit --type always
+        // wins so a literal marker can still be stored as Basic text.
+        const QString type = options.typeSet
+                                 ? options.type
+                                 : (DeckIO::hasClozeMarker(options.question) ? QStringLiteral("cloze") : options.type);
+        if (type == QLatin1String("cloze") && !DeckIO::hasClozeMarker(options.question))
+            return fail(clozeMarkerRequiredMessage(), json);
+        if (Domain::cardTypeFromString(type) != CardType::Cloze && options.answer.trimmed().isEmpty())
             return fail(QObject::tr("Use --answer / -a"), json);
         const std::optional<QString> writeDeck = resolveDeckId(options.deck.trimmed(), true);
         if (!writeDeck)
@@ -1206,7 +1217,7 @@ int run(const QStringList &arguments) {
         CardDraft draft;
         draft.question = options.question;
         draft.answer = options.answer;
-        draft.type = options.type;
+        draft.type = type;
         draft.tags = options.tags.split(',', Qt::SkipEmptyParts);
         QStringList ids;
         if (!backend.createCards(*writeDeck, {draft}, nullptr, &ids, &error))
@@ -1245,6 +1256,10 @@ int run(const QStringList &arguments) {
         const QString question = options.questionSet ? options.question : target->question;
         const QString answer = options.answerSet ? options.answer : target->answer;
         const QString type = options.typeSet ? options.type : Domain::toString(target->type);
+        // Only an explicit Cloze request needs the marker check; a tag-only
+        // edit of an existing Cloze card keeps its current validation.
+        if (options.typeSet && type == QLatin1String("cloze") && !DeckIO::hasClozeMarker(question))
+            return fail(clozeMarkerRequiredMessage(), json);
         QString tags;
         if (options.tagsSet) {
             tags = options.tags;

@@ -246,6 +246,16 @@ void TestDeckRepository::createCardsKeepsClozeAnswersDerivedFromQuestion() {
     QCOMPARE(deck->cards.size(), 1);
     QCOMPARE(deck->cards.first().answer, QString());
     QCOMPARE(DeckIO::displayAnswer(deck->cards.first()), QString("The cat sleeps"));
+
+    // The repository only owns the answer rule: an explicit Cloze with no
+    // marker is storable, and the CLI check and Deck lint own that warning.
+    CardDraft unmarked;
+    unmarked.question = "Plain question";
+    unmarked.type = "cloze";
+    error.clear();
+    QVERIFY(f.repo.createCards("Unmarked", &f.current, {unmarked}, nullptr, nullptr, &error));
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QVERIFY(f.repo.deckByName("Unmarked"));
 }
 
 void TestDeckRepository::createCardsCreatesDeckWithDescription() {

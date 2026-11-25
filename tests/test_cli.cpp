@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QChar>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -1281,6 +1282,28 @@ A: two
     QCOMPARE(code, 1);
     QCOMPARE(strictWarned.value(QStringLiteral("strictPassed")), QJsonValue(false));
     QVERIFY(strictWarned.value(QStringLiteral("ok")).toBool());
+
+    // A Cloze card without a marker is a Warning, and check keeps its keys.
+    QVERIFY(writeFile(QDir(decks).filePath("ClozeWarning.txt"), R"deck(# Deck: ClozeWarning
+---
+Q: Plain question
+A:
+type: cloze
+)deck"));
+    const QJsonObject clozeWarned = runCli({"check", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QVERIFY(clozeWarned.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(sortedKeys(clozeWarned), expected);
+    bool markerWarning = false;
+    for (const QJsonValue &value : clozeWarned.value(QStringLiteral("issues")).toArray()) {
+        const QJsonObject issue = value.toObject();
+        if (issue.value(QStringLiteral("message")).toString().contains(QStringLiteral("marker"))) {
+            markerWarning = true;
+            QCOMPARE(issue.value(QStringLiteral("severity")).toString(), QStringLiteral("warning"));
+            QVERIFY(issue.value(QStringLiteral("hint")).toString().contains(QStringLiteral("{{c1::answer}}")));
+        }
+    }
+    QVERIFY(markerWarning);
 }
 
 void TestCli::summaryContractAcrossThreeStudyDays() {
@@ -2410,9 +2433,9 @@ void TestCli::addCardJsonContracts() {
     QCOMPARE(noAnswer.value(QStringLiteral("error")).toString(), QString("Use --answer / -a"));
     QVERIFY(!QFileInfo::exists(QDir(decks).filePath("Fresh.txt")));
 
-    const QJsonObject added =
-        runCli({"add-card", "--deck", "Fresh", "-q", "Q", "-a", "A", "--type", "cloze", "--tags", "x,y", "--json"},
-               decks, database, &code);
+    const QJsonObject added = runCli({"add-card", "--deck", "Fresh", "-q", "The {{c1::cat}} sleeps.", "-a", "A",
+                                      "--type", "cloze", "--tags", "x,y", "--json"},
+                                     decks, database, &code);
     QCOMPARE(code, 0);
     QStringList expected{"ok", "id", "card"};
     expected.sort();
@@ -2426,6 +2449,105 @@ void TestCli::addCardJsonContracts() {
     QCOMPARE(card.value(QStringLiteral("tags")).toArray().size(), 2);
     QCOMPARE(added.value(QStringLiteral("id")).toString(), card.value(QStringLiteral("id")).toString());
     QVERIFY(QFileInfo::exists(QDir(decks).filePath("Fresh.txt")));
+}
+
+void TestCli::addCardClozeMarkerContracts() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+
+    // A marker in Q is enough: no --type and no -a are needed for Cloze.
+    int code = -1;
+    const QJsonObject autoCloze =
+        runCli({"add-card", "--deck", "Auto", "-q", "The {{c1::cat}} sleeps.", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QStringList topKeys{"card", "id", "ok"};
+    topKeys.sort();
+    QCOMPARE(sortedKeys(autoCloze), topKeys);
+    const QJsonObject card = autoCloze.value(QStringLiteral("card")).toObject();
+    QStringList cardKeys{"deck", "id", "question", "answer", "tags", "type"};
+    cardKeys.sort();
+    QCOMPARE(sortedKeys(card), cardKeys);
+    QCOMPARE(card.value(QStringLiteral("type")).toString(), QStringLiteral("cloze"));
+    QCOMPARE(card.value(QStringLiteral("question")).toString(), QStringLiteral("The {{c1::cat}} sleeps."));
+    QCOMPARE(card.value(QStringLiteral("answer")).toString(), QString());
+    QCOMPARE(autoCloze.value(QStringLiteral("id")).toString(), card.value(QStringLiteral("id")).toString());
+
+    // An explicit type overrides detection: the marker stays literal text on
+    // a Basic card, and Basic keeps its answer gate.
+    const QJsonObject forcedBasic = runCli(
+        {"add-card", "--deck", "Forced", "-q", "The {{c1::cat}} sleeps.", "-a", "literal", "--type", "basic", "--json"},
+        decks, database, &code);
+    QCOMPARE(code, 0);
+    const QJsonObject basicCard = forcedBasic.value(QStringLiteral("card")).toObject();
+    QCOMPARE(basicCard.value(QStringLiteral("type")).toString(), QStringLiteral("basic"));
+    QCOMPARE(basicCard.value(QStringLiteral("question")).toString(), QStringLiteral("The {{c1::cat}} sleeps."));
+    QCOMPARE(basicCard.value(QStringLiteral("answer")).toString(), QStringLiteral("literal"));
+
+    const QJsonObject basicWithoutAnswer =
+        runCli({"add-card", "--deck", "Forced", "-q", "The {{c1::cat}} sleeps.", "--type", "basic", "--json"}, decks,
+               database, &code);
+    QCOMPARE(code, 1);
+    QCOMPARE(sortedKeys(basicWithoutAnswer), QStringList({"error", "ok"}));
+    QCOMPARE(basicWithoutAnswer.value(QStringLiteral("error")).toString(), QStringLiteral("Use --answer / -a"));
+
+    // An explicit Cloze with a marker keeps the accepted --type cloze form.
+    const QJsonObject explicitCloze =
+        runCli({"add-card", "--deck", "Explicit", "-q", "A {{c2::dog}} barks.", "--type", "cloze", "--json"}, decks,
+               database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(explicitCloze.value(QStringLiteral("card")).toObject().value(QStringLiteral("type")).toString(),
+             QStringLiteral("cloze"));
+    QCOMPARE(explicitCloze.value(QStringLiteral("card")).toObject().value(QStringLiteral("question")).toString(),
+             QStringLiteral("A {{c2::dog}} barks."));
+
+    // An explicit Cloze with no marker is rejected without creating a Deck;
+    // the error names the marker form and keeps the two-key error shape.
+    const QJsonObject noMarker =
+        runCli({"add-card", "--deck", "NoMarker", "-q", "Plain question", "--type", "cloze", "--json"}, decks, database,
+               &code);
+    QCOMPARE(code, 1);
+    QCOMPARE(sortedKeys(noMarker), QStringList({"error", "ok"}));
+    QVERIFY(noMarker.value(QStringLiteral("error")).toString().contains(QStringLiteral("{{c1::answer}}")));
+    QVERIFY(!QFileInfo::exists(QDir(decks).filePath(QStringLiteral("NoMarker.txt"))));
+
+    // The hint is stored, never displayed, and the written number survives.
+    const QString hintQuestion = QStringLiteral("A {{c2::cat::animal}} naps.");
+    const QJsonObject hinted =
+        runCli({"add-card", "--deck", "Hint", "-q", hintQuestion, "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    const QJsonObject hintCard = hinted.value(QStringLiteral("card")).toObject();
+    QCOMPARE(hintCard.value(QStringLiteral("question")).toString(), hintQuestion);
+    QCOMPARE(hintCard.value(QStringLiteral("answer")).toString(), QString());
+
+    QString error;
+    const Deck hintDeck = DeckIO::load(QDir(decks).filePath(QStringLiteral("Hint.txt")), &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(hintDeck.cards.size(), 1);
+    const Card &stored = hintDeck.cards.first();
+    QCOMPARE(stored.question, hintQuestion);
+    QCOMPARE(DeckIO::displayQuestion(stored), QStringLiteral("A [ %1 ] naps.").arg(QString(3, QChar(0x00B7))));
+    QCOMPARE(DeckIO::displayAnswer(stored), QStringLiteral("A cat naps."));
+
+    // JSON keeps the stored text and the existing key sets.
+    const QJsonObject listed = runCli({"cards", "--deck", "Hint", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(sortedKeys(listed), QStringList({"cards", "ok"}));
+    const QJsonObject listedCard = listed.value(QStringLiteral("cards")).toArray().first().toObject();
+    QCOMPARE(sortedKeys(listedCard), cardKeys);
+    QCOMPARE(listedCard.value(QStringLiteral("question")).toString(), hintQuestion);
+    QCOMPARE(listedCard.value(QStringLiteral("answer")).toString(), QString());
+
+    // Bulk creation keeps its own rules: no auto-detection there, so a marker
+    // without an explicit type still needs an answer.
+    const QString bulkInput = dir.filePath("bulk.json");
+    QVERIFY(writeFile(bulkInput, R"([{"question":"The {{c1::cat}} sleeps."}])"));
+    const QJsonObject bulk =
+        runCli({"add-cards", "--deck", "Bulk", "--input", bulkInput, "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QVERIFY(bulk.value(QStringLiteral("error")).toString().contains(QStringLiteral("needs an answer")));
+    QVERIFY(!QFileInfo::exists(QDir(decks).filePath(QStringLiteral("Bulk.txt"))));
 }
 
 void TestCli::concurrentAddCardCommandsKeepEveryCard() {
@@ -2583,6 +2705,61 @@ void TestCli::editDeleteErrorContracts() {
     QCOMPARE(code, 1);
     // delete-deck's error is owned by DeckRepository, outside this ticket.
     QCOMPARE(missingDeck.value(QStringLiteral("error")).toString(), QString("No such deck: Unknown"));
+}
+
+void TestCli::editCardClozeMarkerContracts() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    const QString path = QDir(decks).filePath("Edit.txt");
+    QVERIFY(writeFile(path, "# Deck: Edit\n"
+                            "---\n"
+                            "Q: Plain question\n"
+                            "A:\n"
+                            "type: cloze\n"
+                            "id: pinned\n"));
+
+    int code = -1;
+    // A tag-only edit does not set the type, so it keeps the old validation.
+    const QJsonObject tagged = runCli({"edit-card", "-c", "pinned", "--tags", "x,y", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    const QJsonObject taggedCard = tagged.value(QStringLiteral("card")).toObject();
+    QCOMPARE(taggedCard.value(QStringLiteral("type")).toString(), QStringLiteral("cloze"));
+    QCOMPARE(taggedCard.value(QStringLiteral("question")).toString(), QStringLiteral("Plain question"));
+    QCOMPARE(taggedCard.value(QStringLiteral("tags")).toArray().size(), 2);
+
+    // Explicitly setting Cloze checks the resulting Question, not just the type.
+    const QJsonObject noMarker =
+        runCli({"edit-card", "-c", "pinned", "--type", "cloze", "--json"}, decks, database, &code);
+    QCOMPARE(code, 1);
+    QCOMPARE(sortedKeys(noMarker), QStringList({"error", "ok"}));
+    QVERIFY(noMarker.value(QStringLiteral("error")).toString().contains(QStringLiteral("{{c1::answer}}")));
+
+    // With a marker, the same edit succeeds and Cloze needs no answer.
+    const QJsonObject edited =
+        runCli({"edit-card", "-c", "pinned", "-q", "The {{c2::dog}} barks.", "--type", "cloze", "--json"}, decks,
+               database, &code);
+    QCOMPARE(code, 0);
+    QStringList topKeys{"card", "id", "ok"};
+    topKeys.sort();
+    QCOMPARE(sortedKeys(edited), topKeys);
+    const QJsonObject editedCard = edited.value(QStringLiteral("card")).toObject();
+    QStringList cardKeys{"deck", "id", "question", "answer", "tags", "type"};
+    cardKeys.sort();
+    QCOMPARE(sortedKeys(editedCard), cardKeys);
+    QCOMPARE(editedCard.value(QStringLiteral("type")).toString(), QStringLiteral("cloze"));
+    QCOMPARE(editedCard.value(QStringLiteral("question")).toString(), QStringLiteral("The {{c2::dog}} barks."));
+    QCOMPARE(editedCard.value(QStringLiteral("answer")).toString(), QString());
+
+    // JSON keeps stored text; display derives the reveal from the marker.
+    QString error;
+    const Deck deck = DeckIO::load(path, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(deck.cards.size(), 1);
+    QCOMPARE(deck.cards.first().question, QStringLiteral("The {{c2::dog}} barks."));
+    QCOMPARE(deck.cards.first().answer, QString());
+    QCOMPARE(DeckIO::displayAnswer(deck.cards.first()), QStringLiteral("The dog barks."));
 }
 
 void TestCli::importJsonAndCsvContracts() {

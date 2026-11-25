@@ -18,6 +18,7 @@ private slots:
     void deckSafeFileNameSanitizes();
     void deckSaveRoundTripsAndRejectsEmptyPath();
     void deckLintReportsDeckIssues();
+    void deckLintWarnsWhenClozeHasNoMarker();
     void deckLintFileMatchesDirectoryLint();
     void deckLintFlagsMalformedContinuationAsError();
     void deckLintBytesMatchesLintFileWithoutReading();

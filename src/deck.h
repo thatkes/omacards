@@ -59,6 +59,8 @@ bool save(const Deck &deck, QByteArray *written, QString *error = nullptr);
 QString cardId(const Card &card);
 QString contentHash(const Card &card);
 QString safeFileName(const QString &name);
+// True when the Question holds at least one well-formed Cloze marker.
+bool hasClozeMarker(const QString &question);
 QString displayQuestion(const Card &card);
 QString displayAnswer(const Card &card);
 } // namespace DeckIO
