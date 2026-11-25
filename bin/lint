@@ -36,3 +36,4 @@ cd "$ROOT"
 ./tests/test_check_scaling.sh
 ./bin/check-ledger-states
 ./tests/test_check_ledger_states.sh
+./tests/test_wave_boundary_report.sh
