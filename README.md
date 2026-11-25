@@ -87,7 +87,7 @@ Add `--json` for `rendered` and `cached` counts. The first render may download T
 | `2`, `G`, `→` | Good |
 | `N` | New card |
 | `D` | New deck |
-| `B` | Browse and search cards |
+| `B` | Browse and search cards; from Study, open the Current Deck on the current Flashcard and return with B or Escape |
 | `Enter` | Edit the selected card in the library |
 | `Delete` / `Backspace` | Delete the selected card in the library |
 | `/` | Focus library search |

@@ -795,6 +795,51 @@ bool waitForCardIndex(const MainWindowHarness &view, int index) {
     return QTest::qWaitFor([&]() { return view.window && view.window->property("cardIndex").toInt() == index; }, 1000);
 }
 
+// The Library highlight is observable through the window's selected Card and
+// the list position it occupies, without reaching into the return context.
+int cardIndexForId(const Backend &backend, const QString &id) {
+    const QVariantList cards = backend.cardList();
+    for (int i = 0; i < cards.size(); ++i) {
+        if (cards.at(i).toMap().value(QStringLiteral("id")).toString() == id)
+            return i;
+    }
+    return -1;
+}
+
+QString cardFieldForId(const Backend &backend, const QString &id, const QString &field) {
+    const QVariantList cards = backend.cardList();
+    for (const QVariant &entry : cards) {
+        const QVariantMap card = entry.toMap();
+        if (card.value(QStringLiteral("id")).toString() == id)
+            return card.value(field).toString();
+    }
+    return QString();
+}
+
+QString selectedCardId(const MainWindowHarness &view) {
+    QVariant selected;
+    if (!QMetaObject::invokeMethod(view.window, "selectedCard", Q_RETURN_ARG(QVariant, selected)))
+        return QString();
+    return selected.toMap().value(QStringLiteral("id")).toString();
+}
+
+// Several screens have a Home button; only the visible one belongs to the
+// screen under test.
+QQuickItem *visibleHomeButton(const MainWindowHarness &view) {
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    if (!window)
+        return nullptr;
+    QList<QQuickItem *> pending{window->contentItem()};
+    while (!pending.isEmpty()) {
+        QQuickItem *item = pending.takeLast();
+        if (item->isVisible() && item->property("label").toString() == QStringLiteral("Home") &&
+            item->property("hint").toString() == QStringLiteral("Esc"))
+            return item;
+        pending.append(item->childItems());
+    }
+    return nullptr;
+}
+
 } // namespace
 
 void TestBackend::qmlDeckSelectorShowsCurrentDeckAndCounts() {
@@ -4089,6 +4134,260 @@ void TestBackend::qmlUndoShortcutsRespectKeyboardOwners() {
     QVERIFY(!picker->property("open").toBool());
     QVERIFY(press(Qt::Key_Z, [&] { return question() == QStringLiteral("Question?"); }, Qt::ControlModifier));
     QCOMPARE(question(), QStringLiteral("Question?"));
+}
+
+void TestBackend::qmlStudyBSelectsCurrentCardInCurrentDeck() {
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    for (int i = 0; i < 3; ++i)
+        QVERIFY(fixture.createCard(QStringLiteral("Q%1").arg(i), "A", "basic", {}));
+    fixture.selectDeck();
+    QVERIFY(fixture.loadWindow());
+    auto *window = fixture.window();
+    QVERIFY(window);
+
+    // Both Study screens share the shortcut, and the highlight follows the
+    // Flashcard id rather than the Library's saved row.
+    for (const QString &mode : {QStringLiteral("review"), QStringLiteral("cram")}) {
+        QVERIFY(fixture.enterStudy(mode));
+        const QString currentId = fixture.backend.currentCardId();
+        QVERIFY(!currentId.isEmpty());
+        const int currentIndex = cardIndexForId(fixture.backend, currentId);
+        QVERIFY(currentIndex >= 0);
+        const int savedIndex = (currentIndex + 1) % fixture.backend.cardList().size();
+        window->setProperty("cardIndex", savedIndex);
+        QVERIFY(
+            QTest::qWaitFor([&]() { return fixture.view->window->property("cardIndex").toInt() == savedIndex; }, 1000));
+
+        QTest::keyClick(window, Qt::Key_B);
+        QVERIFY(waitForScreen(*fixture.view, QStringLiteral("library")));
+        QCOMPARE(fixture.view->window->property("cardIndex").toInt(), currentIndex);
+        QCOMPARE(selectedCardId(*fixture.view), currentId);
+        QCOMPARE(fixture.backend.currentDeck(), QStringLiteral("Study"));
+
+        QTest::keyClick(window, Qt::Key_B);
+        QVERIFY(waitForScreen(*fixture.view, QStringLiteral("study")));
+        QCOMPARE(fixture.backend.currentCardId(), currentId);
+    }
+}
+
+void TestBackend::qmlStudyBClearsHidingFilterOnlyWhenNeeded() {
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    QVERIFY(fixture.createCard("alpha question", "A", "basic", "red"));
+    QVERIFY(fixture.createCard("beta question", "B", "basic", "blue"));
+    fixture.selectDeck();
+    QVERIFY(fixture.loadWindow());
+    auto *window = fixture.window();
+    QVERIFY(window);
+    QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
+
+    const QString currentId = fixture.backend.currentCardId();
+    QVERIFY(!currentId.isEmpty());
+    const QString currentQuestion = cardFieldForId(fixture.backend, currentId, QStringLiteral("question"));
+    QVERIFY(!currentQuestion.isEmpty());
+
+    fixture.backend.setCardFilter(QStringLiteral("no-such-card"));
+    QVERIFY(fixture.backend.cardList().isEmpty());
+    QTest::keyClick(window, Qt::Key_B);
+    QVERIFY(waitForScreen(*fixture.view, QStringLiteral("library")));
+    QCOMPARE(fixture.backend.cardFilter(), QString());
+    QCOMPARE(fixture.view->window->property("cardIndex").toInt(), cardIndexForId(fixture.backend, currentId));
+    QCOMPARE(selectedCardId(*fixture.view), currentId);
+
+    QTest::keyClick(window, Qt::Key_B);
+    QVERIFY(waitForScreen(*fixture.view, QStringLiteral("study")));
+
+    // A filter that still contains the Flashcard is left alone.
+    fixture.backend.setCardFilter(currentQuestion);
+    QVERIFY(cardIndexForId(fixture.backend, currentId) >= 0);
+    QTest::keyClick(window, Qt::Key_B);
+    QVERIFY(waitForScreen(*fixture.view, QStringLiteral("library")));
+    QCOMPARE(fixture.backend.cardFilter(), currentQuestion);
+    QCOMPARE(selectedCardId(*fixture.view), currentId);
+}
+
+void TestBackend::qmlStudyBFromEmptyStudyOpensUnselectedLibraryAndReturns() {
+    ScopedEnv delay("OMACARDS_AGAIN_DELAY_MS", "2000");
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    QVERIFY(fixture.createCard(QStringLiteral("Q1"), QStringLiteral("A1"), QStringLiteral("basic"), {}));
+    fixture.selectDeck();
+    QVERIFY(fixture.loadWindow());
+    auto *window = fixture.window();
+    QVERIFY(window);
+    QVERIFY(fixture.enterStudy(QStringLiteral("review")));
+
+    // Rate the only card until the Study screen reaches its end state, while
+    // the Current Deck still has a visible row in the Library.
+    QTest::keyClick(window, Qt::Key_Space);
+    fixture.settle();
+    QTest::keyClick(window, Qt::Key_1);
+    fixture.settle();
+    QVERIFY(fixture.backend.hasCard());
+    QTest::keyClick(window, Qt::Key_Space);
+    fixture.settle();
+    QTest::keyClick(window, Qt::Key_2);
+    fixture.settle();
+    QVERIFY(!fixture.backend.hasCard());
+    QQuickItem *empty = fixture.item(QStringLiteral("studyEmptyMessage"));
+    QVERIFY(empty);
+    QVERIFY(waitForVisible(empty, true));
+
+    fixture.backend.setCardFilter(QStringLiteral("Q1"));
+    QVERIFY(fixture.backend.cardList().size() == 1);
+    QTest::keyClick(window, Qt::Key_B);
+    QVERIFY(waitForScreen(*fixture.view, QStringLiteral("library")));
+    QCOMPARE(fixture.view->window->property("cardIndex").toInt(), -1);
+    QVERIFY(selectedCardId(*fixture.view).isEmpty());
+    QCOMPARE(fixture.backend.cardFilter(), QStringLiteral("Q1"));
+
+    QTest::keyClick(window, Qt::Key_Escape);
+    QVERIFY(waitForScreen(*fixture.view, QStringLiteral("study")));
+    QVERIFY(waitForVisible(empty, true));
+    QVERIFY(studyEmptyTexts(fixture).contains(QStringLiteral("All caught up.")));
+    QVERIFY(!fixture.backend.hasCard());
+    QCOMPARE(fixture.backend.reviewed(), 2);
+}
+
+void TestBackend::qmlStudyLibraryReturnKeepsSessionAndScroll() {
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    QVERIFY(fixture.createCard("Question?", manyCardLines(30), "basic", {}));
+    QVERIFY(fixture.createCard("Second question", "short", "basic", {}));
+    fixture.selectDeck();
+    QVERIFY(fixture.loadWindow());
+    auto *window = fixture.window();
+    QVERIFY(window);
+    QVERIFY(fixture.enterStudy(QStringLiteral("review")));
+
+    QTest::keyClick(window, Qt::Key_Space);
+    QVERIFY(waitForShowingAnswer(fixture, true));
+    auto *scroll = fixture.item(QStringLiteral("flashcardViewport"));
+    QVERIFY(scroll);
+    auto *flickable = scroll->property("contentItem").value<QQuickItem *>();
+    QVERIFY(flickable);
+    flickable->setProperty("contentY", 72.0);
+    QVERIFY(waitForContentY(flickable, 72.0));
+
+    const QString currentId = fixture.backend.currentCardId();
+    const bool showingAnswer = fixture.backend.showingAnswer();
+    const int reviewed = fixture.backend.reviewed();
+    const int good = fixture.backend.good();
+    const QVariantList boxes = fixture.backend.property("boxDistribution").toList();
+    const qreal scrollY = flickable->property("contentY").toReal();
+    QVERIFY(scrollY > 0.0);
+    const auto assertStudyUnchanged = [&]() {
+        QCOMPARE(fixture.backend.currentCardId(), currentId);
+        QCOMPARE(fixture.backend.showingAnswer(), showingAnswer);
+        QCOMPARE(fixture.backend.reviewed(), reviewed);
+        QCOMPARE(fixture.backend.good(), good);
+        QCOMPARE(fixture.backend.property("boxDistribution").toList(), boxes);
+        QVERIFY(waitForContentY(flickable, scrollY));
+    };
+
+    QTest::keyClick(window, Qt::Key_B);
+    QVERIFY(waitForScreen(*fixture.view, QStringLiteral("library")));
+    assertStudyUnchanged();
+    QTest::keyClick(window, Qt::Key_B);
+    QVERIFY(waitForScreen(*fixture.view, QStringLiteral("study")));
+    assertStudyUnchanged();
+
+    QTest::keyClick(window, Qt::Key_B);
+    QVERIFY(waitForScreen(*fixture.view, QStringLiteral("library")));
+    QTest::keyClick(window, Qt::Key_Escape);
+    QVERIFY(waitForScreen(*fixture.view, QStringLiteral("study")));
+    assertStudyUnchanged();
+
+    QTest::keyClick(window, Qt::Key_B);
+    QVERIFY(waitForScreen(*fixture.view, QStringLiteral("library")));
+    QTest::keyClick(window, Qt::Key_Slash);
+    QQuickItem *focused = window->activeFocusItem();
+    QVERIFY(focused);
+    QVERIFY2(focused->property("placeholderText").toString().contains(QStringLiteral("Search")),
+             qPrintable(focused->property("placeholderText").toString()));
+    QTest::keyClick(window, Qt::Key_Escape);
+    QVERIFY(waitForScreen(*fixture.view, QStringLiteral("study")));
+    assertStudyUnchanged();
+}
+
+void TestBackend::qmlStudyBShortcutRespectsKeyboardOwners() {
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    QVERIFY(fixture.createCard("Question?", "A", "basic", {}));
+    fixture.selectDeck();
+    QVERIFY(fixture.loadWindow());
+    auto *window = fixture.window();
+    QVERIFY(window);
+    QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
+
+    QTest::keyClick(window, Qt::Key_BracketRight);
+    QVERIFY(waitForPickerOpen(*fixture.view, QStringLiteral("studyDeckSelector"), true));
+    QTest::keyClick(window, Qt::Key_B);
+    QCOMPARE(fixture.view->screenName(), QStringLiteral("study"));
+    QVERIFY(fixture.view->item(QStringLiteral("studyDeckSelector"))->property("open").toBool());
+    QTest::keyClick(window, Qt::Key_Escape);
+    QVERIFY(waitForPickerOpen(*fixture.view, QStringLiteral("studyDeckSelector"), false));
+
+    window->setProperty("helpVisible", true);
+    QTest::keyClick(window, Qt::Key_B);
+    QCOMPARE(fixture.view->screenName(), QStringLiteral("study"));
+    QVERIFY(window->property("helpVisible").toBool());
+    QTest::keyClick(window, Qt::Key_Escape);
+    QVERIFY(!window->property("helpVisible").toBool());
+
+    QTest::keyClick(window, Qt::Key_N);
+    QObject *dialog = window->findChild<QObject *>(QStringLiteral("newCardDialog"));
+    QVERIFY(dialog);
+    QVERIFY(QTest::qWaitFor([&]() { return dialog->property("opened").toBool(); }, 1000));
+    QTest::keyClick(window, Qt::Key_B);
+    QCOMPARE(fixture.view->screenName(), QStringLiteral("study"));
+    QVERIFY(dialog->property("opened").toBool());
+    QTest::keyClick(window, Qt::Key_Escape);
+    QVERIFY(QTest::qWaitFor([&]() { return !dialog->property("opened").toBool(); }, 1000));
+}
+
+void TestBackend::qmlStudyLibraryHomeButtonAndHelpRow() {
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    QVERIFY(fixture.createCard("Question?", "A", "basic", {}));
+    fixture.selectDeck();
+    QVERIFY(fixture.loadWindow());
+    auto *window = fixture.window();
+    QVERIFY(window);
+    QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
+
+    QTest::keyClick(window, Qt::Key_B);
+    QVERIFY(waitForScreen(*fixture.view, QStringLiteral("library")));
+    QQuickItem *homeButton = visibleHomeButton(*fixture.view);
+    QVERIFY(homeButton);
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centerInWindow(window, homeButton));
+    QVERIFY(waitForScreen(*fixture.view, QStringLiteral("home")));
+
+    // Home keeps the shortcut it has always had, including returning from a
+    // Library opened there.
+    QTest::keyClick(window, Qt::Key_B);
+    QVERIFY(waitForScreen(*fixture.view, QStringLiteral("library")));
+    QTest::keyClick(window, Qt::Key_B);
+    QVERIFY(waitForScreen(*fixture.view, QStringLiteral("home")));
+
+    window->setProperty("helpVisible", true);
+    QQuickItem *row = fixture.view->visualItem(QStringLiteral("helpBrowseLibraryRow"));
+    QVERIFY(row);
+    QVERIFY(waitForVisible(row, true));
+    QQuickItem *line = fixture.view->visualItem(QStringLiteral("helpBrowseLibraryRowText"));
+    QVERIFY(line);
+    const QString text = line->property("text").toString();
+    for (const QString &part : {QStringLiteral("Current Deck"), QStringLiteral("Flashcard"), QStringLiteral("Study"),
+                                QStringLiteral("Escape")}) {
+        QVERIFY2(text.contains(part), qPrintable(QStringLiteral("missing '%1' in: %2").arg(part, text)));
+    }
 }
 
 void TestBackend::qmlScreenOrderAndRadiusHaveOneSource() {

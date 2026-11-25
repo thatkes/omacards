@@ -80,5 +80,11 @@ private slots:
     void qmlLibrarySelectionClampsAfterExternalRefresh();
     void qmlNoticeKeepsErrorSignalMessage();
     void qmlUndoShortcutsRespectKeyboardOwners();
+    void qmlStudyBSelectsCurrentCardInCurrentDeck();
+    void qmlStudyBClearsHidingFilterOnlyWhenNeeded();
+    void qmlStudyBFromEmptyStudyOpensUnselectedLibraryAndReturns();
+    void qmlStudyLibraryReturnKeepsSessionAndScroll();
+    void qmlStudyBShortcutRespectsKeyboardOwners();
+    void qmlStudyLibraryHomeButtonAndHelpRow();
     void qmlScreenOrderAndRadiusHaveOneSource();
 };

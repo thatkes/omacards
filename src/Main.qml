@@ -46,6 +46,9 @@ ApplicationWindow {
     property string pendingDeck: ""
     property string noticeMessage: ""
     property int cardIndex: 0
+    // Set only while the Library was opened from Study, so B and Escape can
+    // return without touching the Study session.
+    property bool libraryReturnToStudy: false
     property string lastPresentedStudyState: ""
     readonly property bool cramDistributionVisible: backend.mode === "cram" && cramQueueHasCards()
 
@@ -83,6 +86,7 @@ ApplicationWindow {
 
     function startStudy(mode) {
         closeDeckPicker()
+        libraryReturnToStudy = false
         backend.setMode(mode)
         backend.refresh()
         screen = "study"
@@ -104,6 +108,7 @@ ApplicationWindow {
 
     function goHome() {
         closeDeckPicker()
+        libraryReturnToStudy = false
         screen = "home"
         helpVisible = false
         statsVisible = false
@@ -112,9 +117,48 @@ ApplicationWindow {
 
     function openLibrary() {
         closeDeckPicker()
+        libraryReturnToStudy = false
         backend.refresh()
         screen = "library"
         clampCardIndex()
+        keyHandler.forceActiveFocus()
+    }
+
+    function selectLibraryCardById(id) {
+        const list = backend.cardList
+        for (let i = 0; i < list.length; ++i) {
+            if (list[i].id === id) {
+                cardIndex = i
+                cardView.positionViewAtIndex(i, ListView.Contain)
+                return true
+            }
+        }
+        return false
+    }
+
+    // B from Study carries the Flashcard into the Current Deck's Library. No
+    // refresh here: the session queue, reveal and scroll must survive the trip.
+    function openLibraryFromStudy() {
+        closeDeckPicker()
+        libraryReturnToStudy = true
+        screen = "library"
+        cardIndex = -1
+        const id = backend.currentCardId
+        if (id.length > 0) {
+            if (!selectLibraryCardById(id) && backend.cardFilter.length > 0) {
+                backend.setCardFilter("")
+                selectLibraryCardById(id)
+            }
+            const selected = selectedCard()
+            if (!selected || selected.id !== id)
+                cardIndex = -1
+        }
+        keyHandler.forceActiveFocus()
+    }
+
+    function returnFromLibrary() {
+        screen = "study"
+        libraryReturnToStudy = false
         keyHandler.forceActiveFocus()
     }
 
@@ -801,6 +845,14 @@ ApplicationWindow {
                     return
                 }
 
+                // Study's B case runs before the global shortcut so the
+                // Library inherits the Flashcard from both Review and Cram.
+                if (screen === "study" && event.key === Qt.Key_B) {
+                    win.openLibraryFromStudy()
+                    event.accepted = true
+                    return
+                }
+
                 switch (event.key) {
                 case Qt.Key_Q:
                     Qt.quit()
@@ -821,8 +873,13 @@ ApplicationWindow {
                     event.accepted = true
                     return
                 case Qt.Key_B:
-                    if (screen === "library") goHome()
-                    else openLibrary()
+                    if (screen === "library" && libraryReturnToStudy) {
+                        win.returnFromLibrary()
+                    } else if (screen === "library") {
+                        goHome()
+                    } else {
+                        win.openLibrary()
+                    }
                     event.accepted = true
                     return
                 case Qt.Key_N:
@@ -842,9 +899,9 @@ ApplicationWindow {
                     event.accepted = true
                     return
                 case Qt.Key_Escape:
-                    if (screen === "study") {
-                        goHome()
-                    } else if (screen === "library" || screen === "settings") {
+                    if (screen === "library" && libraryReturnToStudy) {
+                        win.returnFromLibrary()
+                    } else if (screen === "study" || screen === "library" || screen === "settings") {
                         goHome()
                     }
                     event.accepted = true
@@ -1642,8 +1699,9 @@ ApplicationWindow {
                                                 win.cardIndex = 0
                                             }
                                             onAccepted: keyHandler.forceActiveFocus()
-                                            Keys.onEscapePressed: {
-                                                win.goHome()
+                                            Keys.onEscapePressed: function(event) {
+                                                if (libraryReturnToStudy) win.returnFromLibrary()
+                                                else win.goHome()
                                                 event.accepted = true
                                             }
                                         }
@@ -2236,7 +2294,11 @@ ApplicationWindow {
                             action: qsTr("Deck selector on Home or in the Study header: click to open, [ / ] moves the Candidate deck, Enter commits, Escape cancels"),
                             objectName: "helpDeckSelectorRow"
                         },
-                        { keys: "B", action: qsTr("Open the library") },
+                        {
+                            keys: "B",
+                            action: qsTr("Open the library; from Study it opens the Current Deck on the Flashcard, and B or Escape returns to Study"),
+                            objectName: "helpBrowseLibraryRow"
+                        },
                         { keys: "J / K", action: qsTr("Scroll a long card, or move the library selection") },
                         { keys: "Enter", action: qsTr("Edit the selected card in the library") },
                         { keys: "Del", action: qsTr("Delete the selected card in the library") },
