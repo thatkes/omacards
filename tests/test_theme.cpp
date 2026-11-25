@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -195,7 +196,8 @@ void TestTheme::themeReloadEmitsChangedOnceOnPaletteChange() {
 
     // An identical reload leaves the palette alone and must not emit again.
     QVERIFY(writeFile(colors, "accent = \"#222222\"\n"));
-    QTest::qWait(250);
+    // The palette debounce is 80 ms; a second emit would arrive in this window.
+    QVERIFY(!spy.wait(120));
     QCOMPARE(spy.count(), 1);
     QCOMPARE(theme.accent(), QString("#222222"));
 }
@@ -232,20 +234,26 @@ void TestTheme::themeRadiusIgnoresInvalidValues() {
     QVERIFY(dir.isValid());
     const QString tool = dir.filePath("hyprctl");
 
-    QVERIFY(writeExecutable(tool, "#!/bin/sh\nprintf '{\"int\":-5}\\n'\n"));
+    const QString negativeMarker = dir.filePath("rounding-negative-ran");
+    QVERIFY(writeExecutable(tool, QByteArray("#!/bin/sh\nprintf '{\"int\":-5}\\n'\nprintf 'x' > '") +
+                                      negativeMarker.toUtf8() + "'\n"));
     {
         Theme theme(dir.path(), nullptr, tool);
         QSignalSpy spy(&theme, &Theme::changed);
-        QTest::qWait(300);
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(negativeMarker), 2000);
+        QCoreApplication::processEvents();
         QCOMPARE(theme.radius(), 0);
         QCOMPARE(spy.count(), 0);
     }
 
-    QVERIFY(writeExecutable(tool, "#!/bin/sh\nprintf 'not json\\n'\n"));
+    const QString invalidMarker = dir.filePath("rounding-invalid-ran");
+    QVERIFY(writeExecutable(tool, QByteArray("#!/bin/sh\nprintf 'not json\\n'\nprintf 'x' > '") +
+                                      invalidMarker.toUtf8() + "'\n"));
     {
         Theme theme(dir.path(), nullptr, tool);
         QSignalSpy spy(&theme, &Theme::changed);
-        QTest::qWait(300);
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(invalidMarker), 2000);
+        QCoreApplication::processEvents();
         QCOMPARE(theme.radius(), 0);
         QCOMPARE(spy.count(), 0);
     }

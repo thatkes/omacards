@@ -507,8 +507,11 @@ void TestMathRender::liveRenderAndPrefetchShareOneCacheEntry() {
     const QString bin = dir.filePath("bin");
     const QString cache = dir.filePath("cache");
     const QString argsLog = dir.filePath("args.log");
+    const QString barrier = dir.filePath("release");
     QVERIFY(QDir().mkpath(cache));
-    QVERIFY(writeFakePdfToolchain(bin, kPtSvg, QStringLiteral("sleep 0.2\n")));
+    // Hold the first converter run until both callers have asked for the key.
+    const QByteArray waitForBarrier = QByteArray("while [ ! -e '") + barrier.toUtf8() + "' ]; do sleep 0.01; done\n";
+    QVERIFY(writeFakePdfToolchain(bin, kPtSvg, QString::fromUtf8(waitForBarrier)));
 
     PathGuard pathGuard(bin);
     ScopedEnv argsGuard("OMACARDS_TEST_ARGS", argsLog);
@@ -517,7 +520,8 @@ void TestMathRender::liveRenderAndPrefetchShareOneCacheEntry() {
 
     // Whichever caller claims the key first renders it; the other must skip.
     renderer.prefetch("\\(x^2\\)", "#123456", 2.0);
-    renderer.renderExpression("x^2", "#123456", 2.0);
+    renderer.renderWithPlaceholders("\\(x^2\\)", "#123456", 2.0);
+    QVERIFY(writeFile(barrier, "go"));
     const QString path = renderer.mathSvgPath("x^2");
     QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(path), 5000);
 
