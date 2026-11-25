@@ -44,10 +44,10 @@ using namespace TestSupport;
 
 namespace {
 
-// Backend forwards this to DeckRepository for window tests only. Keep the
-// settle margin long enough for the watcher event and one event-loop turn.
+// Backend forwards this to DeckRepository for window tests only. The watcher
+// pause suppresses this process's own writes, so tests wait on visible state
+// instead of a debounce margin.
 constexpr int kTestWatcherDebounceMs = 10;
-constexpr int kWatcherSettleMarginMs = 30;
 
 // One compiled Main.qml and engine for the whole test process. Each fixture
 // still gets its own child context, Backend, Theme and window object tree.
@@ -166,21 +166,25 @@ struct MainWindowHarness {
         return facts;
     }
 
-    void settle() const {
-        QCoreApplication::processEvents();
-        QTest::qWait(30);
-    }
-
-    // Window tests inject a short watcher debounce; wait it out plus the
-    // event margin, then flush the QML notifications from the reload.
-    void settleFileWatcher() const {
-        QTest::qWait(kTestWatcherDebounceMs + kWatcherSettleMarginMs);
-        QCoreApplication::processEvents();
+    // Window geometry is only meaningful once the platform has exposed it.
+    // A fixture owns one window, so do this once rather than on every Study
+    // entry; tests that change size later resize that same window explicitly.
+    bool exposeOnce() {
+        if (!window)
+            return false;
+        if (exposed)
+            return true;
+        auto *qwindow = qobject_cast<QQuickWindow *>(window);
+        if (!qwindow || !QTest::qWaitForWindowExposed(qwindow))
+            return false;
+        exposed = true;
+        return true;
     }
 
     QQmlContext *context = nullptr;
     Theme theme;
     QObject *window = nullptr;
+    bool exposed = false;
 };
 
 // Shared setup for the study-view tests. The window is still the real Main.qml
@@ -208,9 +212,18 @@ struct StudyViewFixture {
         backend.refresh();
     }
 
-    bool loadWindow() {
+    bool loadWindow(Sizing sizing = Sizing::Minimum, const QSize &size = {}) {
         view = std::make_unique<MainWindowHarness>(backend);
-        return view->window != nullptr;
+        if (!view->window || !view->exposeOnce())
+            return false;
+        auto *qwindow = window();
+        if (!qwindow)
+            return false;
+        if (size.isValid())
+            qwindow->resize(size);
+        else if (sizing == Sizing::Minimum)
+            qwindow->resize(qwindow->minimumWidth(), qwindow->minimumHeight());
+        return true;
     }
 
     QQuickWindow *window() const { return view ? qobject_cast<QQuickWindow *>(view->window) : nullptr; }
@@ -234,22 +247,11 @@ struct StudyViewFixture {
         return invoked;
     }
 
-    bool enterStudy(const QString &mode, Sizing sizing = Sizing::Minimum) {
-        if (!window() || !QTest::qWaitForWindowExposed(window()))
+    bool enterStudy(const QString &mode) {
+        if (!window())
             return false;
-        if (sizing == Sizing::Minimum)
-            window()->resize(window()->minimumWidth(), window()->minimumHeight());
         return startStudy(mode);
     }
-
-    bool enterStudy(const QString &mode, const QSize &size) {
-        if (!window() || !QTest::qWaitForWindowExposed(window()))
-            return false;
-        window()->resize(size);
-        return startStudy(mode);
-    }
-
-    void settle() const { view->settle(); }
 
     QTemporaryDir dir;
     Backend backend;
@@ -260,8 +262,26 @@ private:
     bool startStudy(const QString &mode) {
         if (!QMetaObject::invokeMethod(view->window, "startStudy", Q_ARG(QVariant, mode)))
             return false;
-        view->settleFileWatcher();
-        return true;
+        QQuickItem *keyHandler = item(QStringLiteral("keyHandler"));
+        QQuickItem *viewport = item(QStringLiteral("flashcardViewport"));
+        QVariantList previous;
+        int stableTurns = 0;
+        return QTest::qWaitFor(
+            [&]() {
+                if (screenName() != QStringLiteral("study") || backend.mode() != mode || !keyHandler ||
+                    !keyHandler->hasActiveFocus() || (backend.hasCard() && (!viewport || viewport->height() <= 0.0)))
+                    return false;
+                const QVariantList current{screenName(),
+                                           backend.mode(),
+                                           backend.currentCardId(),
+                                           backend.showingAnswer(),
+                                           backend.hasCard(),
+                                           viewport ? QVariant(viewport->height()) : QVariant()};
+                stableTurns = current == previous ? stableTurns + 1 : 1;
+                previous = current;
+                return stableTurns >= 2;
+            },
+            1000);
     }
 };
 
@@ -795,6 +815,34 @@ bool waitForCardIndex(const MainWindowHarness &view, int index) {
     return QTest::qWaitFor([&]() { return view.window && view.window->property("cardIndex").toInt() == index; }, 1000);
 }
 
+bool waitForDeckPresent(const Backend &backend, const QString &name) {
+    return QTest::qWaitFor([&]() { return backend.decks().contains(name); }, 1000);
+}
+
+bool waitForCardCountAtLeast(const Backend &backend, int count) {
+    return QTest::qWaitFor([&]() { return backend.cardList().size() >= count; }, 1000);
+}
+
+bool waitForItemText(QQuickItem *item, const QString &text) {
+    return QTest::qWaitFor([&]() { return item && item->property("text").toString() == text; }, 1000);
+}
+
+bool waitForReviewButtonLabel(const StudyViewFixture &fixture, const QString &label) {
+    return QTest::qWaitFor([&]() { return reviewButtonLabel(fixture) == label; }, 1000);
+}
+
+bool waitForStudyEmptyText(const StudyViewFixture &fixture, const QString &text) {
+    return QTest::qWaitFor([&]() { return studyEmptyTexts(fixture).contains(text); }, 1000);
+}
+
+bool waitForQuestionContains(const StudyViewFixture &fixture, const QString &fragment) {
+    return QTest::qWaitFor([&]() { return fixture.backend.question().contains(fragment); }, 1000);
+}
+
+bool waitForHasCard(const StudyViewFixture &fixture, bool hasCard) {
+    return QTest::qWaitFor([&]() { return fixture.backend.hasCard() == hasCard; }, 1000);
+}
+
 // The Library highlight is observable through the window's selected Card and
 // the list position it occupies, without reaching into the return context.
 int cardIndexForId(const Backend &backend, const QString &id) {
@@ -888,7 +936,7 @@ void TestBackend::qmlStudyAllDueButtonShowsStateAndPosition() {
 
 void TestBackend::qmlStudyAllDueStartsFreshAcrossDecks() {
     QTemporaryDir dir;
-    ScopedEnv delay("OMACARDS_AGAIN_DELAY_MS", "100");
+    ScopedEnv delay("OMACARDS_AGAIN_DELAY_MS", "5");
     Backend backend(dir.path(), dir.filePath("state.db"));
     QString error;
     QVERIFY(backend.initialize(&error));
@@ -934,7 +982,7 @@ void TestBackend::qmlStudyAllDueStartsFreshAcrossDecks() {
 
     // It then reaches another Deck. The old Pending repeat cannot take this
     // turn: with its short delay it would have done so had it survived.
-    QTest::qWait(250);
+    QTest::qWait(10); // the old 5 ms repeat would have fired by now
     QVERIFY2(backend.question().contains(QStringLiteral("Beta question")),
              qPrintable(QStringLiteral("question=%1 reviewed=%2 current=%3 repeated=%4")
                             .arg(backend.question(), QString::number(backend.reviewed()), backend.currentCardId(),
@@ -1333,7 +1381,8 @@ void TestBackend::qmlStudySelectorSwitchesDeckFreshViaVisibleRow() {
     QVERIFY(fixture.backend.createCard("Beta", "Beta question", "B", "basic", {}, &fixture.error));
     QVERIFY(fixture.backend.createCard("Beta", "Beta second", "B2", "basic", {}, &fixture.error));
     fixture.selectDeck("Alpha");
-    fixture.view->settleFileWatcher();
+    QVERIFY(waitForDeckPresent(fixture.backend, "Alpha"));
+    QVERIFY(waitForDeckPresent(fixture.backend, "Beta"));
 
     QVERIFY(fixture.loadWindow());
     auto *window = fixture.window();
@@ -1465,7 +1514,7 @@ void TestBackend::qmlStudySelectorSwitchesDeckFreshViaVisibleRow() {
         QStringLiteral("Molecular Biology — Lecture 12 (Cell Signalling and membrane transport, with extended notes)");
     QVERIFY(fixture.backend.createDeck(longName, &fixture.error));
     QVERIFY(fixture.backend.createCard(longName, "Long question", "L", "basic", {}, &fixture.error));
-    fixture.view->settleFileWatcher();
+    QVERIFY(waitForDeckPresent(fixture.backend, longName));
     QTest::keyClick(window, Qt::Key_BracketRight);
     QVERIFY(waitForPopupVisible(*fixture.view, QStringLiteral("studyDeckPopup")));
     QObject *popup = window->findChild<QObject *>(QStringLiteral("studyDeckPopup"));
@@ -1789,27 +1838,27 @@ void TestBackend::qmlStudyScrollCuesFollowPosition() {
 }
 
 void TestBackend::qmlStudyRatingKeysKeepTheirMeaning() {
-    const QList<QPair<Qt::Key, int>> cases{{Qt::Key_Left, 0}, {Qt::Key_Right, 1}, {Qt::Key_A, 0}, {Qt::Key_G, 1}};
-    for (const auto &entry : cases) {
-        StudyViewFixture fixture;
-        QVERIFY(fixture.initialize());
-        QVERIFY(fixture.createDeck());
-        QVERIFY(fixture.createCard("Question?", "Answer"));
-        fixture.selectDeck();
+    ScopedEnv delay("OMACARDS_AGAIN_DELAY_MS", "5000");
+    const QList<QPair<Qt::Key, int>> cases{{Qt::Key_Left, 0}, {Qt::Key_Right, 1}, {Qt::Key_A, 1}, {Qt::Key_G, 2}};
+    StudyViewFixture fixture;
+    QVERIFY(fixture.initialize());
+    QVERIFY(fixture.createDeck());
+    for (int i = 1; i <= cases.size(); ++i)
+        QVERIFY(fixture.createCard(QString("Question %1?").arg(i), "Answer"));
+    fixture.selectDeck();
 
-        QVERIFY(fixture.loadWindow());
-        auto *window = fixture.window();
-        QVERIFY(window);
-        QVERIFY(fixture.enterStudy(QStringLiteral("review"), StudyViewFixture::Sizing::KeepWindowSize));
+    QVERIFY(fixture.loadWindow());
+    auto *window = fixture.window();
+    QVERIFY(window);
+    QVERIFY(fixture.enterStudy(QStringLiteral("review")));
 
+    for (int i = 0; i < cases.size(); ++i) {
+        QVERIFY(fixture.backend.hasCard());
         QTest::keyClick(window, Qt::Key_Space);
         QVERIFY(waitForShowingAnswer(fixture, true));
-        QVERIFY(fixture.backend.showingAnswer());
-        QTest::keyClick(window, entry.first);
-        QVERIFY(QTest::qWaitFor(
-            [&]() { return fixture.backend.reviewed() == 1 && fixture.backend.good() == entry.second; }, 1000));
-        QCOMPARE(fixture.backend.reviewed(), 1);
-        QCOMPARE(fixture.backend.good(), entry.second);
+        QTest::keyClick(window, cases.at(i).first);
+        QVERIFY(waitForReviewed(fixture, i + 1));
+        QCOMPARE(fixture.backend.good(), cases.at(i).second);
     }
 }
 
@@ -1928,7 +1977,6 @@ void TestBackend::qmlStudyScalesPicturesToWidth() {
     StudyViewFixture fixture;
     QVERIFY(fixture.initialize());
     QVERIFY(fixture.loadWindow());
-    QVERIFY(QTest::qWaitForWindowExposed(fixture.window()));
 
     auto scale = [&](const QString &html, double width, QString *out) {
         return fixture.scaleImagesToWidth(html, width, out);
@@ -1997,10 +2045,10 @@ void TestBackend::qmlStudyVisualFactsPinLayoutAtMinimumSize() {
     fixture.selectDeck();
     fixture.prepareMode(QStringLiteral("cram"));
 
-    QVERIFY(fixture.loadWindow());
+    QVERIFY(fixture.loadWindow(StudyViewFixture::Sizing::KeepWindowSize, QSize(760, 540)));
     auto *window = fixture.window();
     QVERIFY(window);
-    QVERIFY(fixture.enterStudy(QStringLiteral("cram"), QSize(760, 540)));
+    QVERIFY(fixture.enterStudy(QStringLiteral("cram")));
     QCOMPARE(window->width(), 760);
     QCOMPARE(window->height(), 540);
     QCOMPARE(fixture.screenName(), QStringLiteral("study"));
@@ -2156,7 +2204,8 @@ void TestBackend::qmlCramBoxDistributionFollowsRatings() {
 
     // A Deck change rebuilds the queue; no stale counts or highlight linger.
     QVERIFY(fixture.backend.createCard("Study", "Q3", "A3"));
-    fixture.view->settleFileWatcher();
+    QVERIFY(waitForItemText(box1, QStringLiteral("Box 1: 3")));
+    QVERIFY(waitForItemText(timing, QStringLiteral("next in 1 cards")));
     QCOMPARE(fixture.backend.property("boxDistribution").toList(), QVariantList({3, 0, 0, 0, 0}));
     QCOMPARE(box1->property("text").toString(), QStringLiteral("Box 1: 3"));
     QCOMPARE(box2->property("text").toString(), QStringLiteral("Box 2: 0"));
@@ -2343,7 +2392,7 @@ void TestBackend::qmlStatsForecastModulesUseCurrentSchedulingState() {
 
     QVERIFY(QMetaObject::invokeMethod(view.window, "openStats"));
     QVERIFY(QTest::qWaitFor([&]() { return view.window->property("statsVisible").toBool(); }, 1000));
-    view.settle();
+    QVERIFY(QTest::qWaitFor([&]() { return collect(QStringLiteral("statsRowLabel")).size() == 9; }, 1000));
 
     // The nine existing rows stay as they were, and the two Forecast modules
     // are separate named surfaces with their own legends.
@@ -2422,6 +2471,7 @@ void TestBackend::qmlStatsForecastModulesUseCurrentSchedulingState() {
     QQuickItem *scroll = view.item(QStringLiteral("statsScroll"));
     QQuickItem *column = view.item(QStringLiteral("statsColumn"));
     QVERIFY(scroll && column);
+    QVERIFY(QTest::qWaitFor([&]() { return column->height() > scroll->height(); }, 1000));
     const QRectF scrollScene = scroll->mapRectToScene(scroll->boundingRect());
     const QRectF windowScene = window->contentItem()->boundingRect();
     QVERIFY(windowScene.contains(scrollScene.adjusted(-1.0, -1.0, 1.0, 1.0)));
@@ -2709,7 +2759,7 @@ void TestBackend::qmlReviewActionAddsSessionOnlyNewCards() {
         QVERIFY(fixture.createCard(QString("Q%1").arg(i), "A", "basic", {}));
     fixture.selectDeck();
     fixture.backend.setNewCardAllowance(1);
-    fixture.view->settleFileWatcher();
+    QVERIFY(waitForCardCountAtLeast(fixture.backend, 7));
     QVERIFY(fixture.loadWindow());
     auto *window = fixture.window();
     QVERIFY(window);
@@ -2717,11 +2767,11 @@ void TestBackend::qmlReviewActionAddsSessionOnlyNewCards() {
     QVERIFY(fixture.backend.question().contains(QStringLiteral("Q1")));
 
     QTest::keyClick(window, Qt::Key_Space);
-    fixture.settle();
+    QVERIFY(waitForShowingAnswer(fixture, true));
     QTest::keyClick(window, Qt::Key_2);
-    fixture.settle();
-    QVERIFY(!fixture.backend.hasCard());
-    QCOMPARE(reviewButtonLabel(fixture), QStringLiteral("Add 5"));
+    QVERIFY(waitForReviewed(fixture, 1));
+    QVERIFY(waitForHasCard(fixture, false));
+    QVERIFY(waitForReviewButtonLabel(fixture, QStringLiteral("Add 5")));
 
     const QVariantMap statsBefore = fixture.backend.statsSummary();
     const int ratingsBefore = fixture.backend.reviewSummary().total;
@@ -2731,7 +2781,8 @@ void TestBackend::qmlReviewActionAddsSessionOnlyNewCards() {
     QQuickItem *reviewButton = fixture.item(QStringLiteral("studyReviewButton"));
     QVERIFY(reviewButton);
     QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centerInWindow(window, reviewButton));
-    fixture.settle();
+    QVERIFY(waitForHasCard(fixture, true));
+    QVERIFY(waitForQuestionContains(fixture, QStringLiteral("Q2")));
 
     // The first eligible New card is shown without leaving Study, and moving
     // cards into the queue is not a rating, a due card or a daily-count write.
@@ -2769,25 +2820,29 @@ void TestBackend::qmlReviewActionAddsSessionOnlyNewCards() {
     for (int i = 2; i <= 6; ++i) {
         QVERIFY(fixture.backend.question().contains(QString("Q%1").arg(i)));
         QTest::keyClick(window, Qt::Key_Space);
-        fixture.settle();
+        QVERIFY(waitForShowingAnswer(fixture, true));
         QTest::keyClick(window, Qt::Key_2);
-        fixture.settle();
+        QVERIFY(waitForReviewed(fixture, i));
+        if (i < 6)
+            QVERIFY(waitForQuestionContains(fixture, QStringLiteral("Q%1").arg(i + 1)));
+        else
+            QVERIFY(waitForHasCard(fixture, false));
     }
     QVERIFY(!fixture.backend.hasCard());
     QCOMPARE(reviewButtonLabel(fixture), QStringLiteral("Add 5"));
     QTest::keyClick(window, Qt::Key_R);
-    fixture.settle();
-    QVERIFY(fixture.backend.question().contains(QStringLiteral("Q7")));
+    QVERIFY(waitForQuestionContains(fixture, QStringLiteral("Q7")));
+    QVERIFY(waitForHasCard(fixture, true));
 
     QTest::keyClick(window, Qt::Key_Space);
-    fixture.settle();
+    QVERIFY(waitForShowingAnswer(fixture, true));
     QTest::keyClick(window, Qt::Key_2);
-    fixture.settle();
-    QVERIFY(!fixture.backend.hasCard());
+    QVERIFY(waitForReviewed(fixture, 7));
+    QVERIFY(waitForHasCard(fixture, false));
     QCOMPARE(reviewButtonLabel(fixture), QStringLiteral("Review"));
     QTest::keyClick(window, Qt::Key_R);
-    fixture.settle();
-    QVERIFY(!fixture.backend.hasCard());
+    QVERIFY(waitForHasCard(fixture, false));
+    QVERIFY(waitForReviewButtonLabel(fixture, QStringLiteral("Review")));
 }
 
 void TestBackend::qmlReviewActionPresentsPendingRepeatFirst() {
@@ -2799,7 +2854,7 @@ void TestBackend::qmlReviewActionPresentsPendingRepeatFirst() {
         QVERIFY(fixture.createCard(QString("Q%1").arg(i), "A", "basic", {}));
     fixture.selectDeck();
     fixture.backend.setNewCardAllowance(1);
-    fixture.view->settleFileWatcher();
+    QVERIFY(waitForCardCountAtLeast(fixture.backend, 3));
     QVERIFY(fixture.loadWindow());
     auto *window = fixture.window();
     QVERIFY(window);
@@ -2807,30 +2862,31 @@ void TestBackend::qmlReviewActionPresentsPendingRepeatFirst() {
     QVERIFY(fixture.backend.question().contains(QStringLiteral("Q1")));
 
     QTest::keyClick(window, Qt::Key_Space);
-    fixture.settle();
+    QVERIFY(waitForShowingAnswer(fixture, true));
     QTest::keyClick(window, Qt::Key_1);
-    fixture.settle();
+    QVERIFY(waitForReviewed(fixture, 1));
+    QVERIFY(waitForHasCard(fixture, true));
+    QVERIFY(waitForQuestionContains(fixture, QStringLiteral("Q1")));
     // The only queued card was rated Again: it returns at once, and R is not
     // needed to pull it out of a waiting screen.
     QVERIFY(fixture.backend.hasCard());
     QVERIFY(fixture.backend.question().contains(QStringLiteral("Q1")));
     QVERIFY(!fixture.backend.status().contains(QStringLiteral("moment")));
-    QCOMPARE(reviewButtonLabel(fixture), QStringLiteral("Review"));
+    QVERIFY(waitForReviewButtonLabel(fixture, QStringLiteral("Review")));
     const int reviewedBefore = fixture.backend.reviewed();
 
     QTest::keyClick(window, Qt::Key_Space);
-    fixture.settle();
+    QVERIFY(waitForShowingAnswer(fixture, true));
     QTest::keyClick(window, Qt::Key_2);
-    fixture.settle();
-    QVERIFY(!fixture.backend.hasCard());
-    QCOMPARE(fixture.backend.reviewed(), reviewedBefore + 1);
-    QCOMPARE(reviewButtonLabel(fixture), QStringLiteral("Add 5"));
+    QVERIFY(waitForReviewed(fixture, reviewedBefore + 1));
+    QVERIFY(waitForHasCard(fixture, false));
+    QVERIFY(waitForReviewButtonLabel(fixture, QStringLiteral("Add 5")));
 
     // Issue 181's Add 5 path still owns the empty Review queue: R adds
     // session-only New cards without leaving Study.
     QTest::keyClick(window, Qt::Key_R);
-    fixture.settle();
-    QVERIFY(fixture.backend.question().contains(QStringLiteral("Q2")));
+    QVERIFY(waitForQuestionContains(fixture, QStringLiteral("Q2")));
+    QVERIFY(waitForHasCard(fixture, true));
 }
 
 void TestBackend::qmlEndStateHasNoWaitingScreen() {
@@ -2840,7 +2896,7 @@ void TestBackend::qmlEndStateHasNoWaitingScreen() {
     QVERIFY(fixture.createDeck());
     QVERIFY(fixture.createCard(QStringLiteral("Q1"), QStringLiteral("A1"), QStringLiteral("basic"), {}));
     fixture.selectDeck();
-    fixture.view->settleFileWatcher();
+    QVERIFY(waitForCardCountAtLeast(fixture.backend, 1));
     QVERIFY(fixture.loadWindow());
     auto *window = fixture.window();
     QVERIFY(window);
@@ -2848,17 +2904,20 @@ void TestBackend::qmlEndStateHasNoWaitingScreen() {
     QVERIFY(fixture.backend.question().contains(QStringLiteral("Q1")));
 
     QTest::keyClick(window, Qt::Key_Space);
-    fixture.settle();
+    QVERIFY(waitForShowingAnswer(fixture, true));
     QTest::keyClick(window, Qt::Key_1);
-    fixture.settle();
+    QVERIFY(waitForReviewed(fixture, 1));
+    QVERIFY(waitForHasCard(fixture, true));
+    QVERIFY(waitForQuestionContains(fixture, QStringLiteral("Q1")));
     QVERIFY(fixture.backend.hasCard()); // the repeat is on screen, not pending a wait
     QVERIFY(fixture.backend.question().contains(QStringLiteral("Q1")));
 
     QTest::keyClick(window, Qt::Key_Space);
-    fixture.settle();
+    QVERIFY(waitForShowingAnswer(fixture, true));
     QTest::keyClick(window, Qt::Key_2);
-    fixture.settle();
-    QVERIFY(!fixture.backend.hasCard());
+    QVERIFY(waitForReviewed(fixture, 2));
+    QVERIFY(waitForHasCard(fixture, false));
+    QVERIFY(waitForStudyEmptyText(fixture, QStringLiteral("All caught up.")));
     QVERIFY(fixture.backend.status().contains(QStringLiteral("All caught up")));
 
     const QStringList texts = studyEmptyTexts(fixture);
@@ -2876,7 +2935,7 @@ void TestBackend::qmlEndStateHasNoWaitingScreen() {
 
 void TestBackend::backendKeepsPendingRepeatInSameSession() {
     QTemporaryDir dir;
-    ScopedEnv delay("OMACARDS_AGAIN_DELAY_MS", "20");
+    ScopedEnv delay("OMACARDS_AGAIN_DELAY_MS", "5");
     {
         Backend backend(dir.path(), dir.filePath("state.db"));
         QString error;
@@ -3056,7 +3115,7 @@ void TestBackend::refreshKeepsPendingAgainRepeat() {
 
 void TestBackend::deckSwitchStartsFreshSession() {
     QTemporaryDir dir;
-    ScopedEnv delay("OMACARDS_AGAIN_DELAY_MS", "500");
+    ScopedEnv delay("OMACARDS_AGAIN_DELAY_MS", "25");
     {
         Backend backend(dir.path(), dir.filePath("state.db"));
         QString error;
@@ -3081,7 +3140,7 @@ void TestBackend::deckSwitchStartsFreshSession() {
         QVERIFY(!freshQuestion.isEmpty());
         QCOMPARE(backend.reviewed(), 0);
         QCOMPARE(backend.good(), 0);
-        QTest::qWait(700);
+        QTest::qWait(10); // the old 5 ms repeat would have fired by now
         QCOMPARE(backend.question(), freshQuestion);
     }
 }
@@ -3262,7 +3321,7 @@ void TestBackend::setModeBoundarySemantics() {
 
 void TestBackend::modeSwitchStopsRepeatTimerAndClearsPending() {
     QTemporaryDir dir;
-    ScopedEnv delay("OMACARDS_AGAIN_DELAY_MS", "200");
+    ScopedEnv delay("OMACARDS_AGAIN_DELAY_MS", "5");
     {
         // Keep deck files out of the state-db directory so a SQLite write
         // cannot trigger the deck watcher's debounced reload mid-test. Create
@@ -3275,8 +3334,6 @@ void TestBackend::modeSwitchStopsRepeatTimerAndClearsPending() {
         QVERIFY(backend.createDeck("Atomic", &error));
         QVERIFY(backend.createCard("Atomic", "Q1", "A1", "basic", {}, &error));
         QVERIFY(backend.createCard("Atomic", "Q2", "A2", "basic", {}, &error));
-        // Flush the watcher's 120 ms debounce before the repeat timer is armed.
-        QTest::qWait(250);
         backend.selectDeck("Atomic");
 
         backend.reveal();
@@ -3296,7 +3353,7 @@ void TestBackend::modeSwitchStopsRepeatTimerAndClearsPending() {
         QVERIFY(backend.status().contains("Cram"));
 
         QSignalSpy cardSpy(&backend, &Backend::cardChanged);
-        QTest::qWait(400); // the old Review timer would have fired by now
+        QTest::qWait(10); // the old 5 ms Review timer would have fired by now
         QCOMPARE(cardSpy.count(), 0);
     }
 }
@@ -3748,9 +3805,12 @@ void TestBackend::qmlStudyShowsMathPlaceholderUntilSvgArrives() {
     const QSize svgImageSize(120, 48);
     const QString svg = QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"60px\" height=\"24px\" "
                                        "viewBox=\"0 0 60 24\"><g fill=\"rgb(0%, 0%, 0%)\"/></svg>");
-    QVERIFY(writeFakePdfToolchain(bin, svg, QStringLiteral("sleep 1\n")));
+    const QString release = dir.filePath("math-release");
+    const QString delay = QStringLiteral("while [ ! -f \"$OMACARDS_MATH_RELEASE\" ]; do sleep 0.01; done\n");
+    QVERIFY(writeFakePdfToolchain(bin, svg, delay));
 
     TestSupport::ScopedEnv cacheEnv("XDG_CACHE_HOME", dir.filePath("cache"));
+    TestSupport::ScopedEnv releaseEnv("OMACARDS_MATH_RELEASE", release);
     PathGuard pathGuard(bin);
     StudyViewFixture fixture;
     QVERIFY(fixture.initialize());
@@ -3774,7 +3834,7 @@ void TestBackend::qmlStudyShowsMathPlaceholderUntilSvgArrives() {
             const qreal answerTop = answer->mapRectToScene(answer->boundingRect()).top();
             stableTops = qAbs(answerTop - previousAnswerTop) < 1.0 ? stableTops + 1 : 0;
             previousAnswerTop = answerTop;
-            return stableTops >= 5 && fixture.visualFacts().value(QStringLiteral("textInsideContent")).toBool();
+            return stableTops >= 2 && fixture.visualFacts().value(QStringLiteral("textInsideContent")).toBool();
         },
         1000));
 
@@ -3791,6 +3851,11 @@ void TestBackend::qmlStudyShowsMathPlaceholderUntilSvgArrives() {
     const QSizeF questionSizeBefore(question->property("contentWidth").toReal(),
                                     question->property("contentHeight").toReal());
     const qreal answerTopBefore = answer->mapRectToScene(answer->boundingRect()).top();
+
+    QFile marker(release);
+    QVERIFY(marker.open(QIODevice::WriteOnly));
+    marker.write("release");
+    marker.close();
 
     QTRY_VERIFY_WITH_TIMEOUT(!question->property("text").toString().contains(QStringLiteral("<!--omacards-math:")),
                              5000);
@@ -3959,9 +4024,13 @@ void TestBackend::cardEditRefreshesOnceWithoutWatcherEcho() {
     QVERIFY2(error.isEmpty(), qPrintable(error));
     QCOMPARE(decks.count(), 1);
     QCOMPARE(cards.count(), 1);
-    QTest::qWait(400); // longer than the watcher's 120 ms debounce
-    QCOMPARE(decks.count(), 1);
-    QCOMPARE(cards.count(), 1);
+
+    // The repository pauses its watcher across its own write. A refresh is
+    // the observable settle point: any echo from the edit would already have
+    // added a second notification before this one.
+    backend.refresh();
+    QCOMPARE(decks.count(), 2);
+    QCOMPARE(cards.count(), 2);
     QCOMPARE(backend.cardList().first().toMap().value("question").toString(), QString("Edited"));
 }
 
@@ -4124,7 +4193,6 @@ void TestBackend::qmlLibrarySelectionClampsAfterExternalRefresh() {
     QQuickItem *keyHandler = view.item(QStringLiteral("keyHandler"));
     QVERIFY(keyHandler);
     keyHandler->forceActiveFocus();
-    QVERIFY(QTest::qWaitFor([&]() { return keyHandler->hasActiveFocus(); }, 1000));
 
     QTest::keyClick(window, Qt::Key_Delete);
     QVERIFY(QTest::qWaitFor(
@@ -4229,7 +4297,6 @@ void TestBackend::qmlUndoShortcutsRespectKeyboardOwners() {
     QQuickItem *keyHandler = view.item(QStringLiteral("keyHandler"));
     QVERIFY(dialog && keyHandler);
     keyHandler->forceActiveFocus();
-    QVERIFY(QTest::qWaitFor([&]() { return keyHandler->hasActiveFocus(); }, 1000));
     QVERIFY(press(Qt::Key_N, [&] { return dialog->property("opened").toBool(); }));
     keyHandler->forceActiveFocus();
     setQuestion(QStringLiteral("Edited?"));
@@ -4343,15 +4410,16 @@ void TestBackend::qmlStudyBFromEmptyStudyOpensUnselectedLibraryAndReturns() {
     // Rate the only card until the Study screen reaches its end state, while
     // the Current Deck still has a visible row in the Library.
     QTest::keyClick(window, Qt::Key_Space);
-    fixture.settle();
+    QVERIFY(waitForShowingAnswer(fixture, true));
     QTest::keyClick(window, Qt::Key_1);
-    fixture.settle();
-    QVERIFY(fixture.backend.hasCard());
+    QVERIFY(waitForReviewed(fixture, 1));
+    QVERIFY(waitForHasCard(fixture, true));
     QTest::keyClick(window, Qt::Key_Space);
-    fixture.settle();
+    QVERIFY(waitForShowingAnswer(fixture, true));
     QTest::keyClick(window, Qt::Key_2);
-    fixture.settle();
-    QVERIFY(!fixture.backend.hasCard());
+    QVERIFY(waitForReviewed(fixture, 2));
+    QVERIFY(waitForHasCard(fixture, false));
+    QVERIFY(waitForStudyEmptyText(fixture, QStringLiteral("All caught up.")));
     QQuickItem *empty = fixture.item(QStringLiteral("studyEmptyMessage"));
     QVERIFY(empty);
     QVERIFY(waitForVisible(empty, true));
