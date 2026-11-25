@@ -48,10 +48,12 @@ private slots:
     void reviewWrapsWriteStoreErrors();
     void cramCommandContract();
     void addCardJsonContracts();
+    void addCardClozeMarkerContracts();
     void concurrentAddCardCommandsKeepEveryCard();
     void cardsJsonPreservesUnknownFileType();
     void addCardsInputValidationErrors();
     void editDeleteErrorContracts();
+    void editCardClozeMarkerContracts();
     void importJsonAndCsvContracts();
     void importJsonKeepsExactContractKeys();
     void previewJsonContracts();

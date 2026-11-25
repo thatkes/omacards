@@ -304,6 +304,15 @@ QVector<DeckIssue> lintBytes(const QString &path, const QByteArray &bytes) {
         };
         addMathWarnings(QStringLiteral("question"), card.question);
         addMathWarnings(QStringLiteral("answer"), card.answer);
+        if (card.type.kind == CardType::Cloze && !hasClozeMarker(card.question)) {
+            DeckIssue issue;
+            issue.path = path;
+            issue.card = card.id;
+            issue.line = line;
+            issue.message = QStringLiteral("Cloze card has no marker");
+            issue.hint = QStringLiteral("Write a marker like {{c1::answer}} in Q, or change the card type.");
+            issues << issue;
+        }
     }
     return issues;
 }
@@ -385,18 +394,25 @@ bool save(const Deck &deck, QByteArray *written, QString *error) {
     return true;
 }
 
+// A marker is {{cN::answer}} with an optional second :: segment for a hint.
+// The answer may contain a single colon; the hint may contain any non-brace
+// text. Keeping one pattern here makes detection and display agree.
+static const QRegularExpression &clozeMarker() {
+    static const QRegularExpression marker(R"re(\{\{c\d+::((?:[^:}\r\n]|:(?!:))+)(?:::[^}\r\n]*)?\}\})re");
+    return marker;
+}
+
+bool hasClozeMarker(const QString &question) {
+    return clozeMarker().match(question).hasMatch();
+}
+
 // Cloze cards keep the full sentence in Q and the answer is derived from the
 // {{c1::hidden}} markers, so agents can write them by hand.
 static QString stripCloze(const QString &text, bool reveal) {
-    static const QRegularExpression cloze(R"re(\{\{c\d+::(.*?)\}\})re");
-    if (reveal) {
-        return replaceMatches(text, cloze, [](const QRegularExpressionMatch &m) { return m.captured(1); });
-    }
-    QString hidden = replaceMatches(text, cloze, [](const QRegularExpressionMatch &m) {
-        return QString("[ %1 ]").arg(QString(m.captured(1).length(), QChar(0x00B7)));
+    return replaceMatches(text, clozeMarker(), [reveal](const QRegularExpressionMatch &m) {
+        const QString answer = m.captured(1);
+        return reveal ? answer : QStringLiteral("[ %1 ]").arg(QString(answer.length(), QChar(0x00B7)));
     });
-    hidden.remove(QRegularExpression(R"re(\{\{c\d+::(.*?)::.*?\}\})re"));
-    return hidden;
 }
 
 QString contentHash(const Card &card) {

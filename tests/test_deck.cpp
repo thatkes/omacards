@@ -403,6 +403,33 @@ void TestDeck::deckLintReportsDeckIssues() {
     QCOMPARE(issues.first().severity, QString("warning"));
 }
 
+void TestDeck::deckLintWarnsWhenClozeHasNoMarker() {
+    QTemporaryDir dir;
+    const QString cleanPath = dir.filePath("Marked.txt");
+    const QString warningPath = dir.filePath("Unmarked.txt");
+    QVERIFY(writeFile(cleanPath, "# Deck: Marked\n---\nQ: A {{c1::cat}} naps.\nA:\ntype: cloze\n"));
+    QVERIFY(writeFile(warningPath, "# Deck: Unmarked\n---\nQ: Plain question\nA:\ntype: cloze\n"));
+
+    QVERIFY2(DeckIO::lintFile(cleanPath).isEmpty(), "a marked Cloze card must stay lint-clean");
+
+    const QVector<DeckIssue> issues = DeckIO::lintFile(warningPath);
+    QCOMPARE(issues.size(), 1);
+    QCOMPARE(issues.first().path, warningPath);
+    QCOMPARE(issues.first().line, 3);
+    QCOMPARE(issues.first().severity, QStringLiteral("warning"));
+    QVERIFY(issues.first().message.contains(QStringLiteral("marker")));
+    QVERIFY(issues.first().hint.contains(QStringLiteral("{{c1::answer}}")));
+
+    // A Warning must not stop the Deck from loading or writing.
+    QString error;
+    const Deck deck = DeckIO::load(warningPath, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(deck.cards.size(), 1);
+    QCOMPARE(Domain::toString(deck.cards.first().type), QStringLiteral("cloze"));
+    QVERIFY(sameIssues(DeckIO::lintBytes(warningPath, "# Deck: Unmarked\n---\nQ: Plain question\nA:\ntype: cloze\n"),
+                       issues));
+}
+
 void TestDeck::deckLintFileMatchesDirectoryLint() {
     QTemporaryDir dir;
     const QString cleanPath = dir.filePath("Clean.txt");
@@ -521,12 +548,13 @@ void TestDeck::deckClozeEdgeCases() {
     QCOMPARE(hidden, QString("The [ %1 ] and [ %2 ] sleep.").arg(dots, dots));
     QCOMPARE(DeckIO::displayAnswer(card), QString("The cat and dog sleep."));
 
-    // Hints written by hand in a deck file are not stripped by DeckIO; the
-    // Anki importer is the layer that removes them.
-    card.question = "A {{c1::cat::animal}} naps.";
-    const QString hintDots(11, QChar(0x00B7)); // length of "cat::animal"
+    // Hand-written hints are stripped like importer hints: the reveal shows
+    // only the answer and the blank is sized to the answer, not the hint.
+    card.question = "A {{c2::cat::animal}} naps.";
+    card.answer.clear();                      // Cloze answers are derived from Q, not A.
+    const QString hintDots(3, QChar(0x00B7)); // length of "cat"
     QCOMPARE(DeckIO::displayQuestion(card), QString("A [ %1 ] naps.").arg(hintDots));
-    QCOMPARE(DeckIO::displayAnswer(card), QString("A cat::animal naps."));
+    QCOMPARE(DeckIO::displayAnswer(card), QString("A cat naps."));
 
     card.question = "A {{c1::cat naps.";
     QCOMPARE(DeckIO::displayQuestion(card), card.question);
