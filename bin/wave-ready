@@ -18,6 +18,103 @@ one_line() {
     printf '%s' "$1" | tr '\n' ' ' | sed 's/  */ /g'
 }
 
+# Fingerprint values collapse every whitespace run and the edges; one_line()
+# only collapses spaces because it also formats error messages.
+normalise_value() {
+    printf '%s' "$1" | tr '\n' ' ' |
+        sed 's/[[:space:]][[:space:]]*/ /g; s/^ //; s/ $//'
+}
+
+# The field order is also the order in which mismatches are reported.
+fingerprint_fields=$(cat <<'EOF'
+qmake -v
+g++ --version
+Qt version
+fc-match 'Noto Sans Math'
+QT_QPA_PLATFORM
+locale
+EOF
+)
+
+capture_fingerprint() {
+    qmake_v=$(normalise_value "$(qmake -v 2>&1 || true)")
+    compiler_v=$(normalise_value "$(g++ --version 2>&1 || true)")
+    qt_v=$(normalise_value "$(qmake -query QT_VERSION 2>&1 || true)")
+    font_v=$(normalise_value "$(fc-match 'Noto Sans Math' 2>&1 || true)")
+    locale_v=$(normalise_value "$(locale 2>/dev/null || true)")
+    printf '%s\t%s\n' \
+        'qmake -v' "$qmake_v" \
+        'g++ --version' "$compiler_v" \
+        'Qt version' "$qt_v" \
+        "fc-match 'Noto Sans Math'" "$font_v" \
+        'QT_QPA_PLATFORM' "${QT_QPA_PLATFORM-}" \
+        'locale' "$locale_v"
+}
+
+check_fingerprint() {
+    path=$1
+    actual=$(cd "$path" && capture_fingerprint)
+    while IFS= read -r field; do
+        [ -n "$field" ] || continue
+        saved_line=$(awk -F '\t' -v key="$field" \
+            '$1 == key { print; exit }' "$fingerprint")
+        if [ -z "$saved_line" ]; then
+            reason="toolchain fingerprint missing field: $field"
+            return 1
+        fi
+        actual_line=$(printf '%s\n' "$actual" |
+            awk -F '\t' -v key="$field" '$1 == key { print; exit }')
+        if [ "$saved_line" != "$actual_line" ]; then
+            reason="toolchain fingerprint mismatch: $field"
+            return 1
+        fi
+    done <<EOF
+$fingerprint_fields
+EOF
+    return 0
+}
+
+check_untracked() {
+    path=$1
+    if ! entries=$(git -C "$path" ls-files --others --exclude-standard 2>&1); then
+        reason="cannot read untracked status: $(one_line "$entries")"
+        return 1
+    fi
+    [ -n "$entries" ] || return 0
+    while IFS= read -r entry; do
+        [ -n "$entry" ] || continue
+        allowed=0
+        while IFS= read -r local_path; do
+            [ -n "$local_path" ] || continue
+            case "$entry" in
+                "$local_path"|"$local_path"/*) allowed=1; break ;;
+            esac
+        done <<EOF
+$allowed_paths
+EOF
+        if [ "$allowed" -eq 0 ]; then
+            reason="untracked file outside Local-only allowlist: $entry"
+            return 1
+        fi
+    done <<EOF
+$entries
+EOF
+    return 0
+}
+
+check_lint() {
+    path=$1
+    if ! output=$(cd "$path" && ./bin/lint 2>&1); then
+        if [ -n "$output" ]; then
+            reason="./bin/lint failed in worktree: $(one_line "$output")"
+        else
+            reason='./bin/lint failed in worktree'
+        fi
+        return 1
+    fi
+    return 0
+}
+
 base=
 root=
 suites=
@@ -75,6 +172,18 @@ expected=$(git -C "$ROOT" rev-parse --verify "$base^{commit}" 2>/dev/null || tru
 if [ -z "$expected" ]; then
     printf 'ERROR unknown base SHA: %s\n' "$base" >&2
     exit 2
+fi
+
+. "$ROOT/bin/local-only-sync-paths.sh"
+allowed_paths=$(local_only_sync_paths "$ROOT")
+
+# One fingerprint per base: capture it on the first wave-ready run, then
+# compare every proved worktree against that preflight environment.
+short=$(git -C "$ROOT" rev-parse --short=7 "$expected")
+fingerprint="$ROOT/build/equivalence/$short.fingerprint"
+if [ ! -f "$fingerprint" ]; then
+    mkdir -p "$(dirname -- "$fingerprint")"
+    capture_fingerprint > "$fingerprint"
 fi
 
 # Commas separate suites inside a pair; whitespace and semicolons separate
@@ -135,6 +244,12 @@ prove() {
         reason='dirty tracked checkout'
         return 1
     fi
+    if ! check_fingerprint "$path"; then
+        return 1
+    fi
+    if ! check_untracked "$path"; then
+        return 1
+    fi
     return 0
 }
 
@@ -189,6 +304,13 @@ for raw in $ids; do
     if ! sync_output=$("$ROOT/bin/sync-worktree-local-docs" "$path" 2>&1); then
         report_error "$name" \
             "cannot sync local docs: $(one_line "$sync_output")"
+        continue
+    fi
+
+    # Lint reads the synced local docs, so it belongs after the sync rather
+    # than in the pre-sync prove() call above.
+    if ! check_lint "$path"; then
+        report_error "$name" "$reason"
         continue
     fi
 

@@ -62,7 +62,14 @@ git -C "$src" init -q
 git -C "$src" config user.name 'Wave Ready Test'
 git -C "$src" config user.email 'wave-ready@example.test'
 printf 'base\n' > "$src/tracked.txt"
-git -C "$src" add .gitignore tracked.txt
+cat > "$src/bin/lint" <<'EOF'
+#!/bin/sh
+# Fixture lint: read the synced docs, then fail on request.
+[ -e docs/agents/note.md ] || exit 1
+[ ! -e docs/agents/lint-fails ]
+EOF
+chmod +x "$src/bin/lint"
+git -C "$src" add .gitignore tracked.txt bin/lint
 git -C "$src" commit -q -m base
 base=$(git -C "$src" rev-parse HEAD)
 printf 'next\n' > "$src/tracked.txt"
@@ -90,6 +97,15 @@ for spec in 201:SuiteA 202:SuiteB,SuiteC 203:SuiteD; do
     assert_has "three_missing_line_$id" \
         "ticket-$id $worktrees/ticket-$id $suites" "$ready_out"
     prove_worktree "three_missing_$id" "$id" "$base"
+done
+
+short=$(git -C "$src" rev-parse --short=7 "$base")
+fingerprint="$src/build/equivalence/$short.fingerprint"
+assert_file fingerprint_captured "$fingerprint"
+assert_line_count fingerprint_fields 6 "$(cat "$fingerprint")"
+for field in 'qmake -v' 'g++ --version' 'Qt version' \
+    "fc-match 'Noto Sans Math'" QT_QPA_PLATFORM locale; do
+    assert_file_has_text "fingerprint_field_$field" "$fingerprint" "$field"
 done
 
 # Existing correct worktree: reuse it instead of trying to create it again.
@@ -140,6 +156,60 @@ assert_equal stale_branch_stdout "$ready_out" ""
 assert_has stale_branch_error \
     "ERROR ticket-207 branch ticket-207 exists at $other" "$ready_err"
 assert_absent_file stale_branch_no_worktree "$worktrees/ticket-207"
+
+# Stray untracked file: reject it by name, then promote once it is gone. A
+# synced local-only doc stays untracked and is allowed.
+git -C "$src" worktree add -q -b ticket-208 "$worktrees/ticket-208" "$base"
+printf 'stray\n' > "$worktrees/ticket-208/stray.txt"
+run_ready stray_untracked "$base" --root "$worktrees" \
+    --suites '#208=SuiteI' 208
+assert_status stray_untracked_status 1 "$ready_status" \
+    "$ready_out$ready_err"
+assert_equal stray_untracked_stdout "$ready_out" ""
+assert_has stray_untracked_error \
+    'ERROR ticket-208 untracked file outside Local-only allowlist: stray.txt' \
+    "$ready_err"
+assert_file_has_text stray_untracked_untouched \
+    "$worktrees/ticket-208/stray.txt" 'stray'
+rm "$worktrees/ticket-208/stray.txt"
+run_ready stray_removed "$base" --root "$worktrees" \
+    --suites '#208=SuiteI' 208
+assert_status stray_removed_status 0 "$ready_status" "$ready_out$ready_err"
+assert_has stray_removed_line \
+    "ticket-208 $worktrees/ticket-208 SuiteI" "$ready_out"
+assert_file stray_removed_local_doc \
+    "$worktrees/ticket-208/docs/agents/note.md"
+
+# Lint failure: an allowlisted marker makes this worktree's lint fail.
+git -C "$src" worktree add -q -b ticket-209 "$worktrees/ticket-209" "$base"
+run_ready lint_setup "$base" --root "$worktrees" --suites '#209=SuiteJ' 209
+assert_status lint_setup_status 0 "$ready_status" "$ready_out$ready_err"
+: > "$worktrees/ticket-209/docs/agents/lint-fails"
+run_ready lint_failure "$base" --root "$worktrees" --suites '#209=SuiteJ' 209
+assert_status lint_failure_status 1 "$ready_status" "$ready_out$ready_err"
+assert_equal lint_failure_stdout "$ready_out" ""
+assert_has lint_failure_error \
+    'ERROR ticket-209 ./bin/lint failed in worktree' "$ready_err"
+assert_file lint_failure_untouched \
+    "$worktrees/ticket-209/docs/agents/lint-fails"
+
+# Fingerprint mismatch: the error names the field that differs.
+git -C "$src" worktree add -q -b ticket-210 "$worktrees/ticket-210" "$base"
+awk -F '\t' -v OFS='\t' '
+    $1 == "QT_QPA_PLATFORM" { $2 = "CHANGED"; print; next }
+    { print }
+' "$fingerprint" > "$tmp/fingerprint.changed"
+mv "$tmp/fingerprint.changed" "$fingerprint"
+run_ready fingerprint_mismatch "$base" --root "$worktrees" \
+    --suites '#210=SuiteK' 210
+assert_status fingerprint_mismatch_status 1 "$ready_status" \
+    "$ready_out$ready_err"
+assert_equal fingerprint_mismatch_stdout "$ready_out" ""
+assert_has fingerprint_mismatch_error \
+    'ERROR ticket-210 toolchain fingerprint mismatch: QT_QPA_PLATFORM' \
+    "$ready_err"
+assert_file fingerprint_mismatch_untouched \
+    "$worktrees/ticket-210/tracked.txt"
 
 if [ "$failures" -ne 0 ]; then
     printf '%s wave-ready case(s) failed\n' "$failures"
