@@ -367,7 +367,7 @@ void TestStudySession::endOfSessionRepeatIsPresentedWithoutWaiting() {
 }
 
 void TestStudySession::repeatTimerDoesNotSwapTheUnratedFlashcard() {
-    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "150");
+    ScopedEnv guard("OMACARDS_AGAIN_DELAY_MS", "60");
     SessionFixture fixture;
     QString error;
     QVERIFY(fixture.prepare("Timer", {"Q1", "Q2"}, &error));
@@ -378,14 +378,14 @@ void TestStudySession::repeatTimerDoesNotSwapTheUnratedFlashcard() {
 
     QSignalSpy cardSpy(&fixture.session, &StudySession::cardChanged);
     // Q1's Pending deadline must not displace the unrated Q2 before it passes.
-    QTest::qWait(75);
+    QTest::qWait(20);
     QCOMPARE(fixture.session.currentCardId(), onScreen);
     QVERIFY(fixture.session.showingAnswer());
     QCOMPARE(cardSpy.count(), 0);
 
     // The expired timer still leaves the card in place; the next transition is
     // driven by rating Q2, which presents the Pending Q1.
-    QTest::qWait(125);
+    QTest::qWait(60);
     QCOMPARE(fixture.session.currentCardId(), onScreen);
     QVERIFY(fixture.session.showingAnswer());
     QCOMPARE(cardSpy.count(), 0);

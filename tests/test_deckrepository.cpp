@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QSignalSpy>
@@ -864,7 +865,7 @@ void TestDeckRepository::watchDirectoryRequestsReloadAfterFileChange() {
 }
 
 void TestDeckRepository::watchDirectoryIgnoresRepositoryWrites() {
-    RepoFixture f;
+    RepoFixture f(10);
     QVERIFY(setup(f));
     f.repo.watchDirectory();
     QSignalSpy reloadSpy(&f.repo, &DeckRepository::reloadRequested);
@@ -876,7 +877,9 @@ void TestDeckRepository::watchDirectoryIgnoresRepositoryWrites() {
     QVERIFY(f.repo.modifyCard("Self", id, "Edited", "A", "basic", {}, &error));
     QVERIFY(f.repo.undo(&error, nullptr)); // history restores write files too
 
-    QTest::qWait(400); // longer than the 120 ms watcher debounce
+    QCOMPARE(reloadSpy.count(), 0);
+    // A leaked self-write event reaches the 10 ms debounce inside this window.
+    QVERIFY(!reloadSpy.wait(80));
     QCOMPARE(reloadSpy.count(), 0);
 
     // An outside write still reaches the debounced reload.
@@ -886,14 +889,14 @@ void TestDeckRepository::watchDirectoryIgnoresRepositoryWrites() {
 }
 
 void TestDeckRepository::watchDirectoryDebounceOverrideReloadsPromptly() {
-    RepoFixture f(10);
+    RepoFixture f(1);
     QVERIFY(setup(f));
     f.repo.watchDirectory();
     QSignalSpy reloadSpy(&f.repo, &DeckRepository::reloadRequested);
 
     QVERIFY(writeFile(QDir(f.dir.filePath("decks")).filePath("Fast.txt"), "# Deck: Fast\n---\nQ: q\nA: a\n"));
     // The production debounce cannot answer inside this window.
-    QTRY_VERIFY_WITH_TIMEOUT(reloadSpy.count() > 0, 100);
+    QTRY_VERIFY_WITH_TIMEOUT(reloadSpy.count() > 0, 50);
 }
 
 void TestDeckRepository::watchDirectoryUsesProductionDebounceByDefault() {
@@ -902,8 +905,11 @@ void TestDeckRepository::watchDirectoryUsesProductionDebounceByDefault() {
     f.repo.watchDirectory();
     QSignalSpy reloadSpy(&f.repo, &DeckRepository::reloadRequested);
 
+    QElapsedTimer sinceWrite;
+    sinceWrite.start();
     QVERIFY(writeFile(QDir(f.dir.filePath("decks")).filePath("Default.txt"), "# Deck: Default\n---\nQ: q\nA: a\n"));
-    QTest::qWait(60); // shorter than the production debounce
-    QCOMPARE(reloadSpy.count(), 0);
     QTRY_VERIFY_WITH_TIMEOUT(reloadSpy.count() > 0, 2000);
+    // The 120 ms production debounce holds the reload back; a prompt reload
+    // would land well below this lower bound.
+    QVERIFY(sinceWrite.elapsed() >= 100);
 }
