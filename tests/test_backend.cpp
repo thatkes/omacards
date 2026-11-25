@@ -842,6 +842,125 @@ QQuickItem *visibleHomeButton(const MainWindowHarness &view) {
 
 } // namespace
 
+void TestBackend::qmlStudyAllDueButtonShowsStateAndPosition() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Alpha", &error));
+    QVERIFY(backend.createDeck("Beta", &error));
+    backend.selectDeck("Alpha");
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+
+    QQuickItem *button = view.item(QStringLiteral("homeStudyAllDueButton"));
+    QVERIFY(button);
+    QVERIFY(button->isVisible());
+    QCOMPARE(button->property("label").toString(), QStringLiteral("Study all due"));
+    QVERIFY(!button->property("enabled").toBool());
+    QCOMPARE(backend.dueCount(), 0);
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centerInWindow(window, button));
+    QCOMPARE(view.screenName(), QStringLiteral("home"));
+
+    // Due work only in another Deck still enables the button.
+    QVERIFY(backend.createCard("Beta", "Beta question", "B1", "basic", {}, &error));
+    QVERIFY(QTest::qWaitFor([&]() { return backend.dueCount() > 0; }, 1000));
+    QVERIFY(QTest::qWaitFor([&]() { return button->property("enabled").toBool(); }, 1000));
+    QCOMPARE(backend.currentDeck(), QStringLiteral("Alpha"));
+
+    const auto actionWithLabel = [&](const QString &label) {
+        for (QQuickItem *sibling : button->parentItem()->childItems()) {
+            if (sibling->property("label").toString() == label)
+                return sibling;
+        }
+        return static_cast<QQuickItem *>(nullptr);
+    };
+    QQuickItem *startReview = actionWithLabel(QStringLiteral("Start review"));
+    QQuickItem *cram = actionWithLabel(QStringLiteral("Cram"));
+    QVERIFY(startReview && cram);
+    QVERIFY(startReview->x() < button->x());
+    QVERIFY(button->x() < cram->x());
+}
+
+void TestBackend::qmlStudyAllDueStartsFreshAcrossDecks() {
+    QTemporaryDir dir;
+    ScopedEnv delay("OMACARDS_AGAIN_DELAY_MS", "100");
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck("Alpha", &error));
+    QVERIFY(backend.createCard("Alpha", "Alpha first", "A1", "basic", {}, &error));
+    QVERIFY(backend.createCard("Alpha", "Alpha second", "A2", "basic", {}, &error));
+    QVERIFY(backend.createDeck("Beta", &error));
+    QVERIFY(backend.createCard("Beta", "Beta question", "B1", "basic", {}, &error));
+    backend.selectDeck("Alpha");
+
+    // Dirty the Current Deck sitting with a Pending repeat and a counter.
+    QVERIFY(backend.question().contains(QStringLiteral("Alpha first")));
+    const QString repeatedId = backend.currentCardId();
+    backend.reveal();
+    backend.rate(1);
+    QCOMPARE(backend.reviewed(), 1);
+    QVERIFY(backend.question().contains(QStringLiteral("Alpha second")));
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    QQuickItem *button = view.item(QStringLiteral("homeStudyAllDueButton"));
+    QVERIFY(button && button->isVisible() && button->property("enabled").toBool());
+
+    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, centerInWindow(window, button));
+    QVERIFY(QTest::qWaitFor([&]() { return view.screenName() == QStringLiteral("study"); }, 1000));
+    QCOMPARE(backend.mode(), QStringLiteral("review"));
+    QCOMPARE(backend.currentDeck(), QStringLiteral("Alpha"));
+    QCOMPARE(backend.reviewed(), 0);
+    QQuickItem *summary = view.item(QStringLiteral("studyDeckLabel"));
+    QVERIFY(summary);
+    QVERIFY2(summary->property("text").toString().contains(QStringLiteral("Alpha")),
+             qPrintable(summary->property("text").toString()));
+
+    // The All-decks queue starts with the remaining Current Deck card.
+    QVERIFY2(backend.question().contains(QStringLiteral("Alpha second")), qPrintable(backend.question()));
+    QTest::keyClick(window, Qt::Key_Space);
+    QVERIFY(QTest::qWaitFor([&]() { return backend.showingAnswer(); }, 1000));
+    QTest::keyClick(window, Qt::Key_2);
+    QVERIFY(QTest::qWaitFor([&]() { return backend.reviewed() == 1 && !backend.showingAnswer(); }, 1000));
+
+    // It then reaches another Deck. The old Pending repeat cannot take this
+    // turn: with its short delay it would have done so had it survived.
+    QTest::qWait(250);
+    QVERIFY2(backend.question().contains(QStringLiteral("Beta question")),
+             qPrintable(QStringLiteral("question=%1 reviewed=%2 current=%3 repeated=%4")
+                            .arg(backend.question(), QString::number(backend.reviewed()), backend.currentCardId(),
+                                 repeatedId)));
+    QVERIFY(backend.currentCardId() != repeatedId);
+    QTest::keyClick(window, Qt::Key_Space);
+    QVERIFY(QTest::qWaitFor([&]() { return backend.showingAnswer(); }, 1000));
+    QTest::keyClick(window, Qt::Key_2);
+    QVERIFY(QTest::qWaitFor([&]() { return !backend.hasCard(); }, 1000));
+
+    QQuickItem *empty = view.item(QStringLiteral("studyEmptyMessage"));
+    QVERIFY(empty && empty->isVisible());
+    QStringList texts;
+    QList<QQuickItem *> pending{empty};
+    while (!pending.isEmpty()) {
+        QQuickItem *current = pending.takeLast();
+        const QString text = current->property("text").toString();
+        if (!text.isEmpty())
+            texts << text;
+        pending.append(current->childItems());
+    }
+    QVERIFY(texts.contains(QStringLiteral("All caught up.")));
+    QCOMPARE(backend.currentDeck(), QStringLiteral("Alpha"));
+    QCOMPARE(backend.reviewed(), 2);
+}
+
 void TestBackend::qmlDeckSelectorShowsCurrentDeckAndCounts() {
     QTemporaryDir dir;
     Backend backend(dir.path(), dir.filePath("state.db"));

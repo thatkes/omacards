@@ -67,7 +67,15 @@ void StudySession::rebuildQueue(const QString &deckName, bool notifyStats) {
     m_currentId.clear();
 
     const Deck *deck = m_decks.deckByName(deckName);
-    if (deck && m_mode == StudyMode::Cram) {
+    if (deckName.isEmpty() && m_mode == StudyMode::Review) {
+        // All-decks session: the planner's empty-name scope returns Due cards
+        // across Decks followed by New cards in Deck order, with each Deck's
+        // daily allowance already applied. No session-only additions apply.
+        QStringList dueIds;
+        QStringList newIds;
+        m_planner.reviewIds(deckName, &dueIds, &newIds);
+        m_progression.buildReview(dueIds, newIds, pending);
+    } else if (deck && m_mode == StudyMode::Cram) {
         // The module only orders the Cards it is given; the injected policy
         // decides whether a rebuild shuffles them or keeps deck-file order.
         m_progression.buildCram(m_cramOrder(deck->cards));

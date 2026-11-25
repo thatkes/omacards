@@ -168,6 +168,8 @@ public slots:
     Q_INVOKABLE void rate(int rating);
     Q_INVOKABLE void showNext();
     Q_INVOKABLE void reviewWhenEmpty(int count);
+    // Home's All-decks Review action. Leaves Current Deck alone.
+    Q_INVOKABLE void startAllDue();
     Q_INVOKABLE void newDeck(const QString &name);
     Q_INVOKABLE void addCard(const QString &question, const QString &answer);
     Q_INVOKABLE void addCardDetails(const QString &question, const QString &answer, const QString &type,
@@ -234,6 +236,9 @@ private:
     QString m_persistedDeck;
     QHash<QString, qint64> m_lastStudied;
     StudyMode m_mode = StudyMode::Review;
+    // The Home button widens only the live sitting. Watcher refreshes must keep
+    // that scope; any other study entry point drops it.
+    bool m_allDueSession = false;
     QString m_cardFilter;
     mutable QVariantList m_cardListCache;
     mutable QVariantList m_deckSummariesCache;

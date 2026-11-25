@@ -114,7 +114,25 @@ void Backend::reviewWhenEmpty(int count) {
     // card. QML keeps the normal start-study path for every other case.
     if (m_mode != StudyMode::Review || m_session.hasCard())
         return;
+    if (m_allDueSession) {
+        // R after an All-decks sitting is the ordinary Current Deck action.
+        m_allDueSession = false;
+        m_session.rebuild(m_currentDeck);
+    }
     m_session.reviewWhenEmpty(count);
+}
+
+void Backend::startAllDue() {
+    if (m_mode != StudyMode::Review) {
+        m_mode = StudyMode::Review;
+        m_session.setMode(QStringLiteral("review"));
+    }
+    // One fresh Review sitting with the planner's unfiltered availability.
+    // An empty deck name is the existing "every Deck" scope; Current Deck stays
+    // put so the selector, Library and settings keep their usual default.
+    // The flag keeps that scope when a deck-file watcher rebuilds the queue.
+    m_allDueSession = true;
+    m_session.startFresh(QString());
 }
 
 void Backend::refresh() {
@@ -134,7 +152,7 @@ void Backend::refresh() {
     emit currentDeckChanged();
     emit cardsChanged();
     m_session.updateDueCount();
-    m_session.rebuild(m_currentDeck);
+    m_session.rebuild(m_allDueSession ? QString() : m_currentDeck);
     refreshBoxDistributionCache();
 }
 
@@ -250,6 +268,7 @@ void Backend::recordDeckSelection(const QString &name) {
 void Backend::selectDeck(const QString &name) {
     if (name.isEmpty() || name == m_currentDeck || !m_deckRepo.deckByName(name))
         return;
+    m_allDueSession = false;
     m_currentDeck = name;
     invalidateDerivedLists();
     recordDeckSelection(name);
@@ -326,6 +345,12 @@ void Backend::refreshBoxDistributionCache() const {
 }
 
 void Backend::setMode(const QString &mode) {
+    if (m_allDueSession) {
+        m_allDueSession = false;
+        // Any other entry point returns to the Current Deck, even when the
+        // requested mode is the one already active.
+        m_session.startFresh(m_currentDeck);
+    }
     // Compare the raw argument, not the parsed enum: noncanonical text still
     // reaches the session boundary and resets the sitting.
     if (mode == Domain::toString(m_mode))
@@ -360,6 +385,7 @@ void Backend::newDeck(const QString &name) {
 }
 
 bool Backend::createDeck(const QString &name, QString *error, const QString &description) {
+    m_allDueSession = false;
     if (!m_deckRepo.createDeck(name, &m_currentDeck, error, description))
         return false;
     refresh();

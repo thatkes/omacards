@@ -17,6 +17,8 @@ private slots:
     void backendAppliesDayStartToDueCards();
     void backendReportsNewCountAndDeckSummaries();
     void qmlCanNavigateLibraryCards();
+    void qmlStudyAllDueButtonShowsStateAndPosition();
+    void qmlStudyAllDueStartsFreshAcrossDecks();
     void qmlDeckSelectorShowsCurrentDeckAndCounts();
     void qmlDeckCycleKeysWrapAndAreScoped();
     void qmlDeckPickerClickCommitsAndLongNamesElideViaVisibleRow();

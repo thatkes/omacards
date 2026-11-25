@@ -38,7 +38,8 @@ public:
     void setMode(const QString &mode);
     void rebuild(const QString &deckName);
     // Rebuild for a freshly chosen deck: no pending repeats, Leitner boxes or
-    // session counters from the previous deck survive the switch.
+    // session counters from the previous deck survive the switch. An empty
+    // name starts an All-decks Review sitting from the planner's full scope.
     void startFresh(const QString &deckName);
     void updateDueCount();
     void setStatus(const QString &status);
