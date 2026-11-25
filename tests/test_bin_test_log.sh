@@ -4,7 +4,7 @@ set -eu
 # Self-test for the per-invocation log path in bin/test. It runs the real
 # bin/test against a fake test binary in an isolated checkout, twice at once,
 # so a fixed log path shows up as mixed or missing summaries. A plain run now
-# splits the suites into two concurrent groups; each group gets its own log and
+# splits the suites into three concurrent groups; each group gets its own log and
 # environment, and the runner presents one combined summary. A CLI source edit
 # is checked against the app binary the fake CLI tests spawn. A --timing run
 # must strip the flag before the test binary sees it and name each phase and
@@ -87,12 +87,14 @@ for suite in $all_suites; do
     suite_count=$((suite_count + 1))
 done
 case "$group" in
-    TestCli|TestBackend) suites=$suite_count totals=$suite_count marked=1 ;;
+    TestCli|TestBackend|TestDynamic) suites=$suite_count totals=$suite_count marked=1 ;;
 esac
 case "$mode" in
     run-a|run-b|edited|timing) ;;
     fail) suites=1; totals=1; marked=0 ;;
-    partial) suites=9; totals=2; marked=0 ;;
+    # Each of the three groups announces six suites, so the combined plan
+    # stays at 18 while the Totals lines show a truncated six-suite run.
+    partial) suites=6; totals=2; marked=0 ;;
     *) exit 2 ;;
 esac
 if [ "${marked:-0}" -eq 1 ]; then
@@ -133,11 +135,12 @@ assert_file_has_text run_a_own_marker "$tmp/out-a.log" 'MARKER: run-a'
 assert_file_has_text run_b_own_marker "$tmp/out-b.log" 'MARKER: run-b'
 assert_file_lacks_text run_a_has_no_other_marker "$tmp/out-a.log" 'MARKER: run-b'
 assert_file_lacks_text run_b_has_no_other_marker "$tmp/out-b.log" 'MARKER: run-a'
-assert_equal run_a_has_two_groups "$(count_matches "$tmp/out-a.log" 'GROUP: ')" 2
-assert_equal run_b_has_two_groups "$(count_matches "$tmp/out-b.log" 'GROUP: ')" 2
+assert_equal run_a_has_three_groups "$(count_matches "$tmp/out-a.log" 'GROUP: ')" 3
+assert_equal run_b_has_three_groups "$(count_matches "$tmp/out-b.log" 'GROUP: ')" 3
 assert_file_has_text run_a_has_cli_group "$tmp/out-a.log" 'GROUP: TestCli'
 assert_file_has_text run_a_has_backend_group "$tmp/out-a.log" 'GROUP: TestBackend'
-assert_file_has_text run_a_uses_binary_suite_list "$tmp/out-a.log" 'ALL_SUITES: TestBackend TestDynamic'
+assert_file_has_text run_a_has_other_group "$tmp/out-a.log" 'GROUP: TestDynamic'
+assert_file_has_text run_a_uses_binary_suite_list "$tmp/out-a.log" 'ALL_SUITES: TestDynamic'
 assert_file_has_text run_a_aggregated_announcement "$tmp/out-a.log" 'OMACARDS_TEST_SUITES: 3'
 assert_file_has_text run_a_combined_summary "$tmp/out-a.log" 'across 3 suites'
 assert_file_has_text run_b_combined_summary "$tmp/out-b.log" 'across 3 suites'
@@ -166,14 +169,14 @@ for log in "$repo"/build/tests/group.*; do
         mixed_group_logs=$((mixed_group_logs + 1))
     fi
 done
-assert_status four_group_logs 4 "$group_log_count"
-assert_status two_group_logs_for_run_a 2 "$a_group_logs"
-assert_status two_group_logs_for_run_b 2 "$b_group_logs"
+assert_status six_group_logs 6 "$group_log_count"
+assert_status three_group_logs_for_run_a 3 "$a_group_logs"
+assert_status three_group_logs_for_run_b 3 "$b_group_logs"
 assert_status no_mixed_group_logs 0 "$mixed_group_logs"
 
 for key in HOME OMACARDS_STATE_DB TMPDIR; do
     variants=$(grep -hoE "(^| )${key}=[^ ]*" "$repo"/build/tests/group.* | sort -u | wc -l)
-    assert_status "distinct_group_$key" 4 "$variants"
+    assert_status "distinct_group_$key" 6 "$variants"
 done
 cache_variants=$(grep -hoE '(^| )XDG_CACHE_HOME=[^ ]*' "$repo"/build/tests/group.* | sort -u | wc -l)
 assert_status shared_warm_xdg_cache 1 "$cache_variants"
@@ -186,15 +189,21 @@ assert_status focused_status 0 "$status_focused"
 assert_equal focused_has_one_group "$(count_matches "$tmp/out-focused.log" 'GROUP: ')" 1
 assert_file_has_text focused_keeps_smaller_count "$tmp/out-focused.log" 'across 1 suites'
 
-# --timing is observational: five phase lines and one line per registered
-# suite, with the flag stripped before the test binary sees the arguments.
+# --timing is observational: one phase per build/guard/group, one line per
+# registered suite, and the same three-group shape as a plain run. The flag is
+# stripped before the test binary sees the arguments.
 set +e
 PATH="$fakebin:$PATH" "$repo/bin/test" --timing timing > "$tmp/out-timing.log" 2>&1
 status_timing=$?
 set -e
 assert_status timing_status 0 "$status_timing"
-assert_equal timing_has_five_phases \
-    "$(count_matches "$tmp/out-timing.log" 'TIMING phase ')" 5
+assert_equal timing_has_three_groups \
+    "$(count_matches "$tmp/out-timing.log" 'GROUP: ')" 3
+assert_file_has_text timing_has_cli_group "$tmp/out-timing.log" 'GROUP: TestCli'
+assert_file_has_text timing_has_backend_group "$tmp/out-timing.log" 'GROUP: TestBackend'
+assert_file_has_text timing_has_other_group "$tmp/out-timing.log" 'GROUP: TestDynamic'
+assert_equal timing_has_six_phases \
+    "$(count_matches "$tmp/out-timing.log" 'TIMING phase ')" 6
 assert_file_has_text timing_phase_app "$tmp/out-timing.log" \
     'TIMING phase app-build: '
 assert_file_has_text timing_phase_scaling "$tmp/out-timing.log" \
@@ -203,6 +212,8 @@ assert_file_has_text timing_phase_test_build "$tmp/out-timing.log" \
     'TIMING phase test-binary-build: '
 assert_file_has_text timing_phase_cli_group "$tmp/out-timing.log" \
     'TIMING phase cli-group: '
+assert_file_has_text timing_phase_backend_group "$tmp/out-timing.log" \
+    'TIMING phase backend-group: '
 assert_file_has_text timing_phase_other_group "$tmp/out-timing.log" \
     'TIMING phase other-group: '
 assert_equal timing_has_three_suite_lines \
@@ -232,7 +243,7 @@ assert_status partial_run_status 1 "$status_partial"
 assert_file_has_text partial_run_guard "$tmp/out-partial.log" 'expected 18'
 
 PATH="$fakebin:$PATH" "$repo/bin/test" info > "$tmp/out-info.log" 2>&1
-assert_equal info_has_two_groups "$(count_matches "$tmp/out-info.log" 'GROUP: ')" 2
+assert_equal info_has_three_groups "$(count_matches "$tmp/out-info.log" 'GROUP: ')" 3
 assert_file_has_text info_mode_summary "$tmp/out-info.log" 'across 0 suites'
 
 # A CLI source edit must reach the app binary the CLI tests spawn. The fake
