@@ -102,6 +102,16 @@ ApplicationWindow {
         startStudy("review")
     }
 
+    // The Home button widens the Study start path for one sitting. Current
+    // Deck is untouched, so every other entry point keeps its usual scope.
+    function studyAllDue() {
+        closeDeckPicker()
+        backend.startAllDue()
+        resetStudyScroll()
+        screen = "study"
+        keyHandler.forceActiveFocus()
+    }
+
     function goHome() {
         closeDeckPicker()
         screen = "home"
@@ -1085,6 +1095,13 @@ ApplicationWindow {
                                            ? qsTr("Start review") : qsTr("Review anyway")
                                     hint: "R"
                                     onClicked: win.startStudy("review")
+                                }
+
+                                ActionButton {
+                                    objectName: "homeStudyAllDueButton"
+                                    label: qsTr("Study all due")
+                                    enabled: backend.dueCount > 0
+                                    onClicked: win.studyAllDue()
                                 }
 
                                 ActionButton {
