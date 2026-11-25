@@ -1,0 +1,96 @@
+#!/bin/sh
+set -eu
+
+# Validate the state and deferral reason cells in the ledger's current-id
+# table. Tests pass a fixture ledger; normal use reads the local wiki ledger.
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+
+usage() {
+    printf 'Usage: check-ledger-states [--ledger PATH]\n' >&2
+}
+
+ledger="$ROOT/docs/agents/wiki/backlog-queue-ledger.md"
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --ledger)
+            [ "$#" -ge 2 ] || { usage; exit 2; }
+            ledger=$2
+            shift 2
+            ;;
+        *)
+            usage
+            exit 2
+            ;;
+    esac
+done
+
+if [ ! -f "$ledger" ]; then
+    printf 'ERROR no such ledger: %s\n' "$ledger" >&2
+    exit 1
+fi
+
+report="$(awk -F '[|]' '
+    function trim(value) {
+        gsub(/^[ \t]+|[ \t]+$/, "", value)
+        return value
+    }
+    function canonical(value) {
+        return value == "queued" || value == "running" ||
+               value == "deferred: awaiting recon" ||
+               value == "deferred: complicated" ||
+               value == "deferred: user decision" ||
+               value == "needs-triage" || value == "merged"
+    }
+    function has_reason(value) {
+        gsub(/[ \t`]/, "", value)
+        gsub(/-/, "", value)
+        gsub(/\342\200\223/, "", value)
+        gsub(/\342\200\224/, "", value)
+        return value != ""
+    }
+    BEGIN { q = "\047"; starts = 0; ends = 0; inside = 0; bad = 0 }
+    /<!-- ledger-current-ids-start -->/ {
+        starts++
+        if (inside || ends) bad = 1
+        inside = 1
+        next
+    }
+    /<!-- ledger-current-ids-end -->/ {
+        ends++
+        if (!inside) bad = 1
+        inside = 0
+        next
+    }
+    inside && /^\|/ {
+        if (NF < 5) { bad = 1; next }
+        id = trim($2)
+        state = trim($3)
+        gsub(/`/, "", state)
+        if (id == "id" || id ~ /^-+$/) next
+        if (id !~ /^#[0-9]+$/) {
+            bad = 1
+            print "ERROR " id ": invalid id cell " q id q
+            next
+        }
+        if (!canonical(state)) {
+            bad = 1
+            print "ERROR " id ": invalid state cell " q state q
+            next
+        }
+        if (state ~ /^deferred:/ && !has_reason($5)) {
+            bad = 1
+            print "ERROR " id ": missing reason for " q state q
+        }
+    }
+    END {
+        if (starts != 1 || ends != 1 || inside || bad)
+            print "ERROR malformed ledger current-id section"
+    }
+' "$ledger")"
+
+if [ -n "$report" ]; then
+    printf '%s\n' "$report"
+    exit 1
+fi
+
+printf 'LEDGER STATES OK\n'
