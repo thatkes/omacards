@@ -47,6 +47,12 @@ src/theme.* src/translator.*  theme
 src/i18n/  catalogue
 tests/  suite
 ```
+
+Cloze rules: add-card uses [--type <basic|cloze>] with lowercase type values.
+A marker alone sets the type; an explicit --type wins. The answer may be
+omitted when the marker supplies it. {{c1::answer}} reveals at display time,
+multiple markers keep their numbers, and {{c1::answer::hint}} drops ::hint for
+Anki imports and hand-written cards.
 EOF
     cat > "$root/src/skill/SKILL.md" <<'EOF'
 ## Command list
@@ -59,6 +65,12 @@ omacards help  # aliases: --help, -h
 omacards skill <subcommand> [--json]
 omacards skill install [--json]
 ```
+
+Cloze rules: add-card uses [--type <basic|cloze>] with lowercase type values.
+A marker alone sets the type; an explicit --type wins. The answer may be
+omitted when the marker supplies it. {{c1::answer}} reveals at display time,
+multiple markers keep their numbers, and {{c1::answer::hint}} drops ::hint for
+Anki imports and hand-written cards.
 EOF
     : > "$root/src/backend.h"
     : > "$root/src/backend.cpp"
@@ -67,11 +79,115 @@ EOF
     : > "$root/src/translator.h"
     : > "$root/src/translator.cpp"
     : > "$root/src/i18n/en.json"
+    cat > "$root/src/command-help.txt" <<'EOF'
+# Help wording for the command-path registry.
+Path: check
+Purpose: Show deck issues.
+Flags: [--json], --help, -h
+Example: omacards check --json
+
+Path: decks
+Purpose: List decks.
+Flags: [--json], --help, -h
+Example: omacards decks --json
+
+Path: decks current
+Purpose: Show the Current deck.
+Flags: [--json], --help, -h
+Example: omacards decks current --json
+
+Path: skill
+Purpose: Manage the agent skill.
+Flags: [install], [--json], --help, -h
+Example: omacards skill --help
+
+Path: skill install
+Purpose: Install the agent skill.
+Flags: [--json], --help, -h
+Example: omacards skill install --json
+EOF
+    mkdir -p "$root/reference" "$root/lessons"
+    cat > "$root/reference/0001-sample.html" <<'EOF'
+<p>See <code>Cli::run()</code> in src/cli.cpp.</p>
+EOF
+    cat > "$root/lessons/0001-sample.html" <<'EOF'
+<p>See <code>Cli::write()</code> in src/cli.cpp.</p>
+EOF
 }
 
 matching="$tmp/matching"
 make_root "$matching"
 expect_result matching_docs_pass 0 'Doc references OK' "$matching" 'FAIL'
+
+# Every command in the three-document contract must appear in each document.
+missing_skill_command="$tmp/missing-skill-command"
+make_root "$missing_skill_command"
+sed '/^omacards skill install /d' \
+    "$missing_skill_command/src/skill/SKILL.md" > "$tmp/no-skill-command.md"
+mv "$tmp/no-skill-command.md" "$missing_skill_command/src/skill/SKILL.md"
+expect_result command_missing_from_one_doc_fails 1 \
+    'SKILL.md: command missing from doc contract: skill install' \
+    "$missing_skill_command" 'Doc references OK'
+
+# Flag sets are compared per command, in both directions, across all three.
+missing_readme_flag="$tmp/missing-readme-flag"
+make_root "$missing_readme_flag"
+sed 's/^omacards skill install \[--json\]$/omacards skill install/' \
+    "$missing_readme_flag/README.md" > "$tmp/no-install-json.md"
+mv "$tmp/no-install-json.md" "$missing_readme_flag/README.md"
+expect_result flag_missing_from_one_doc_fails 1 \
+    'README.md: command skill install is missing flag --json' \
+    "$missing_readme_flag" 'Doc references OK'
+
+extra_skill_flag="$tmp/extra-skill-flag"
+make_root "$extra_skill_flag"
+sed 's/^omacards decks \[--json\]$/omacards decks [--json] [--strict]/' \
+    "$extra_skill_flag/src/skill/SKILL.md" > "$tmp/extra-decks-flag.md"
+mv "$tmp/extra-decks-flag.md" "$extra_skill_flag/src/skill/SKILL.md"
+expect_result flag_extra_in_one_doc_fails 1 \
+    'SKILL.md: command decks has extra flag --strict' \
+    "$extra_skill_flag" 'Doc references OK'
+
+missing_help_flag="$tmp/missing-help-flag"
+make_root "$missing_help_flag"
+awk '
+    /^Path: / { path = $2 }
+    /^Flags: / && path == "check" { print "Flags: --help, -h"; next }
+    { print }
+' "$missing_help_flag/src/command-help.txt" > "$tmp/no-check-json.txt"
+mv "$tmp/no-check-json.txt" "$missing_help_flag/src/command-help.txt"
+expect_result flag_missing_from_help_fails 1 \
+    'src/command-help.txt: command check is missing flag --json' \
+    "$missing_help_flag" 'Doc references OK'
+
+# The cloze contract is checked by tokens, not by exact prose.
+no_cloze_hint="$tmp/no-cloze-hint"
+make_root "$no_cloze_hint"
+sed 's/{{c1::answer::hint}}/{{c1::answer}}/g' \
+    "$no_cloze_hint/src/skill/SKILL.md" > "$tmp/no-cloze-hint.md"
+mv "$tmp/no-cloze-hint.md" "$no_cloze_hint/src/skill/SKILL.md"
+expect_result cloze_hint_rule_required 1 \
+    'SKILL.md: missing cloze contract text: {{c1::answer::hint}}' \
+    "$no_cloze_hint" 'Doc references OK'
+
+# Teaching pages point at symbols, not line numbers.
+numbered_reference="$tmp/numbered-reference"
+make_root "$numbered_reference"
+cat > "$numbered_reference/reference/0001-sample.html" <<'EOF'
+<p><a href="../src/cli.cpp#L12">Cli::run()</a></p>
+EOF
+expect_result numeric_reference_anchor_fails 1 \
+    'reference/0001-sample.html:1: numeric source anchor: #L12' \
+    "$numbered_reference" 'Doc references OK'
+
+numbered_lesson="$tmp/numbered-lesson"
+make_root "$numbered_lesson"
+cat > "$numbered_lesson/lessons/0001-sample.html" <<'EOF'
+<p>Cli::write() is in src/cli.cpp:12.</p>
+EOF
+expect_result numeric_lesson_anchor_fails 1 \
+    'lessons/0001-sample.html:1: numeric source anchor: src/cli.cpp:12' \
+    "$numbered_lesson" 'Doc references OK'
 
 # A bare subcommand that is not in the registry is a drift regression, not
 # an argument to be ignored.
@@ -160,7 +276,7 @@ cat > "$valid_help_metadata/src/command-help.txt" <<'EOF'
 # Help wording for the command-path registry.
 Path: check
 Purpose: Show deck issues.
-Flags: --help, -h
+Flags: [--json], --help, -h
 Example: omacards check --help
 
 Path: decks
@@ -245,7 +361,7 @@ make_root "$complete_help_metadata"
 cat > "$complete_help_metadata/src/command-help.txt" <<'EOF'
 Path: check
 Purpose: Show deck issues.
-Flags: --help, -h
+Flags: [--json], --help, -h
 Example: omacards check --help
 
 Path: decks

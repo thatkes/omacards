@@ -138,6 +138,12 @@ type: cloze
 
 Questions and answers may span multiple lines: indent every continuation line with exactly two spaces. `omacards check` reports lines with more indentation as Deck issues.
 
+A Cloze card stores the full sentence in its Question and uses `{{c1::answer}}` for the hidden passage. The answer may be omitted because the reveal comes from the marker at display time. A marker alone sets the type after #186; an explicit `--type` still wins. Type values are lowercase: `basic` or `cloze`. Multiple markers keep their numbers, and `{{c1::answer::hint}}` drops the `::hint` for both Anki imports and hand-written cards.
+
+```sh
+omacards add-card --deck Spanish -q 'The {{c1::cat}} sleeps.' --json
+```
+
 ### Worked multi-line answers
 
 For a one-off card, use ANSI-C single quotes so `\n` becomes a real newline. Plain single quotes leave `\n` as a literal backslash and n. Double LaTeX backslashes inside `$'...'` (`\\(` for `\(`, `\\frac` for `\frac`), or bash reads `\f` and `\t` as its own escapes:
@@ -174,9 +180,9 @@ omacards add-cards --deck Calculus --input - --json <<'JSON'
 JSON
 ```
 
-A card's id is a hash of its deck, question and answer, so editing a card resets its Scheduling state but keeps the file readable. An explicit `id:` line pins the identity across edits.
+A card's id is a hash of its deck, question and answer, so it stays stable across edits. Scheduling state is invalidated only when the content hash changes: edits to Question, Answer or type reset it, while tag-only edits keep it. An explicit `id:` line pins the identity across edits.
 
-Anki `.apkg` imports preserve HTML entities, tags, and cloze note types (`{{c1::answer}}`; `::hint` is dropped). Referenced media is extracted next to the deck files under `media/<sanitized-deck>/` and image sources are rewritten to local `file://` URLs, so images still render in the study view. CSV files use commas between columns and TSV files use tabs. Columns hold the question, answer and an optional comma-separated tags list. An optional header row is skipped when its first cell contains `question` or the Anki alias `front`. Both import as basic cards.
+Anki `.apkg` imports preserve HTML entities, tags, and cloze note types (`{{c1::answer}}`; `::hint` is dropped for both Anki imports and hand-written cards). Referenced media is extracted next to the deck files under `media/<sanitized-deck>/` and image sources are rewritten to local `file://` URLs, so images still render in the study view. CSV files use commas between columns and TSV files use tabs. Columns hold the question, answer and an optional comma-separated tags list. An optional header row is skipped when its first cell contains `question` or the Anki alias `front`. Both import as basic cards.
 
 ## Agent CLI
 
@@ -186,7 +192,7 @@ stderr; in JSON mode failures print an `error`/`ok:false` object to stdout.
 `open` and `help` ignore `--json`.
 
 ```sh
-omacards add-card [--deck <deck>] -q <question> -a <answer> [--tags <tags>] [--json]
+omacards add-card [--deck <deck>] -q <question> -a <answer> [--type <basic|cloze>] [--tags <tags>] [--json]
 omacards add-cards [--deck <deck>] [--description <text>] --input <file> [--json]
 omacards add-deck <deck> [--description <text>] [--json]
 omacards cards [--deck <deck>] [--json]
@@ -195,10 +201,10 @@ omacards config [--new-card-allowance <n>] [--day-start-hour <h>] [--retention <
 omacards cram [--deck <deck>] [--steps <n>] [--json]
 omacards decks [--json]
 omacards decks current [--json]
-omacards delete-card -c <card-id> [--json]
+omacards delete-card -c <card-id> [--deck <deck>] [--json]
 omacards delete-deck <deck> [--json]
 omacards due [--deck <deck>] [--json]
-omacards edit-card -c <card-id> -a <answer> [--type <type>] [--tags <tags>] [--json]
+omacards edit-card -c <card-id> [-q <question>] [-a <answer>] [--type <type>] [--tags <tags>] [--json]
 omacards edit-deck <deck> --description <text> [--json]
 omacards forecast [--deck <deck>] [--json]
 omacards help  # aliases: --help, -h
@@ -208,6 +214,7 @@ omacards preview [--deck <deck>] [--card <card-id>] [--format <format>] [--json]
 omacards rename-deck <old-name> <new-name> [--json]
 omacards review -c <card-id> -r <rating> [--json]
 omacards search <term> [--deck <deck>] [--json]
+omacards skill  # bare skill prints status and help; --json prints status only
 omacards skill <subcommand> [--json]
 omacards skill install [--json]
 omacards skill status [--json]

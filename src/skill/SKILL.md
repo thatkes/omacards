@@ -63,7 +63,7 @@ exists, seeding is skipped and the Deck list is empty; the checkout helper
 ## Command list
 
 ```sh
-omacards add-card [-d <deck>] -q <question> -a <answer> [--tags <tags>] [--json]
+omacards add-card [-d <deck>] -q <question> -a <answer> [--type <basic|cloze>] [--tags <tags>] [--json]
 omacards add-cards [--deck <deck>] [--description <text>] --input <file> [--json]
 omacards add-deck <deck> [--description <text>] [--json]
 omacards cards [-d <deck>] [--json]
@@ -99,6 +99,17 @@ omacards warm [-d <deck>] [--json]
 
 `add-card` without `--deck` writes to the Current deck, so check
 `omacards decks current --json` first.
+
+For a Cloze card, put `{{c1::answer}}` in the Question. The answer may be
+omitted because the reveal comes from the marker at display time. A marker
+alone sets the type after #186; an explicit `--type` still wins. Type values
+are lowercase: `basic` or `cloze`. Multiple markers keep their numbers, and
+`{{c1::answer::hint}}` drops the `::hint` for both Anki imports and hand-written
+cards.
+
+```sh
+omacards add-card --deck Spanish -q 'The {{c1::cat}} sleeps.' --json
+```
 
 ## Bulk deck creation (preferred)
 
@@ -218,6 +229,9 @@ id: a1b2c3d4e5f6
 - `---` separates cards.
 - Keys: `Q:` / `A:` (question / answer), `Answer:` is an alias for `A:`,
   `type: cloze`, `tags: a, b`, and an explicit `id:`.
+- A Cloze card may omit `A:`. The reveal comes from the `{{c1::answer}}` marker
+  at display time; multiple markers keep their numbers. A `::hint` segment is
+  dropped from hand-written cards as it is from Anki imports.
 - **Continuation lines must start with exactly two spaces.** One leading space
   or three or more is reported as a Deck issue by `check`.
 - A Card id is a hash of its Deck, question and answer. A hand-edited file
