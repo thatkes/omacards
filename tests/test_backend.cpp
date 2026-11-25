@@ -23,6 +23,7 @@
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTemporaryDir>
+#include <QTime>
 #include <QUrl>
 #include <QVariant>
 #include <memory>
@@ -2109,6 +2110,166 @@ void TestBackend::qmlGoodLabelUsesGoodCount() {
     QCOMPARE(stats.value("studyDayGood").toInt(), 1);
     QCOMPARE(stats.value("totalRatings").toInt(), 1);
     QVERIFY(!stats.contains("today"));
+}
+
+void TestBackend::qmlStatsForecastModulesUseCurrentSchedulingState() {
+    QTemporaryDir dir;
+    Backend backend(dir.path(), dir.filePath("state.db"));
+    QString error;
+    QVERIFY(backend.initialize(&error));
+    QVERIFY(backend.createDeck(QStringLiteral("Alpha"), &error));
+    QVERIFY(backend.createDeck(QStringLiteral("Beta"), &error));
+    for (const QString &question :
+         {QStringLiteral("overdue"), QStringLiteral("today"), QStringLiteral("plus1"), QStringLiteral("plus20"),
+          QStringLiteral("plus21"), QStringLiteral("plus95"), QStringLiteral("new")})
+        QVERIFY(backend.createCard(QStringLiteral("Alpha"), question, QStringLiteral("A"), QStringLiteral("basic"), {},
+                                   &error));
+    QVERIFY(backend.createCard(QStringLiteral("Beta"), QStringLiteral("beta-plus5"), QStringLiteral("A"),
+                               QStringLiteral("basic"), {}, &error));
+    backend.setDayStartHour(4);
+
+    const QDate today = Config::studyDay(QDateTime::currentMSecsSinceEpoch(), 4);
+    const auto at = [&today](int offset) { return QDateTime(today.addDays(offset), QTime(12, 0)).toMSecsSinceEpoch(); };
+    QHash<QString, Card> cards;
+    for (const Deck &deck : backend.allDecks())
+        for (const Card &card : deck.cards)
+            cards.insert(card.question, card);
+    const auto seed = [&](const QString &question, int offset, int reps) {
+        const Card card = cards.value(question);
+        QVERIFY(!card.id.isEmpty());
+        FsrsState state;
+        state.due = at(offset);
+        state.reps = reps;
+        state.stability = 2.0;
+        state.difficulty = 5.0;
+        state.lastReview = at(-1);
+        backend.store().save(card.id, DeckIO::contentHash(card), state);
+    };
+    seed(QStringLiteral("overdue"), -1, 2);
+    seed(QStringLiteral("today"), 0, 3);
+    seed(QStringLiteral("plus1"), 1, 2);
+    seed(QStringLiteral("plus20"), 20, 3);
+    seed(QStringLiteral("plus21"), 21, 3);
+    seed(QStringLiteral("plus95"), 95, 3);
+    seed(QStringLiteral("beta-plus5"), 5, 2);
+    QVERIFY(backend.store().lastError().isEmpty());
+    backend.refresh();
+
+    MainWindowHarness view(backend);
+    QVERIFY(view.window);
+    auto *window = qobject_cast<QQuickWindow *>(view.window);
+    QVERIFY(window);
+    QVERIFY(QTest::qWaitForWindowExposed(window));
+    window->resize(window->minimumWidth(), window->minimumHeight());
+    QVERIFY(QTest::qWaitFor(
+        [&]() { return window->width() == window->minimumWidth() && window->height() == window->minimumHeight(); },
+        1000));
+
+    const auto collect = [&](const QString &objectName) {
+        QList<QQuickItem *> found;
+        QList<QQuickItem *> pending{window->contentItem()};
+        while (!pending.isEmpty()) {
+            QQuickItem *current = pending.takeFirst();
+            if (current->objectName() == objectName)
+                found << current;
+            pending.append(current->childItems());
+        }
+        return found;
+    };
+
+    QVERIFY(QMetaObject::invokeMethod(view.window, "openStats"));
+    QVERIFY(QTest::qWaitFor([&]() { return view.window->property("statsVisible").toBool(); }, 1000));
+    view.settle();
+
+    // The nine existing rows stay as they were, and the two Forecast modules
+    // are separate named surfaces with their own legends.
+    const QStringList expectedLabels{
+        QStringLiteral("Reviews today"), QStringLiteral("Accuracy today"), QStringLiteral("New cards today"),
+        QStringLiteral("Due now"),       QStringLiteral("Streak"),         QStringLiteral("Total reviews"),
+        QStringLiteral("Cards"),         QStringLiteral("Decks"),          QStringLiteral("This session")};
+    QStringList labels;
+    for (QQuickItem *label : collect(QStringLiteral("statsRowLabel")))
+        labels << label->property("text").toString();
+    QCOMPARE(labels, expectedLabels);
+    QVERIFY(view.item(QStringLiteral("scheduleHeatmap")));
+    QVERIFY(view.item(QStringLiteral("cardCompositionChart")));
+    QVERIFY(view.item(QStringLiteral("scheduleHeatmapLegend")));
+    QVERIFY(view.item(QStringLiteral("cardCompositionLegend")));
+    QCOMPARE(collect(QStringLiteral("scheduleHeatmapLegendEntry")).size(), 5);
+
+    // One value, held in Config, drives both the panel and the CLI command.
+    const QVariantList days = view.window->property("forecastDays").toList();
+    QCOMPARE(days.size(), Config::kForecastWindowDays);
+    QCOMPARE(days.first().toMap().value(QStringLiteral("date")).toString(),
+             today.toString(QStringLiteral("yyyy-MM-dd")));
+    QCOMPARE(days.last().toMap().value(QStringLiteral("date")).toString(),
+             today.addDays(Config::kForecastWindowDays - 1).toString(QStringLiteral("yyyy-MM-dd")));
+
+    const QList<QQuickItem *> cells = collect(QStringLiteral("scheduleHeatmapCell"));
+    QCOMPARE(cells.size(), Config::kForecastWindowDays);
+    const auto cellAt = [&cells](int index) -> QQuickItem * {
+        for (QQuickItem *cell : cells)
+            if (cell->property("dayIndex").toInt() == index)
+                return cell;
+        return nullptr;
+    };
+    QVERIFY(cellAt(0) && cellAt(1) && cellAt(5) && cellAt(20) && cellAt(21) && cellAt(89));
+    QCOMPARE(cellAt(0)->property("dayCount").toInt(), 2); // overdue and current-day returns share the first cell
+    QCOMPARE(cellAt(1)->property("dayCount").toInt(), 1);
+    QCOMPARE(cellAt(5)->property("dayCount").toInt(), 1); // Beta is present despite Alpha being current
+    QCOMPARE(cellAt(20)->property("dayCount").toInt(), 1);
+    QCOMPARE(cellAt(21)->property("dayCount").toInt(), 1);
+    QCOMPARE(cellAt(89)->property("dayCount").toInt(), 0);
+
+    // Bands adapt to the busiest day. Their colours are derived from the live
+    // theme at runtime, not pinned to a palette value.
+    QQuickItem *heatmap = view.item(QStringLiteral("scheduleHeatmap"));
+    QCOMPARE(heatmap->property("maxCount").toInt(), 2);
+    QCOMPARE(cellAt(0)->property("band").toInt(), 4);
+    QCOMPARE(cellAt(89)->property("band").toInt(), 0);
+    const QColor accent(view.theme.accent());
+    const QColor busy = cellAt(0)->property("color").value<QColor>();
+    const QColor empty = cellAt(89)->property("color").value<QColor>();
+    QCOMPARE(busy.red(), accent.red());
+    QCOMPARE(busy.green(), accent.green());
+    QCOMPARE(busy.blue(), accent.blue());
+    QVERIFY(busy.alphaF() > empty.alphaF());
+
+    const QList<QQuickItem *> slices = collect(QStringLiteral("compositionSlice"));
+    QCOMPARE(slices.size(), 4);
+    QHash<QString, int> counts;
+    QHash<QString, QColor> colors;
+    for (QQuickItem *slice : slices) {
+        const QString name = slice->property("sliceName").toString();
+        counts.insert(name, slice->property("sliceCount").toInt());
+        colors.insert(name, slice->property("sliceColor").value<QColor>());
+    }
+    QCOMPARE(counts.value(QStringLiteral("New")), 1);
+    QCOMPARE(counts.value(QStringLiteral("Learning")), 2);
+    QCOMPARE(counts.value(QStringLiteral("Young")), 3);
+    QCOMPARE(counts.value(QStringLiteral("Mature")), 2);
+    QCOMPARE(colors.value(QStringLiteral("New")), QColor(view.theme.soft()));
+    QCOMPARE(colors.value(QStringLiteral("Learning")), QColor(view.theme.red()));
+    QCOMPARE(colors.value(QStringLiteral("Young")), QColor(view.theme.yellow()));
+    QCOMPARE(colors.value(QStringLiteral("Mature")), QColor(view.theme.green()));
+
+    // At the minimum window size the overlay stays inside the window and the
+    // rows and modules remain reachable by scrolling.
+    QQuickItem *scroll = view.item(QStringLiteral("statsScroll"));
+    QQuickItem *column = view.item(QStringLiteral("statsColumn"));
+    QVERIFY(scroll && column);
+    const QRectF scrollScene = scroll->mapRectToScene(scroll->boundingRect());
+    const QRectF windowScene = window->contentItem()->boundingRect();
+    QVERIFY(windowScene.contains(scrollScene.adjusted(-1.0, -1.0, 1.0, 1.0)));
+    QVERIFY(scroll->property("contentHeight").toReal() >= column->height());
+    QVERIFY(column->height() > scroll->height());
+    QVERIFY(scroll->property("contentWidth").toReal() <= scroll->width() + 1.0);
+
+    QQuickItem *keyHandler = view.item(QStringLiteral("keyHandler"));
+    QVERIFY(keyHandler);
+    keyHandler->forceActiveFocus();
+    QTest::keyClick(window, Qt::Key_S);
+    QVERIFY(QTest::qWaitFor([&]() { return !view.window->property("statsVisible").toBool(); }, 1000));
 }
 
 void TestBackend::qmlSettingsRowsFitTheirContent() {

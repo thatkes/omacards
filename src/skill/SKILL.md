@@ -77,6 +77,7 @@ omacards delete-deck <deck> [--json]
 omacards due [-d <deck>] [--json]
 omacards edit-card -c <card-id> [-q <question>] [-a <answer>] [--type <type>] [--tags <tags>] [--json]
 omacards edit-deck <deck> --description <text> [--json]
+omacards forecast [-d <deck>] [--json]
 omacards help  # aliases: --help, -h
 omacards import <file> [-d <deck>] [--json]
 omacards open  # start the GUI; ignores --json

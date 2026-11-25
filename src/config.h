@@ -27,6 +27,10 @@ inline constexpr qint64 kMaxAgainDelayMs = 600000;
 
 inline constexpr int kMaxIntervalDays = 36500;
 
+// One place to change when the Stats heatmap grows to 180 days. It is not a
+// Setting: the Forecast command and the panel always use the same window.
+inline constexpr int kForecastWindowDays = 90;
+
 inline constexpr int kLeitnerBoxes = 5;
 inline constexpr int kLeitnerIntervals[kLeitnerBoxes] = {1, 2, 4, 8, 16};
 

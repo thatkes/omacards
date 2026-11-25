@@ -194,6 +194,9 @@ public slots:
                                        m_desiredRetention},
                                       m_currentDeck);
     }
+    // Forecast is a read-only view of Scheduling state; QML passes an empty
+    // name for all Decks, matching the Headless command's default.
+    Q_INVOKABLE QVariantMap forecast(const QString &deckName = {}) const { return m_planner.forecast(deckName); }
 
 signals:
     void decksChanged();

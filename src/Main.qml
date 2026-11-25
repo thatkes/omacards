@@ -10,6 +10,7 @@ import QtQuick.Layouts
 // library - deckList and cardView ListViews
 // settings - ScrollView
 // help overlay - keyboard Repeater
+// stats overlay - nine Stats rows plus two independent Forecast modules
 
 ApplicationWindow {
     id: win
@@ -39,6 +40,8 @@ ApplicationWindow {
     property bool helpVisible: false
     property bool statsVisible: false
     property var statsData: ({})
+    property var forecastDays: []
+    property var forecastSlices: ({})
     property string editCardId: ""
     property string pendingDeck: ""
     property string noticeMessage: ""
@@ -151,6 +154,9 @@ ApplicationWindow {
 
     function openStats() {
         statsData = backend.statsSummary()
+        const forecast = backend.forecast()
+        forecastDays = forecast.days || []
+        forecastSlices = forecast.slices || ({})
         statsVisible = true
     }
 
@@ -2292,61 +2298,85 @@ ApplicationWindow {
 
         Rectangle {
             anchors.centerIn: parent
-            width: Math.min(parent.width - 80, 460)
-            implicitHeight: statsColumn.implicitHeight + 56
+            width: Math.min(parent.width - 80, 720)
+            height: Math.min(parent.height - 80, Math.max(320, statsColumn.implicitHeight + 56))
             radius: win.clampedRadius(12)
             color: win.panel
             border.width: 1
             border.color: win.withAlpha(theme.accent, 0.5)
 
-            ColumnLayout {
-                id: statsColumn
-                anchors.centerIn: parent
-                width: parent.width - 56
-                spacing: 10
+            ScrollView {
+                id: statsScroll
+                objectName: "statsScroll"
+                anchors.fill: parent
+                anchors.margins: 28
+                clip: true
+                contentWidth: width
+                contentHeight: statsColumn.implicitHeight
 
-                Label {
-                    text: qsTr("Stats")
-                    color: win.text
-                    font.pixelSize: 19
-                    font.weight: Font.DemiBold
-                }
+                ColumnLayout {
+                    id: statsColumn
+                    objectName: "statsColumn"
+                    width: statsScroll.width
+                    spacing: 10
 
-                Repeater {
-                    model: [
-                        [qsTr("Reviews today"), (statsData.studyDayRatings || 0)],
-                        [qsTr("Accuracy today"), (statsData.accuracy || 0) + "%"],
-                        [qsTr("New cards today"), qsTr("%1 of %2").arg(statsData.newCardsOnStudyDay || 0).arg(statsData.newCardAllowance || 0)],
-                        [qsTr("Due now"), (statsData.due || 0)],
-                        [qsTr("Streak"), qsTr("%1 days").arg(statsData.streak || 0)],
-                        [qsTr("Total reviews"), (statsData.totalRatings || 0)],
-                        [qsTr("Cards"), (statsData.cards || 0)],
-                        [qsTr("Decks"), (statsData.decks || 0)],
-                        [qsTr("This session"), qsTr("%1 reviews · %2 Good").arg(statsData.sessionReviewed || 0).arg(statsData.sessionGood || 0)]
-                    ]
+                    Label {
+                        text: qsTr("Stats")
+                        color: win.text
+                        font.pixelSize: 19
+                        font.weight: Font.DemiBold
+                    }
 
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Label {
+                    Repeater {
+                        model: [
+                            [qsTr("Reviews today"), (statsData.studyDayRatings || 0)],
+                            [qsTr("Accuracy today"), (statsData.accuracy || 0) + "%"],
+                            [qsTr("New cards today"), qsTr("%1 of %2").arg(statsData.newCardsOnStudyDay || 0).arg(statsData.newCardAllowance || 0)],
+                            [qsTr("Due now"), (statsData.due || 0)],
+                            [qsTr("Streak"), qsTr("%1 days").arg(statsData.streak || 0)],
+                            [qsTr("Total reviews"), (statsData.totalRatings || 0)],
+                            [qsTr("Cards"), (statsData.cards || 0)],
+                            [qsTr("Decks"), (statsData.decks || 0)],
+                            [qsTr("This session"), qsTr("%1 reviews · %2 Good").arg(statsData.sessionReviewed || 0).arg(statsData.sessionGood || 0)]
+                        ]
+
+                        RowLayout {
+                            objectName: "statsRow"
                             Layout.fillWidth: true
-                            text: modelData[0]
-                            color: win.muted
-                            font.pixelSize: 13
-                        }
-                        Label {
-                            text: modelData[1]
-                            color: theme.accent
-                            font.pixelSize: 13
-                            font.weight: Font.DemiBold
+                            Label {
+                                Layout.fillWidth: true
+                                objectName: "statsRowLabel"
+                                text: modelData[0]
+                                color: win.muted
+                                font.pixelSize: 13
+                            }
+                            Label {
+                                objectName: "statsRowValue"
+                                text: modelData[1]
+                                color: theme.accent
+                                font.pixelSize: 13
+                                font.weight: Font.DemiBold
+                            }
                         }
                     }
-                }
 
-                Label {
-                    Layout.topMargin: 4
-                    text: qsTr("Press S or Esc to close")
-                    color: win.muted
-                    font.pixelSize: 11
+                    ScheduleHeatmap {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 6
+                        days: win.forecastDays
+                    }
+
+                    CardCompositionChart {
+                        Layout.fillWidth: true
+                        slices: win.forecastSlices
+                    }
+
+                    Label {
+                        Layout.topMargin: 4
+                        text: qsTr("Press S or Esc to close")
+                        color: win.muted
+                        font.pixelSize: 11
+                    }
                 }
             }
         }

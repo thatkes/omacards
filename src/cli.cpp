@@ -505,6 +505,7 @@ QString usage() {
                           "  omacards review -c ID -r 1|3 [--json]\n"
                           "  omacards cram [-d D] [--steps N] [--json]\n"
                           "  omacards stats [--json]\n"
+                          "  omacards forecast [--deck D] [--json]\n"
                           "  omacards config [--new-card-allowance N] [--day-start-hour H]\n"
                           "                       [--retention 0.70-0.99] [--json]\n"
                           "  omacards skill install [--json]\n"
@@ -1016,6 +1017,41 @@ int run(const QStringList &arguments) {
                   .arg(accuracy)
                   .arg(summary.streak)
                   .arg(backend.availableCount()));
+        return 0;
+    }
+
+    if (options.command == "forecast") {
+        const std::optional<QString> forecastDeck = resolveDeckId(options.deck);
+        if (!forecastDeck)
+            return 1;
+        const QVariantMap data = backend.forecast(*forecastDeck);
+        const QVariantList dayValues = data.value(QStringLiteral("days")).toList();
+        const QVariantMap sliceValues = data.value(QStringLiteral("slices")).toMap();
+        QJsonArray days;
+        for (const QVariant &value : dayValues) {
+            const QVariantMap day = value.toMap();
+            QJsonObject item;
+            item.insert(QStringLiteral("date"), day.value(QStringLiteral("date")).toString());
+            item.insert(QStringLiteral("count"), day.value(QStringLiteral("count")).toInt());
+            days.append(item);
+        }
+        QJsonObject slices;
+        for (const QString &key :
+             {QStringLiteral("new"), QStringLiteral("learning"), QStringLiteral("young"), QStringLiteral("mature")})
+            slices.insert(key, sliceValues.value(key).toInt());
+        QJsonObject object;
+        object.insert(QStringLiteral("ok"), true);
+        object.insert(QStringLiteral("deck"), data.value(QStringLiteral("deck")).toString());
+        object.insert(QStringLiteral("windowDays"), data.value(QStringLiteral("windowDays")).toInt());
+        object.insert(QStringLiteral("days"), days);
+        object.insert(QStringLiteral("slices"), slices);
+        write(object, json,
+              QObject::tr("%1-day forecast: %2 new · %3 learning · %4 young · %5 mature")
+                  .arg(data.value(QStringLiteral("windowDays")).toInt())
+                  .arg(slices.value(QStringLiteral("new")).toInt())
+                  .arg(slices.value(QStringLiteral("learning")).toInt())
+                  .arg(slices.value(QStringLiteral("young")).toInt())
+                  .arg(slices.value(QStringLiteral("mature")).toInt()));
         return 0;
     }
 

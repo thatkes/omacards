@@ -36,6 +36,7 @@ private slots:
     void summaryContractAcrossThreeStudyDays();
     void checkDeckScoping();
     void readCommandJsonContracts();
+    void forecastReportsJsonTextAndDeckScope();
     void cardsResolvesDeckFileNameWithDifferentWrittenName();
     void searchAndDueResolveDeckFileNameWithDifferentWrittenName();
     void checkPreviewWarmReviewCramResolveDeckFileName();
