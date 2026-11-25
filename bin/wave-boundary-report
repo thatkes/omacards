@@ -1,0 +1,139 @@
+#!/bin/sh
+set -eu
+
+# Print the tracker facts a wave boundary claims, from one issue-list pass.
+# Fixtures feed the same fields as gh, so the report and its self-test need no
+# network. LEDGER delegates to the checker with the ids from that same pass.
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+
+usage() {
+    printf 'Usage: wave-boundary-report [--issues-file PATH] [--scope-file PATH] [--ledger PATH] [--check]\n' >&2
+}
+
+issues_file=
+scope_file=
+ledger="$ROOT/docs/agents/wiki/backlog-queue-ledger.md"
+check_only=0
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --issues-file)
+            [ "$#" -ge 2 ] || { usage; exit 2; }
+            issues_file=$2
+            shift 2
+            ;;
+        --scope-file)
+            [ "$#" -ge 2 ] || { usage; exit 2; }
+            scope_file=$2
+            shift 2
+            ;;
+        --ledger)
+            [ "$#" -ge 2 ] || { usage; exit 2; }
+            ledger=$2
+            shift 2
+            ;;
+        --check)
+            check_only=1
+            shift
+            ;;
+        *)
+            usage
+            exit 2
+            ;;
+    esac
+done
+
+for path in "$issues_file" "$scope_file" "$ledger"; do
+    if [ -n "$path" ] && [ ! -f "$path" ]; then
+        printf 'ERROR no such file: %s\n' "$path" >&2
+        exit 1
+    fi
+done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT HUP INT TERM
+
+if [ -n "$issues_file" ]; then
+    issues_source=$issues_file
+else
+    issues_source="$tmp/issues.json"
+    if ! gh issue list --state open --limit 100 \
+        --json number,title,labels,author,blockedBy > "$issues_source"; then
+        printf 'ERROR could not list open issues\n' >&2
+        exit 1
+    fi
+fi
+
+if ! jq -e 'type == "array"' "$issues_source" > /dev/null; then
+    printf 'ERROR issue source is not a JSON array: %s\n' "$issues_source" >&2
+    exit 1
+fi
+
+jq -r '.[] | "#" + (.number | tostring)' "$issues_source" |
+    LC_ALL=C sort -t '#' -k2,2n > "$tmp/open-ids.txt"
+jq -r '.[] | [
+        "#" + (.number | tostring),
+        ([(.blockedBy.nodes // [])[] | select(.state == "OPEN")] | length | tostring)
+    ] | join(" ")' "$issues_source" |
+    LC_ALL=C sort -t '#' -k2,2n > "$tmp/blockers.txt"
+jq -r '.[] | [
+        "#" + (.number | tostring),
+        (.author.login // "?"),
+        "labels=" + (if (.labels | length) == 0 then "-"
+                     else ([.labels[].name] | sort | join(",")) end)
+    ] | join(" ")' "$issues_source" |
+    LC_ALL=C sort -t '#' -k2,2n > "$tmp/authors.txt"
+
+scope_blocked=0
+if [ -n "$scope_file" ]; then
+    awk '{ line = $0; gsub(/[ \t`]/, "", line); sub(/^#/, "", line)
+           if (line ~ /^[0-9]+$/) print "#" line }' "$scope_file" > "$tmp/scope-ids.txt"
+    while IFS= read -r id; do
+        [ -n "$id" ] || continue
+        count=$(awk -v id="$id" '$1 == id { print $2; exit }' "$tmp/blockers.txt")
+        if [ -n "$count" ] && [ "$count" -gt 0 ]; then
+            scope_blocked=1
+        fi
+    done < "$tmp/scope-ids.txt"
+fi
+
+set +e
+ledger_output=$("$ROOT/bin/check-ledger-open-ids" \
+    --ledger "$ledger" --issues-file "$tmp/open-ids.txt" 2>&1)
+ledger_status=$?
+status_output=$(git -C "$ROOT" status --short 2>&1)
+worktrees_output=$(git -C "$ROOT" worktree list --porcelain 2>&1 | awk '
+    function emit() {
+        if (path != "") {
+            if (branch == "") branch = "(detached)"
+            printf "%s %s\n", path, branch
+        }
+        path = ""
+        branch = ""
+    }
+    /^worktree / { path = $0; sub(/^worktree /, "", path); branch = "" }
+    /^branch / {
+        branch = $0
+        sub(/^branch /, "", branch)
+        sub(/^refs\/heads\//, "", branch)
+    }
+    /^$/ { emit() }
+    END { emit() }
+')
+set -e
+
+printf 'OPEN_IDS\n'
+cat "$tmp/open-ids.txt"
+printf '\nBLOCKERS\n'
+cat "$tmp/blockers.txt"
+printf '\nAUTHORS\n'
+cat "$tmp/authors.txt"
+printf '\nLEDGER\n%s\n' "$ledger_output"
+printf '\nSTATUS\n%s\n' "$status_output"
+printf '\nWORKTREES\n%s\n' "$worktrees_output"
+
+if [ "$check_only" -eq 1 ]; then
+    if [ "$ledger_status" -ne 0 ] || [ "$scope_blocked" -eq 1 ]; then
+        exit 1
+    fi
+fi
+exit 0
