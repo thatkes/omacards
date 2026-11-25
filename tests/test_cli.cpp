@@ -1,7 +1,9 @@
 #include <QtTest>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -11,6 +13,7 @@
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTemporaryDir>
+#include <QTime>
 
 #include <memory>
 #include <vector>
@@ -22,7 +25,9 @@
 #include "config.h"
 #include "deck.h"
 #include "domain.h"
+#include "fsrs.h"
 #include "mathrender.h"
+#include "store.h"
 #include "theme.h"
 
 using namespace TestSupport;
@@ -1700,6 +1705,137 @@ void TestCli::readCommandJsonContracts() {
     QCOMPARE(config.value(QStringLiteral("newCardsOnStudyDay")).toInt(), 1);
     QCOMPARE(config.value(QStringLiteral("newRemaining")).toInt(),
              config.value(QStringLiteral("newCardAllowance")).toInt() - 1);
+}
+
+void TestCli::forecastReportsJsonTextAndDeckScope() {
+    QTemporaryDir dir;
+    const QString decks = dir.filePath("decks");
+    const QString database = dir.filePath("state.db");
+    QVERIFY(QDir().mkpath(decks));
+    EnvGuard env(decks, database);
+    const int dayStart = 4;
+    const QDate today = Config::studyDay(QDateTime::currentMSecsSinceEpoch(), dayStart);
+    const auto at = [&today](int offset) { return QDateTime(today.addDays(offset), QTime(12, 0)).toMSecsSinceEpoch(); };
+
+    QHash<QString, QString> ids;
+    QHash<QString, qint64> expectedDue;
+    {
+        auto owned = Backend::fromEnvironment();
+        QString error;
+        QVERIFY(owned->initialize(&error));
+        QVERIFY(owned->createDeck(QStringLiteral("Alpha"), &error));
+        QVERIFY(owned->createDeck(QStringLiteral("Beta"), &error));
+        for (const QString &question :
+             {QStringLiteral("overdue"), QStringLiteral("today"), QStringLiteral("plus1"), QStringLiteral("plus20"),
+              QStringLiteral("plus21"), QStringLiteral("plus95"), QStringLiteral("new")})
+            QVERIFY(owned->createCard(QStringLiteral("Alpha"), question, QStringLiteral("A"), QStringLiteral("basic"),
+                                      {}, &error));
+        QVERIFY(owned->createCard(QStringLiteral("Beta"), QStringLiteral("beta-plus5"), QStringLiteral("A"),
+                                  QStringLiteral("basic"), {}, &error));
+        owned->setDayStartHour(dayStart);
+
+        QHash<QString, Card> cards;
+        for (const Deck &deck : owned->allDecks())
+            for (const Card &card : deck.cards) {
+                cards.insert(card.question, card);
+                ids.insert(card.question, card.id);
+            }
+        const auto seed = [&](const QString &question, int offset, int reps) {
+            const Card card = cards.value(question);
+            QVERIFY(!card.id.isEmpty());
+            FsrsState state;
+            state.due = at(offset);
+            state.reps = reps;
+            state.stability = 2.0;
+            state.difficulty = 5.0;
+            state.lastReview = at(-1);
+            owned->store().save(card.id, DeckIO::contentHash(card), state);
+            expectedDue.insert(question, state.due);
+        };
+        seed(QStringLiteral("overdue"), -1, 2);
+        seed(QStringLiteral("today"), 0, 3);
+        seed(QStringLiteral("plus1"), 1, 2);
+        seed(QStringLiteral("plus20"), 20, 3);
+        seed(QStringLiteral("plus21"), 21, 3);
+        seed(QStringLiteral("plus95"), 95, 3);
+        seed(QStringLiteral("beta-plus5"), 5, 2);
+        QVERIFY(owned->store().lastError().isEmpty());
+        owned->refresh();
+    }
+
+    int code = -1;
+    const QJsonObject forecast = runCli({"forecast", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(sortedKeys(forecast), QStringList({"days", "deck", "ok", "slices", "windowDays"}));
+    QVERIFY(forecast.value(QStringLiteral("ok")).toBool());
+    QCOMPARE(forecast.value(QStringLiteral("deck")).toString(), QString());
+    QCOMPARE(forecast.value(QStringLiteral("windowDays")).toInt(), 90);
+
+    const QJsonArray days = forecast.value(QStringLiteral("days")).toArray();
+    QCOMPARE(days.size(), 90);
+    for (const QJsonValue &day : days)
+        QCOMPARE(sortedKeys(day.toObject()), QStringList({"count", "date"}));
+    QCOMPARE(days.at(0).toObject().value(QStringLiteral("date")).toString(),
+             today.toString(QStringLiteral("yyyy-MM-dd")));
+    QCOMPARE(days.at(89).toObject().value(QStringLiteral("date")).toString(),
+             today.addDays(89).toString(QStringLiteral("yyyy-MM-dd")));
+    const auto dayCount = [&days](int index) {
+        return days.at(index).toObject().value(QStringLiteral("count")).toInt();
+    };
+    QCOMPARE(dayCount(0), 2); // overdue and current-day returns share the first cell
+    QCOMPARE(dayCount(1), 1);
+    QCOMPARE(dayCount(5), 1); // Beta is included by the all-Decks default
+    QCOMPARE(dayCount(20), 1);
+    QCOMPARE(dayCount(21), 1);
+    QCOMPARE(dayCount(89), 0);
+
+    const QJsonObject slices = forecast.value(QStringLiteral("slices")).toObject();
+    QCOMPARE(sortedKeys(slices), QStringList({"learning", "mature", "new", "young"}));
+    QCOMPARE(slices.value(QStringLiteral("new")).toInt(), 1);
+    QCOMPARE(slices.value(QStringLiteral("learning")).toInt(), 2);
+    QCOMPARE(slices.value(QStringLiteral("young")).toInt(), 3);
+    QCOMPARE(slices.value(QStringLiteral("mature")).toInt(), 2);
+    QCOMPARE(runCliText({"forecast"}, decks, database, &code).trimmed(),
+             QStringLiteral("90-day forecast: 1 new · 2 learning · 3 young · 2 mature"));
+    QCOMPARE(code, 0);
+
+    const QJsonObject alpha = runCli({"forecast", "--deck", "Alpha", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(sortedKeys(alpha), sortedKeys(forecast));
+    QCOMPARE(alpha.value(QStringLiteral("deck")).toString(), QStringLiteral("Alpha"));
+    const QJsonArray alphaDays = alpha.value(QStringLiteral("days")).toArray();
+    QCOMPARE(alphaDays.at(0).toObject().value(QStringLiteral("count")).toInt(), 2);
+    QCOMPARE(alphaDays.at(5).toObject().value(QStringLiteral("count")).toInt(), 0);
+    const QJsonObject alphaSlices = alpha.value(QStringLiteral("slices")).toObject();
+    QCOMPARE(alphaSlices.value(QStringLiteral("new")).toInt(), 1);
+    QCOMPARE(alphaSlices.value(QStringLiteral("learning")).toInt(), 2);
+    QCOMPARE(alphaSlices.value(QStringLiteral("young")).toInt(), 2);
+    QCOMPARE(alphaSlices.value(QStringLiteral("mature")).toInt(), 2);
+
+    const QJsonObject beta = runCli({"forecast", "--deck", "Beta", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QCOMPARE(beta.value(QStringLiteral("deck")).toString(), QStringLiteral("Beta"));
+    QCOMPARE(beta.value(QStringLiteral("days")).toArray().at(5).toObject().value(QStringLiteral("count")).toInt(), 1);
+    const QJsonObject betaSlices = beta.value(QStringLiteral("slices")).toObject();
+    QCOMPARE(betaSlices.value(QStringLiteral("young")).toInt(), 1);
+    QCOMPARE(betaSlices.value(QStringLiteral("new")).toInt(), 0);
+
+    // Forecast reads state only: no Scheduling write, Review entry or new Setting.
+    Store stored(database);
+    QVERIFY(stored.open());
+    for (auto it = expectedDue.constBegin(); it != expectedDue.constEnd(); ++it)
+        QCOMPARE(stored.schedulingRecord(ids.value(it.key())).state.due, it.value());
+    QCOMPARE(stored.summary(dayStart).total, 0);
+
+    // The frozen stats contract keeps its eleven keys beside the new command.
+    const QJsonObject stats = runCli({"stats", "--json"}, decks, database, &code);
+    QCOMPARE(code, 0);
+    QStringList expectedStats{
+        "ok",  "totalRatings", "studyDayRatings", "studyDayGood", "streak", "newCardsOnStudyDay", "newCardAllowance",
+        "due", "totalDue",     "cards",           "decks"};
+    expectedStats.sort();
+    QCOMPARE(sortedKeys(stats), expectedStats);
+    QCOMPARE(stats.value(QStringLiteral("totalRatings")).toInt(), 0);
 }
 
 void TestCli::cardsResolvesDeckFileNameWithDifferentWrittenName() {

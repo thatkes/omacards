@@ -73,6 +73,11 @@ Purpose: Change a Deck's description without adding Cards.
 Flags: NAME, --description TEXT, [--json], --help, -h
 Example: omacards edit-deck Calculus --description 'New description' --json
 
+Path: forecast
+Purpose: Show the 90-day return schedule and Card composition, optionally in one Deck.
+Flags: [--deck D], [--json], --help, -h
+Example: omacards forecast --deck Calculus --json
+
 Path: import
 Purpose: Import Cards from a file.
 Flags: PATH, [-d D], [--json], --help, -h

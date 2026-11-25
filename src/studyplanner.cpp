@@ -290,6 +290,67 @@ QVariantMap StudyPlanner::statsSummary(const StatsSummaryInputs &inputs, const Q
     return result;
 }
 
+QVariantMap StudyPlanner::forecast(const QString &deckName) const {
+    const qint64 now = m_snapshotValid ? m_snapshot.now : QDateTime::currentMSecsSinceEpoch();
+    const QDate today = Config::studyDay(now, m_dayStartHour);
+    QVector<int> perDay(Config::kForecastWindowDays, 0);
+    int newCards = 0;
+    int learning = 0;
+    int young = 0;
+    int mature = 0;
+
+    if (m_snapshotValid) {
+        for (const Deck &deck : decks()) {
+            if (!deckName.isEmpty() && deck.name != deckName)
+                continue;
+            for (const Card &card : deck.cards) {
+                const FsrsState state = stateFor(card);
+                if (state.reps == 0) {
+                    // New cards have no scheduled return; they belong only in
+                    // the composition chart.
+                    ++newCards;
+                    continue;
+                }
+                const qint64 daysOut = today.daysTo(Config::studyDay(state.due, m_dayStartHour));
+                if (daysOut <= 0) {
+                    // Past-due cards are work for today, so the first cell
+                    // holds the whole current Study day and everything late.
+                    ++learning;
+                    ++perDay[0];
+                } else if (daysOut <= 20) {
+                    ++young;
+                    if (daysOut < perDay.size())
+                        ++perDay[static_cast<int>(daysOut)];
+                } else {
+                    ++mature;
+                    if (daysOut < perDay.size())
+                        ++perDay[static_cast<int>(daysOut)];
+                }
+            }
+        }
+    }
+
+    QVariantList days;
+    for (int offset = 0; offset < Config::kForecastWindowDays; ++offset) {
+        QVariantMap day;
+        day.insert("date", today.addDays(offset).toString(QStringLiteral("yyyy-MM-dd")));
+        day.insert("count", perDay.at(offset));
+        days << day;
+    }
+    QVariantMap slices;
+    slices.insert("new", newCards);
+    slices.insert("learning", learning);
+    slices.insert("young", young);
+    slices.insert("mature", mature);
+
+    QVariantMap result;
+    result.insert("deck", deckName);
+    result.insert("windowDays", Config::kForecastWindowDays);
+    result.insert("days", days);
+    result.insert("slices", slices);
+    return result;
+}
+
 StorePlannerAdapter::StorePlannerAdapter(Store &store) : m_store(store) {}
 
 void StorePlannerAdapter::clearError() {

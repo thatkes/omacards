@@ -38,6 +38,7 @@ private slots:
     void qmlCramBoxDistributionIsCramOnlyAndHidesWhenEmpty();
     void qmlCramLeitnerBoxHighlightFollowsThemeChange();
     void qmlGoodLabelUsesGoodCount();
+    void qmlStatsForecastModulesUseCurrentSchedulingState();
     void qmlSettingsRowsFitTheirContent();
     void backendAppliesNewCardLimit();
     void perDeckAllowanceSpendsOnlyRatedDeck();

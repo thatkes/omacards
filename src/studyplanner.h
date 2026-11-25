@@ -82,6 +82,9 @@ public:
         double desiredRetention;
     };
     QVariantMap statsSummary(const StatsSummaryInputs &inputs, const QString &deckName = {}) const;
+    // Read-only distribution of Cards by next scheduled return. An empty deck
+    // name means all Decks, matching availability() and the Stats panel.
+    QVariantMap forecast(const QString &deckName = {}) const;
 
 private:
     struct StudySnapshot {
