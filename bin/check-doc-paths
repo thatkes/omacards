@@ -1,19 +1,27 @@
 #!/bin/sh
 set -eu
 
-# Guard the two documented command lists against src/command-paths.txt in
-# both directions, require help metadata for every registry path that reaches
-# commandHelp(), and check the README Layout block's path tokens against the
-# filesystem. Parsing stays shallow: first fenced block after a heading,
-# command paths followed by bracketed/angled arguments, and one layout-token
-# matcher that also checks paths appearing after prose. An optional root
-# argument exists for the self-test.
+# Guard README, SKILL.md and command-help.txt as one command contract: every
+# path appears in each document and every command's flags agree. Also require
+# help metadata for registry paths that reach commandHelp(), check the README
+# Layout block's path tokens against the filesystem, and require the cloze
+# rules in the agent documents. The optional root argument also checks the
+# teaching pages for numeric anchors; those pages are local-only docs, so the
+# check lives in the self-test rather than the integration lint run.
+# Parsing stays shallow: first fenced block after a heading, command paths
+# followed by bracketed/angled arguments, and one layout-token matcher that
+# also checks paths appearing after prose. Prose and bracket notation are
+# ignored when comparing flags.
 
 if [ "$#" -gt 1 ]; then
     printf 'Usage: %s [root]\n' "$0" >&2
     exit 2
 fi
 
+self_test=0
+if [ "$#" -eq 1 ]; then
+    self_test=1
+fi
 root=${1:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}
 root=$(CDPATH= cd -- "$root" && pwd)
 cd "$root"
@@ -33,6 +41,8 @@ done
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 status=0
+tab=$(printf '\t')
+: > "$tmp/help-flags"
 
 # Expand brace alternatives and simple globs, then require a filesystem
 # match. Every brace alternative must match; a lone glob needs one match.
@@ -145,6 +155,68 @@ parse_commands() {
     ' "$tmp/registry" "$2"
 }
 
+# Print "<path>\t<flag>" for each flag in a documentation command block.
+# Brackets, value placeholders and help's global -h/--help tokens are dropped;
+# -d and --deck are one flag family.
+parse_command_flags() {
+    awk '
+        function canonical(flag) {
+            gsub(/^[\[]+/, "", flag)
+            gsub(/,$/, "", flag)
+            gsub(/[\]]+$/, "", flag)
+            if (substr(flag, 1, 1) != "-") return ""
+            if (flag == "-h" || flag == "--help") return ""
+            if (flag == "-d") return "--deck"
+            return flag
+        }
+        FNR == NR { known[$0] = 1; next }
+        {
+            raw = $0
+            text = raw
+            sub(/^[^:]*:/, "", text)
+            sub(/^[[:space:]]+/, "", text)
+            if (text == "" || text ~ /^#/ || text !~ /^omacards([[:space:]]|$)/)
+                next
+
+            marker = match(text, /[[:space:]]#/)
+            if (marker) text = substr(text, 1, marker - 1)
+            sub(/[[:space:]]+$/, "", text)
+
+            n = split(text, fields, /[[:space:]]+/)
+            if (n < 2) next
+            path = fields[2]
+            if (!known[path]) next
+            argstart = 3
+            while (argstart <= n) {
+                word = fields[argstart]
+                first = substr(word, 1, 1)
+                if (first == "-" || first == "[" || first == "<" ||
+                    first == "\"" || first == "\047" || first == "~") break
+                candidate = path " " word
+                if (!known[candidate]) break
+                path = candidate
+                argstart++
+            }
+            if (!known[path]) next
+
+            for (i = argstart; i <= n; i++) {
+                word = fields[i]
+                first = substr(word, 1, 1)
+                if (first != "-" && first != "[") continue
+                flag = canonical(word)
+                if (flag == "") continue
+                key = path SUBSEP flag
+                if (!seen[key]++) print path "\t" flag
+            }
+        }
+    ' "$tmp/registry" "$2"
+}
+
+command_has_flag() {
+    awk -F '\t' -v path="$1" -v flag="$2" \
+        '$1 == path && $2 == flag { found = 1 } END { exit !found }' "$3"
+}
+
 awk '{
     sub(/\r$/, "")
     gsub(/^[[:space:]]+|[[:space:]]+$/, "")
@@ -201,7 +273,26 @@ done < "$tmp/missing-paths"
 # and are exempt.
 if [ -f "$help_metadata" ]; then
     : > "$tmp/help-paths"
-    awk -v paths_file="$tmp/help-paths" '
+    awk -v paths_file="$tmp/help-paths" -v flags_file="$tmp/help-flags" '
+        function canonical(flag) {
+            gsub(/^[\[]+/, "", flag)
+            gsub(/,$/, "", flag)
+            gsub(/[\]]+$/, "", flag)
+            if (substr(flag, 1, 1) != "-") return ""
+            if (flag == "-h" || flag == "--help") return ""
+            if (flag == "-d") return "--deck"
+            return flag
+        }
+        function emit_flags(p, value,    n, words, i, flag, key) {
+            gsub(/,/, " ", value)
+            n = split(value, words, /[[:space:]]+/)
+            for (i = 1; i <= n; i++) {
+                flag = canonical(words[i])
+                if (flag == "") continue
+                key = p SUBSEP flag
+                if (!flag_seen[key]++) print p "\t" flag > flags_file
+            }
+        }
         function finish(    p) {
             if (!has_path && !has_purpose && !has_flags && !has_example)
                 return
@@ -266,6 +357,7 @@ if [ -f "$help_metadata" ]; then
                 flags = value
                 flags_line = FNR
                 has_flags = 1
+                if (has_path) emit_flags(path, value)
             } else if (field == "Example") {
                 example = value
                 example_line = FNR
@@ -299,6 +391,165 @@ if [ -f "$help_metadata" ]; then
     done < "$tmp/help-missing-paths"
 fi
 
+# Treat the README block, the skill command list and the help metadata as one
+# contract. Existing fixtures may predate command-help.txt; compare the two
+# prose documents then, and include help metadata when it is present.
+awk '$2 == "+" { path = $0; sub(/^[^ ]+ [^ ]+ /, "", path); print path }' \
+    "$tmp/readme-paths" | sort -u > "$tmp/readme-command-paths"
+awk '$2 == "+" { path = $0; sub(/^[^ ]+ [^ ]+ /, "", path); print path }' \
+    "$tmp/skill-paths" | sort -u > "$tmp/skill-command-paths"
+if [ -f "$help_metadata" ]; then
+    cp "$tmp/help-paths.sorted" "$tmp/help-command-paths"
+else
+    : > "$tmp/help-command-paths"
+fi
+
+parse_command_flags README.md "$tmp/readme-cli.raw" > "$tmp/readme-flags.raw"
+parse_command_flags SKILL.md "$tmp/skill-cli.raw" > "$tmp/skill-flags.raw"
+sort -u "$tmp/readme-flags.raw" > "$tmp/readme-flags"
+sort -u "$tmp/skill-flags.raw" > "$tmp/skill-flags"
+sort -u "$tmp/help-flags" > "$tmp/help-flags.sorted"
+mv "$tmp/help-flags.sorted" "$tmp/help-flags"
+
+{
+    cat "$tmp/readme-command-paths" "$tmp/skill-command-paths" \
+        "$tmp/help-command-paths"
+} | sort -u | awk '
+    NR == FNR { known[$0] = 1; next }
+    ($0 in known) && $0 != "help" && $0 != "--help" && $0 != "-h" { print }
+' "$tmp/registry" - > "$tmp/contract-paths"
+
+document_has_path() {
+    awk -v path="$1" '$0 == path { found = 1 } END { exit !found }' "$2"
+}
+
+while IFS= read -r path; do
+    for entry in "README.md|$tmp/readme-command-paths" \
+                 "SKILL.md|$tmp/skill-command-paths"; do
+        name=${entry%%|*}
+        file=${entry#*|}
+        if ! document_has_path "$path" "$file"; then
+            printf '%s: command missing from doc contract: %s\n' \
+                "$name" "$path" >&2
+            status=1
+        fi
+    done
+    if [ -f "$help_metadata" ] &&
+       ! document_has_path "$path" "$tmp/help-command-paths"; then
+        printf 'src/command-help.txt: command missing from doc contract: %s\n' \
+            "$path" >&2
+        status=1
+    fi
+done < "$tmp/contract-paths"
+
+check_command_flag_parity() {
+    parity_path=$1
+    : > "$tmp/active-docs"
+    for entry in "README.md|$tmp/readme-command-paths|$tmp/readme-flags" \
+                 "SKILL.md|$tmp/skill-command-paths|$tmp/skill-flags" \
+                 "src/command-help.txt|$tmp/help-command-paths|$tmp/help-flags"; do
+        name=${entry%%|*}
+        rest=${entry#*|}
+        path_file=${rest%%|*}
+        flag_file=${rest#*|}
+        if [ "$name" = 'src/command-help.txt' ] && [ ! -f "$help_metadata" ]; then
+            continue
+        fi
+        if document_has_path "$parity_path" "$path_file"; then
+            printf '%s%s%s%s%s\n' "$name" "$tab" "$flag_file" "$tab" present \
+                >> "$tmp/active-docs"
+        fi
+    done
+
+    total=$(wc -l < "$tmp/active-docs" | tr -d '[:space:]')
+    if [ "$total" -lt 2 ]; then
+        return 0
+    fi
+
+    : > "$tmp/active-flags.raw"
+    while IFS="$tab" read -r name file state; do
+        awk -F '\t' -v path="$parity_path" '$1 == path { print $2 }' "$file" \
+            >> "$tmp/active-flags.raw"
+    done < "$tmp/active-docs"
+    sort -u "$tmp/active-flags.raw" > "$tmp/active-flags"
+
+    while IFS= read -r flag; do
+        present=0
+        : > "$tmp/flag-docs"
+        while IFS="$tab" read -r name file state; do
+            if command_has_flag "$parity_path" "$flag" "$file"; then
+                present=$((present + 1))
+                state=present
+            else
+                state=absent
+            fi
+            printf '%s%s%s%s%s\n' "$name" "$tab" "$file" "$tab" "$state" \
+                >> "$tmp/flag-docs"
+        done < "$tmp/active-docs"
+        if [ "$present" -eq "$total" ]; then
+            continue
+        fi
+
+        if [ "$total" -eq 2 ]; then
+            second_name=$(sed -n '2p' "$tmp/active-docs" | cut -f1)
+            second_file=$(sed -n '2p' "$tmp/active-docs" | cut -f2)
+            first_file=$(sed -n '1p' "$tmp/active-docs" | cut -f2)
+            if command_has_flag "$parity_path" "$flag" "$first_file"; then
+                printf '%s: command %s is missing flag %s\n' \
+                    "$second_name" "$parity_path" "$flag" >&2
+            else
+                printf '%s: command %s has extra flag %s\n' \
+                    "$second_name" "$parity_path" "$flag" >&2
+            fi
+            status=1
+        elif [ "$present" -ge 2 ]; then
+            while IFS="$tab" read -r name file state; do
+                if [ "$state" = absent ]; then
+                    printf '%s: command %s is missing flag %s\n' \
+                        "$name" "$parity_path" "$flag" >&2
+                    status=1
+                fi
+            done < "$tmp/flag-docs"
+        else
+            while IFS="$tab" read -r name file state; do
+                if [ "$state" = present ]; then
+                    printf '%s: command %s has extra flag %s\n' \
+                        "$name" "$parity_path" "$flag" >&2
+                    status=1
+                fi
+            done < "$tmp/flag-docs"
+        fi
+    done < "$tmp/active-flags"
+}
+
+while IFS= read -r path; do
+    check_command_flag_parity "$path"
+done < "$tmp/contract-paths"
+
+# The cloze rules are a documentation contract, checked by short tokens so
+# wording can change without breaking lint.
+cat > "$tmp/cloze-tokens" <<'EOF'
+--type <basic|cloze>
+{{c1::answer}}
+{{c1::answer::hint}}
+display time
+lowercase
+a marker alone
+multiple markers
+EOF
+for doc in "$readme" "$skill"; do
+    doc_name=${doc##*/}
+    tr '\n' ' ' < "$doc" | tr '[:upper:]' '[:lower:]' \
+        | tr -s ' ' > "$tmp/cloze-doc"
+    while IFS= read -r token; do
+        if ! grep -Fq -- "$token" "$tmp/cloze-doc"; then
+            printf '%s: missing cloze contract text: %s\n' \
+                "$doc_name" "$token" >&2
+            status=1
+        fi
+    done < "$tmp/cloze-tokens"
+done
+
 extract_block "$readme" '## Layout' > "$tmp/layout.raw"
 if [ ! -s "$tmp/layout.raw" ]; then
     printf 'Missing fenced block after ## Layout in %s\n' "$readme" >&2
@@ -321,6 +572,31 @@ while IFS= read -r raw; do
         fi
     done
 done < "$tmp/layout.raw"
+
+# Teaching pages name symbols, not source lines. They are gitignored local
+# docs, so the guard runs in the self-test root instead of changing the
+# integration lint result with files the branch cannot carry.
+if [ "$self_test" -eq 1 ]; then
+    for teaching_dir in reference lessons; do
+        if [ ! -d "$teaching_dir" ]; then
+            continue
+        fi
+        find "$teaching_dir" -type f -name '*.html' -print | sort \
+            > "$tmp/teaching-pages"
+        while IFS= read -r page; do
+            grep -nE '#L[0-9]+|(src/)?[A-Za-z0-9_.-]+\.(cpp|h|qml|pro|txt|md):[0-9]+|lines? [0-9]+' \
+                "$page" > "$tmp/anchor-matches" || true
+            while IFS=: read -r line_no text; do
+                anchor=$(printf '%s\n' "$text" | grep -oE \
+                    '#L[0-9]+|(src/)?[A-Za-z0-9_.-]+\.(cpp|h|qml|pro|txt|md):[0-9]+|lines? [0-9]+' \
+                    | head -n 1)
+                printf '%s:%s: numeric source anchor: %s\n' \
+                    "$page" "$line_no" "$anchor" >&2
+                status=1
+            done < "$tmp/anchor-matches"
+        done < "$tmp/teaching-pages"
+    done
+fi
 
 if [ "$status" -eq 0 ]; then
     printf 'Doc references OK (%s command paths, %s Layout path tokens)\n' \
